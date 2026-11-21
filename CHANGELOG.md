@@ -13,6 +13,9 @@ new features and the last one for fixes.
 - Text and fill colour menus like Google Sheets': a tick on the current colour, the standard
   colours, your own custom colours (remembered) with a full picker (colour square, hue slider,
   hex and RGB boxes), and a shortcut to conditional formatting.
+- Notes like Google Sheets': Insert › Note, a white card beside the cell when you hover over or
+  select it, edit it in place, and drag its corner to resize it. Comments are gone for now:
+  notes cover what they were used for.
 - A calculation preview while you type a formula, as in Google Sheets: a small bubble shows the
   result so far, even for an unfinished formula, or of just the part you select.
 

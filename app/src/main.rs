@@ -20,6 +20,7 @@ mod fonts;
 mod icons;
 mod linkcard;
 mod merge;
+mod notes;
 mod sheets_formulas;
 mod shell;
 mod theme;

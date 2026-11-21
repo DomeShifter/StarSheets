@@ -140,8 +140,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Tick box", "insert.checkbox", ""),
             Cmd("Drop-down", "panel:dropdown", ""),
             Sep,
-            Cmd("Comment", "review.newComment", "Ctrl+Alt+M"),
-            Cmd("Note", "review.newNote", "Shift+F2"),
+            Cmd("Note", "panel:note", "Shift+F2"),
         ],
     ),
     (
@@ -320,7 +319,6 @@ pub const TOOLBAR: &[Tool] = &[
     Menu("text_rotation_angleup", "Text rotation", ROTATION),
     Gap,
     Btn("link", "Insert link (Ctrl+K)", "insert.link", "{}"),
-    Btn("add_comment", "Insert comment (Ctrl+Alt+M)", "review.newComment", "{}"),
     Btn("insert_chart", "Insert chart", "insert.chart", "{}"),
     Btn("filter_alt", "Create a filter", "data.filter", "{}"),
     Menu("functions", "Functions", FUNCTIONS),
@@ -976,7 +974,9 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                     // "ui:<dialog>" opens one of GridCraft's dialogs (some, like conditional
                     // formatting, are then shown as our own side panel).
                     // "panel:dropdown" opens the data-validation panel on a new drop-down.
-                    if *id == "panel:dropdown" {
+                    if *id == "panel:note" {
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::notes::REQUEST), true));
+                    } else if *id == "panel:dropdown" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
                     } else if let Some(what) = id.strip_prefix("panel:") {
                         // File actions (files.rs reads this from egui memory).
