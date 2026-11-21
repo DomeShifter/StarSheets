@@ -55,7 +55,7 @@ pub fn install(ctx: &egui::Context) {
         s.spacing.menu_margin = Margin::symmetric(0, S as i8);
         // Solid scroll bars, always drawn when a list doesn't fit (egui's default thin ones only
         // show on hover, so a long list didn't look scrollable).
-        s.spacing.scroll = egui::style::ScrollStyle::solid();
+        s.spacing.scroll = egui::style::ScrollStyle { bar_width: 10.0, handle_min_length: 24.0, ..egui::style::ScrollStyle::solid() };
         s.visuals.window_corner_radius = CornerRadius::same(PANEL_RADIUS);
         s.visuals.menu_corner_radius = CornerRadius::same(PANEL_RADIUS);
         s.visuals.window_stroke = Stroke::NONE;
