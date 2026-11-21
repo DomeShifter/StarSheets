@@ -75,6 +75,15 @@ pub fn install(ctx: &egui::Context) {
     });
 }
 
+/// Puts the house style back if something replaced it (GridCraft re-applies its own look when it
+/// sets up fonts). Cheap: a check of two values most frames.
+pub fn keep(ctx: &egui::Context) {
+    let st = ctx.global_style();
+    if st.spacing.scroll.bar_width != 10.0 || st.visuals.window_corner_radius != CornerRadius::same(PANEL_RADIUS) {
+        install(ctx);
+    }
+}
+
 /// The frame of every dialog: white, 24 px padding, 8 px corners, a soft shadow.
 pub fn dialog_frame() -> Frame {
     Frame::NONE

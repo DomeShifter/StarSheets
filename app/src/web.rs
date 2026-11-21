@@ -176,6 +176,7 @@ impl eframe::App for WebShell {
         self.files.logic(&mut self.app, ctx);
         self.files.take_imports(&mut self.app, &self.inbox, ctx);
         self.webfonts.logic(&self.app, ctx);
+        crate::house::keep(ctx);
         self.app.logic(ctx);
         // Store changed preferences straight away: a reload or closed tab runs no exit code (#1562).
         let changed = self.prefs.changed(&self.app);
