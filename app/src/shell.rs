@@ -889,6 +889,9 @@ fn rename_box(app: &mut SheetApp, ui: &mut Ui, name: &str, draft: &mut Option<St
         state.store(ui.ctx(), r.id);
     }
     if r.lost_focus() {
+        // The Enter that confirms the name is used up here, or the grid would read it as its
+        // own Enter and start editing the active cell.
+        ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Enter, .. })));
         let new = text.trim().to_string();
         if !ui.input(|i| i.key_pressed(egui::Key::Escape)) && !new.is_empty() && new != name {
             rename_doc(app, &new);
