@@ -880,6 +880,14 @@ fn rename_box(app: &mut SheetApp, ui: &mut Ui, name: &str, draft: &mut Option<St
     if !r.has_focus() && !r.lost_focus() {
         r.request_focus();
     }
+    // Like Sheets: the whole name starts selected, so typing replaces it.
+    if r.gained_focus()
+        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id)
+    {
+        let all = egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(text.chars().count()));
+        state.cursor.set_char_range(Some(all));
+        state.store(ui.ctx(), r.id);
+    }
     if r.lost_focus() {
         let new = text.trim().to_string();
         if !ui.input(|i| i.key_pressed(egui::Key::Escape)) && !new.is_empty() && new != name {
