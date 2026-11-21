@@ -208,7 +208,8 @@ impl Files {
             }
             Reply::Conflict { doc, sent, bytes } => {
                 // Someone saved this file elsewhere since we opened it: keep both.
-                let name = format!("{} (conflicted copy {})", self.link.as_ref().map_or("Untitled spreadsheet".into(), |l| stem(&l.name)), now_text());
+                // No date in the name: the server adds " (2)" if this name is taken too.
+                let name = format!("{} (conflicted copy)", self.link.as_ref().map_or("Untitled spreadsheet".into(), |l| stem(&l.name)));
                 app.message = Some(("Saved as a copy".into(), format!("This file was changed in another tab or by someone else, so your changes were saved as \"{name}\".")));
                 self.link = None;
                 post_new(doc, sent, bytes, name, &self.new_folder, self.inbox.clone(), ctx.clone());
@@ -573,11 +574,6 @@ fn stem(name: &str) -> String {
 
 fn enc(s: &str) -> String {
     js_sys::encode_uri_component(s).as_string().unwrap_or_default()
-}
-
-fn now_text() -> String {
-    let d = js_sys::Date::new_0();
-    format!("{:04}-{:02}-{:02} {:02}:{:02}", d.get_full_year(), d.get_month() + 1, d.get_date(), d.get_hours(), d.get_minutes())
 }
 
 fn now_unix() -> i64 {

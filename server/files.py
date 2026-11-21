@@ -241,9 +241,12 @@ def to_bin(relpath):
     os.makedirs(BIN, exist_ok=True)
     name = base_of(relpath)
     stem, ext = os.path.splitext(name) if os.path.isfile(full(relpath)) else (name, "")
-    target = f"{stem} ({time.strftime('%Y-%m-%d %H%M%S')}){ext}"
+    # Its own name; only a clash with something already in the bin adds " (2)", " (3)"…
+    target = name
+    n = 1
     while os.path.exists(os.path.join(BIN, target)):
-        target = f"{stem} ({time.strftime('%Y-%m-%d %H%M%S')}-{secrets.token_hex(2)}){ext}"
+        n += 1
+        target = f"{stem} ({n}){ext}"
     shutil.move(full(relpath), os.path.join(BIN, target))
     bins = load_json(BIN_INDEX)
     bins[target] = {"original": relpath, "deleted": int(time.time())}
