@@ -32,6 +32,8 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0024-sheets-merge-vertically-copy-outline-font-flash | `home.mergeDown` (Google's Merge vertically: one merge per column); no copy outline in Sheets mode; fonts are rebuilt only when a new typeface is needed (a font size change used to rebuild them and flash the screen) | StarSheets-specific (the font fix could help upstream) |
 | 0025-ui-egui-sheets-notes-no-comments | In Sheets mode: no "Comment" in the cell menu, and notes are drawn by the host (StarSheets' Google-style note card) | StarSheets-specific |
 | 0026-core-input-locale | `parse::set_input_locale`: a host locale for typed input: day-first dates (05/08 = 5 August) and the formats typed dates, times, date-times and plain numbers get. Unset = unchanged (US reading). Patch 0025 also maps the ISO \\ key (IntlBackslash) for Ctrl+\\ | could help upstream |
+| 0027-ui-egui-sheets-note-menu | Sheets cell menu: on a cell with a note, "Insert note" becomes "Edit note" and "Delete note" | Sheets-specific |
+| 0028-ui-egui-kept-font-families | `fonts::keep_families`: families a host keeps bound in every font set (the font menu draws each name in its own font) | could help upstream |
 | 0002-ui-egui-theme-token-override | `Tokens::install` / `Tokens::for_mode`: a host can replace the colour palettes | to offer as a PR |
 | 0003-ui-egui-chrome-sheet-tabs-switch | `Chrome.sheet_tabs: bool`: a host can hide the sheet tabs and status bar | to offer as a PR |
 | 0004-ui-egui-sheets-cell-keys | `UiState.sheets_keys`: Enter edits (and is consumed so the new editor doesn't commit at once), Backspace only clears, no Enter-paste, static copy outline | to offer as a PR (as an option) |

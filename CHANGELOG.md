@@ -7,6 +7,15 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- The font menu shows each font's name in that font, scaled so the names look the same size.
+- Right-click on a cell with a note offers Edit note and Delete note.
+- Insert note writes straight into the note card (no separate box).
+
+### Fixed
+- Note cards can be resized with their corner grip.
+- "Today" in the date picker puts today's date in.
+- Renaming a sheet tab: Enter keeps the name, Esc cancels.
+
 - One house style for every dialog, menu, card and panel, following Google Sheets: 24 px dialog
   padding, pill-shaped buttons, 36 px fields, padded menus (docs/house-style.md).
 

@@ -551,10 +551,17 @@ impl Shell {
                         Font => {
                             let label = RichText::new(format!("{}  ▾", cur.font)).size(13.0).color(theme::TEXT);
                             ui.menu_button(label, |ui| {
-                                ui.set_min_width(200.0);
+                                // Sheets' font menu: each name in its own font, a ✓ by the current one.
+                                menu_style_width(ui, 220.0);
+                                ui.spacing_mut().button_padding.x = 44.0;
                                 egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| {
                                     for f in fonts() {
-                                        if ui.add(Button::new(RichText::new(f).size(14.0)).selected(f == cur.font)).clicked() {
+                                        let font = crate::fonts::preview_font(ui.ctx(), f, crate::house::BODY + 1.0).unwrap_or_else(|| egui::FontId::proportional(crate::house::BODY + 1.0));
+                                        let r = ui.add(Button::new(RichText::new(f).font(font).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(220.0, crate::house::ROW_HEIGHT)));
+                                        if f == cur.font {
+                                            ui.painter().text(r.rect.left_center() + vec2(16.0, 0.0), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), theme::TEXT);
+                                        }
+                                        if r.clicked() {
                                             app.run_or_alert("home.fontName", json!({ "name": f }));
                                             ui.close();
                                         }

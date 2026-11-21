@@ -154,13 +154,26 @@ impl Bottom {
             && *i == tab.index
         {
             let r = ui.add(egui::TextEdit::singleline(draft).desired_width(110.0));
-            r.request_focus();
-            if r.lost_focus() {
+            let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
+            // Enter keeps the name, Esc cancels, a click elsewhere keeps it (as in Sheets). Focus is
+            // only asked for while the box doesn't have it, or it could never be left.
+            if r.lost_focus() || enter || esc {
+                // The Enter is used up here, or the grid would read it as its own.
+                ui.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Enter | egui::Key::Escape, .. })));
                 let name = draft.trim().to_string();
-                if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !name.is_empty() && name != tab.name {
+                if !esc && !name.is_empty() && name != tab.name {
                     app.run_or_alert("sheet.rename", json!({ "sheet": tab.index, "name": name }));
                 }
                 self.renaming = None;
+                ui.memory_mut(|m| m.surrender_focus(r.id));
+            } else if !r.has_focus() {
+                r.request_focus();
+                // The whole name starts selected, so typing replaces it.
+                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), r.id) {
+                    let all = egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(draft.chars().count()));
+                    state.cursor.set_char_range(Some(all));
+                    state.store(ui.ctx(), r.id);
+                }
             }
             return;
         }

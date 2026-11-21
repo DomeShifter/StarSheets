@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Downloads the fonts in app/webfonts.txt from Google Fonts as TTF (egui reads TTF/OTF, not
-WOFF2) into app/webfonts/<slug>/{regular,bold,italic,bolditalic}.ttf. A style a family lacks is
+WOFF2) into app/webfonts/<slug>/{regular,bold,italic,bolditalic}.ttf, plus menu.ttf (only the
+letters of the font's name, for the font menu). A style a family lacks is
 skipped (the app then draws it from the regular face). Each font's licence (OFL or Apache) is
 saved beside it as LICENSE.txt, and app/webfonts/NOTICE.txt lists every font, its licence and
 where it came from; a font without a licence fails the build. Run before `trunk build`.
@@ -62,6 +63,15 @@ def main():
                 os.makedirs(folder, exist_ok=True)
                 path = os.path.join(folder, style + ".ttf")
                 if not os.path.exists(path):
+                    open(path, "wb").write(get(m.group(1)))
+        # The font menu shows each name in its own font, like Sheets: a tiny face holding only the
+        # letters of the name (Google's `text=` subset), a few KB each.
+        if not check and "regular" in have:
+            path = os.path.join(OUT, slug(menu), "menu.ttf")
+            if not os.path.exists(path):
+                q = urllib.parse.quote(family) + "&text=" + urllib.parse.quote(menu)
+                m = re.search(r"url\((https://[^)]+)\)", get(f"https://fonts.googleapis.com/css2?family={q}").decode())
+                if m:
                     open(path, "wb").write(get(m.group(1)))
         text, source = licence(family)
         kind = "missing" if text is None else ("SIL Open Font License 1.1" if "Open Font License" in text else "Apache License 2.0" if "Apache License" in text else "Ubuntu Font Licence" if "Ubuntu Font" in text else "see LICENSE.txt")

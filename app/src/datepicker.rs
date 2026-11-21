@@ -1,6 +1,6 @@
 //! Sheets' date picker: editing a cell that has a date validation rule (e.g. "Is valid date")
 //! shows a month calendar under the cell. Clicking a day puts that date in the cell; "Today"
-//! jumps to the current month.
+//! puts today's date in.
 
 use egui::{Align2, Color32, RichText, Sense, Ui, vec2};
 use gridcraft_engine::core::{CellRef, Value};
@@ -91,9 +91,8 @@ impl DatePicker {
                     }
                 }
                 ui.add_space(4.0);
-                if ui.add(egui::Button::new(RichText::new("Today").size(15.0).color(BLUE)).frame(false)).clicked() {
-                    let (y, m, _) = ymd(today);
-                    (year, month) = (y, m);
+                if ui.add(egui::Button::new(RichText::new("Today").size(crate::house::BODY).color(BLUE)).frame(false)).clicked() {
+                    picked = Some(today);
                 }
             });
         });
