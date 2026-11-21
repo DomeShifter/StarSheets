@@ -436,15 +436,9 @@ fn colour_pick(ui: &mut Ui, id: &str, colour: Option<u32>, icon: &str, tip: &str
 
 fn single_editor(ui: &mut Ui, d: &mut Draft) {
     ui.label(RichText::new("Format cells if…").size(12.0).color(theme::TEXT_DIM));
-    // The whole list at once, with Sheets' dividers (egui's default height hid 11 of the 19).
-    egui::ComboBox::from_id_salt("cf_condition").width(PANEL_W - 8.0).height(900.0).selected_text(CONDITIONS[d.condition].0).show_ui(ui, |ui| {
-        for (i, (label, ..)) in CONDITIONS.iter().enumerate() {
-            if matches!(i, 7 | 10 | 18) {
-                ui.separator();
-            }
-            ui.selectable_value(&mut d.condition, i, *label);
-        }
-    });
+    // The whole list at once, with Sheets' dividers.
+    let labels: Vec<&str> = CONDITIONS.iter().map(|c| c.0).collect();
+    crate::house::select(ui, "cf_condition", PANEL_W, &mut d.condition, &labels, &[6, 9, 17]);
     let (_, kind, _, boxes) = CONDITIONS[d.condition];
     let hint = match kind {
         "date" => "Date, e.g. 25/12/2026",
@@ -455,11 +449,8 @@ fn single_editor(ui: &mut Ui, d: &mut Draft) {
     if kind == "date" {
         let choices = date_choices(op);
         d.when = d.when.min(choices.len() - 1);
-        egui::ComboBox::from_id_salt("cf_when").width(PANEL_W - 8.0).selected_text(choices[d.when].0).show_ui(ui, |ui| {
-            for (i, (label, _)) in choices.iter().enumerate() {
-                ui.selectable_value(&mut d.when, i, *label);
-            }
-        });
+        let labels: Vec<&str> = choices.iter().map(|c| c.0).collect();
+        crate::house::select(ui, "cf_when", PANEL_W, &mut d.when, &labels, &[]);
     }
     if boxes >= 1 && !(kind == "date" && d.when > 0) {
         ui.add(egui::TextEdit::singleline(&mut d.value1).hint_text(hint).desired_width(PANEL_W).margin(vec2(8.0, 8.0)));

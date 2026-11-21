@@ -304,14 +304,9 @@ impl DvPanel {
         ui.add_space(12.0);
         ui.label(RichText::new("Criteria").size(14.0).strong());
         ui.add_space(4.0);
-        egui::ComboBox::from_id_salt("dv_crit").width(PANEL_W - 8.0).height(1000.0).selected_text(CRITERIA[d.crit].0).show_ui(ui, |ui| {
-            for (i, (label, _, sep)) in CRITERIA.iter().enumerate() {
-                ui.selectable_value(&mut d.crit, i, *label);
-                if *sep {
-                    ui.separator();
-                }
-            }
-        });
+        let labels: Vec<&str> = CRITERIA.iter().map(|c| c.0).collect();
+        let dividers: Vec<usize> = CRITERIA.iter().enumerate().filter(|(_, c)| c.2).map(|(i, _)| i).collect();
+        crate::house::select(ui, "dv_crit", PANEL_W, &mut d.crit, &labels, &dividers);
         ui.add_space(6.0);
         criterion_inputs(ui, d);
 
@@ -450,11 +445,9 @@ fn criterion_inputs(ui: &mut Ui, d: &mut Draft) {
             let between = matches!(op, "between" | "notBetween");
             if !between {
                 let labels: Vec<&str> = if op == "equal" { DATE_IS.iter().map(|x| x.0).collect() } else { DATE_REL.iter().map(|x| x.0).collect() };
-                egui::ComboBox::from_id_salt("dv_when").width(PANEL_W - 8.0).selected_text(labels[d.when.min(labels.len() - 1)]).show_ui(ui, |ui| {
-                    for (i, l) in labels.iter().enumerate() {
-                        ui.selectable_value(&mut d.when, i, *l);
-                    }
-                });
+                let mut when = d.when.min(labels.len() - 1);
+                crate::house::select(ui, "dv_when", PANEL_W, &mut when, &labels, &[]);
+                d.when = when;
             }
             if between || d.when == 0 {
                 boxed(ui, &mut d.v1, "dd/mm/yyyy");

@@ -22,6 +22,9 @@ pub struct Notes {
     editing: Option<(u64, CellRef, String)>,
     /// A size being dragged with the grip: (cell, width, height).
     resizing: Option<(CellRef, f32, f32)>,
+    /// Where that drag began: (pointer, width, height). Sizes come from this, not from per-frame
+    /// deltas, which egui can apply twice when a frame is laid out twice.
+    drag_start: Option<(Pos2, f32, f32)>,
     focus: bool,
     /// The card shown last frame (cell, rect): it stays while the pointer is over it, so it can be
     /// clicked, scrolled or resized after leaving the cell.
@@ -103,19 +106,20 @@ impl Notes {
                 ui.painter().line_segment([Pos2::new(grip.right() - k, grip.bottom()), Pos2::new(grip.right(), grip.bottom() - k)], Stroke::new(1.0, Color32::from_gray(0x80)));
             }
             let g = ui.interact(grip, egui::Id::new("starsheets_note_grip_drag"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeNwSe);
-            (g.dragged(), g.drag_stopped(), g.drag_delta())
+            (g.dragged(), g.drag_stopped(), g.interact_pointer_pos())
         });
         let card = area.response.rect;
         self.last = Some((cell, card.expand(8.0)));
-        let (dragging, stopped, delta) = area.inner;
-        if dragging {
-            let (cw, ch) = self.resizing.filter(|r| r.0 == cell).map_or((w, h), |r| (r.1, r.2));
-            self.resizing = Some((cell, (cw + delta.x).max(MIN.0), (ch + delta.y).max(MIN.1)));
+        let (dragging, stopped, pointer) = area.inner;
+        if dragging && let Some(p) = pointer {
+            let (from, sw, sh) = *self.drag_start.get_or_insert((p, w, h));
+            self.resizing = Some((cell, (sw + p.x - from.x).max(MIN.0), (sh + p.y - from.y).max(MIN.1)));
         }
-        if stopped
-            && let Some((c, rw, rh)) = self.resizing.take()
-        {
-            new_size = Some((c, rw, rh));
+        if stopped {
+            self.drag_start = None;
+            if let Some((c, rw, rh)) = self.resizing.take() {
+                new_size = Some((c, rw, rh));
+            }
         }
         // A press outside the card while writing saves the note.
         if self.editing.is_some() && ui.input(|i| i.pointer.any_pressed() && i.pointer.press_origin().is_some_and(|p| !card.contains(p))) {

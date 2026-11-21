@@ -217,6 +217,40 @@ pub fn menu_inset<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
     Frame::NONE.inner_margin(Margin::symmetric(MENU_INSET, XS as i8)).show(ui, add).inner
 }
 
+/// A drop-down field: a 36 px box with the chosen label and ▾, opening a Sheets menu with every
+/// choice at once (a ✓ by the current one; `dividers_after` puts a line after those indexes).
+/// Returns true when the choice changed.
+pub fn select(ui: &mut Ui, id: &str, width: f32, current: &mut usize, labels: &[&str], dividers_after: &[usize]) -> bool {
+    let shown = labels.get(*current).copied().unwrap_or_default();
+    let field = egui::Button::new(RichText::new(shown).size(BODY).color(theme::TEXT))
+        .right_text(RichText::new("▾").size(BODY).color(theme::TEXT_DIM))
+        .fill(Color32::WHITE)
+        .stroke(Stroke::new(1.0, theme::BOX))
+        .corner_radius(CornerRadius::same(FIELD_RADIUS))
+        .min_size(vec2(width, FIELD_HEIGHT));
+    let r = ui.add(field);
+    let mut changed = false;
+    egui::Popup::menu(&r).id(egui::Id::new(id)).show(|ui| {
+        crate::shell::menu_style_width(ui, width.max(200.0));
+        ui.spacing_mut().button_padding.x = 40.0;
+        for (i, label) in labels.iter().enumerate() {
+            let row = ui.add(egui::Button::new(RichText::new(*label).size(BODY).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(0.0, ROW_HEIGHT)));
+            if i == *current {
+                ui.painter().text(row.rect.left_center() + vec2(L, 0.0), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), theme::TEXT);
+            }
+            if row.clicked() {
+                changed = i != *current;
+                *current = i;
+                ui.close();
+            }
+            if dividers_after.contains(&i) {
+                crate::shell::menu_sep_width(ui, width.max(200.0));
+            }
+        }
+    });
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
