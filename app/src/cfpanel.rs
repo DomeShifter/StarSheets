@@ -395,8 +395,12 @@ fn colour_pick(ui: &mut Ui, id: &str, colour: Option<u32>, icon: &str, tip: &str
 
 fn single_editor(ui: &mut Ui, d: &mut Draft) {
     ui.label(RichText::new("Format cells if…").size(12.0).color(theme::TEXT_DIM));
-    egui::ComboBox::from_id_salt("cf_condition").width(PANEL_W - 8.0).selected_text(CONDITIONS[d.condition].0).show_ui(ui, |ui| {
+    // The whole list at once, with Sheets' dividers (egui's default height hid 11 of the 19).
+    egui::ComboBox::from_id_salt("cf_condition").width(PANEL_W - 8.0).height(900.0).selected_text(CONDITIONS[d.condition].0).show_ui(ui, |ui| {
         for (i, (label, ..)) in CONDITIONS.iter().enumerate() {
+            if matches!(i, 7 | 10 | 18) {
+                ui.separator();
+            }
             ui.selectable_value(&mut d.condition, i, *label);
         }
     });
