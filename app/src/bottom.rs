@@ -116,6 +116,8 @@ impl Bottom {
                     ui.add_space(6.0);
                     let quick_width = 220.0;
                     let strip = (ui.available_width() - quick_width).max(80.0);
+                    // The tab strip keeps a thin bar that shows on hover (a solid one would sit under the tabs).
+                    ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
                     egui::ScrollArea::horizontal().max_width(strip).id_salt("starsheets_tabs").show(ui, |ui| {
                         ui.horizontal(|ui| {
                             self.tab_rects.clear();

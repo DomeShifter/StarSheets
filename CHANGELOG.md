@@ -7,6 +7,8 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- Drop-downs in the conditional formatting and data validation panels show every choice at once;
+  lists that don't fit the window scroll with a solid, always-visible scroll bar.
 - The font menu shows each font's name in that font, scaled so the names look the same size.
 - Right-click on a cell with a note offers Edit note and Delete note.
 - Insert note writes straight into the note card (no separate box).

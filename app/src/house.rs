@@ -53,6 +53,9 @@ pub fn install(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| {
         s.spacing.window_margin = Margin::same(XL as i8);
         s.spacing.menu_margin = Margin::symmetric(0, S as i8);
+        // Solid scroll bars, always drawn when a list doesn't fit (egui's default thin ones only
+        // show on hover, so a long list didn't look scrollable).
+        s.spacing.scroll = egui::style::ScrollStyle::solid();
         s.visuals.window_corner_radius = CornerRadius::same(PANEL_RADIUS);
         s.visuals.menu_corner_radius = CornerRadius::same(PANEL_RADIUS);
         s.visuals.window_stroke = Stroke::NONE;
@@ -233,6 +236,8 @@ pub fn select(ui: &mut Ui, id: &str, width: f32, current: &mut usize, labels: &[
     egui::Popup::menu(&r).id(egui::Id::new(id)).show(|ui| {
         crate::shell::menu_style_width(ui, width.max(200.0));
         ui.spacing_mut().button_padding.x = 40.0;
+        // As tall as the screen allows; a scroll bar when it still doesn't fit.
+        egui::ScrollArea::vertical().max_height(menu_max_height(ui.ctx())).show(ui, |ui| {
         for (i, label) in labels.iter().enumerate() {
             let row = ui.add(egui::Button::new(RichText::new(*label).size(BODY).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(0.0, ROW_HEIGHT)));
             if i == *current {
@@ -247,8 +252,14 @@ pub fn select(ui: &mut Ui, id: &str, width: f32, current: &mut usize, labels: &[
                 crate::shell::menu_sep_width(ui, width.max(200.0));
             }
         }
+        });
     });
     changed
+}
+
+/// The most a menu's list may take before it scrolls: the window's height less a margin.
+pub fn menu_max_height(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().height() - 2.0 * XL).max(160.0)
 }
 
 #[cfg(test)]

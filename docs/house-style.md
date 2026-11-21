@@ -41,6 +41,14 @@ Everything sits on a 4 px scale.
 | Button | pill (18 px) | 12 px inside | 36 px high, at least 88 px wide |
 | Divider | | 8 px above and below | 1 px #DADCE0 |
 
+## Lists and drop-downs
+
+- A drop-down (`house::select`) opens a menu that shows **every choice at once**, as tall as the
+  window allows, with a ✓ by the current one and dividers between groups.
+- When it still doesn't fit (a small window or a low-resolution screen), it scrolls with a
+  **solid scroll bar** that is always visible, so it's obvious there is more. Every scrolling
+  list uses solid bars; only the sheet tab strip keeps a thin bar that shows on hover.
+
 ## Buttons
 
 - **Main button:** green (#146C2E) pill with white text. Only one per dialog, at the far right.

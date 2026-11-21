@@ -554,7 +554,7 @@ impl Shell {
                                 // Sheets' font menu: each name in its own font, a ✓ by the current one.
                                 menu_style_width(ui, 220.0);
                                 ui.spacing_mut().button_padding.x = 44.0;
-                                egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| {
+                                egui::ScrollArea::vertical().max_height(crate::house::menu_max_height(ui.ctx()) - 80.0).show(ui, |ui| {
                                     for f in fonts() {
                                         let base = egui::FontId::proportional(crate::house::BODY + 1.0);
                                         let font = match crate::fonts::preview_font(ui.ctx(), f, base.size) {
