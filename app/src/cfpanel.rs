@@ -201,16 +201,18 @@ impl CfPanel {
             paint_swatch(p, sw, &cf.rule, &theme_colours);
             p.text(sw.right_center() + vec2(12.0, -9.0), egui::Align2::LEFT_CENTER, describe(&cf.rule), egui::FontId::proportional(13.5), theme::TEXT);
             p.text(sw.right_center() + vec2(12.0, 10.0), egui::Align2::LEFT_CENTER, ranges, egui::FontId::proportional(12.0), theme::TEXT_DIM);
-            if resp.hovered() {
-                let bin = egui::Rect::from_center_size(egui::pos2(r.right() - 20.0, r.center().y), vec2(28.0, 28.0));
-                let b = ui.interact(bin, ui.id().with(("cf_bin", i)), Sense::click());
-                if let Some(img) = crate::icons::icon("delete") {
-                    img.paint_at(ui, bin.shrink(5.0));
-                }
-                if b.on_hover_text("Remove rule").clicked() {
-                    delete = Some(i);
-                    continue;
-                }
+            // The bin always exists (so the pointer moving onto it doesn't make it vanish) and
+            // shows while the card or the bin is hovered.
+            let bin = egui::Rect::from_center_size(egui::pos2(r.right() - 20.0, r.center().y), vec2(28.0, 28.0));
+            let b = ui.interact(bin, ui.id().with(("cf_bin", i)), Sense::click());
+            if (resp.hovered() || b.hovered())
+                && let Some(img) = crate::icons::icon("delete")
+            {
+                img.paint_at(ui, bin.shrink(5.0));
+            }
+            if b.on_hover_text("Remove rule").clicked() {
+                delete = Some(i);
+                continue;
             }
             if resp.clicked() {
                 let mut d = draft_from(&cf.rule, &theme_colours).unwrap_or_else(|| Draft::new(String::new()));
