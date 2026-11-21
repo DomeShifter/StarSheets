@@ -435,6 +435,8 @@ pub struct Shell {
     size_draft: Option<String>,
     /// The spreadsheet's name while it's being renamed (click the title).
     title_draft: Option<String>,
+    /// The custom colour picker (⊕ in the colour menus).
+    custom: crate::colourpicker::CustomPicker,
 }
 
 /// What the toolbar shows for the active cell.
@@ -488,6 +490,7 @@ fn icon_or_text(ui: &mut Ui, name: &str, tip: &str) -> egui::Response {
 
 impl Shell {
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        self.custom.ui(app, &ui.ctx().clone());
         // Ctrl+Shift+F: hide/show the menus (taken before the grid sees it).
         if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::F)) {
             self.compact = !self.compact;
@@ -533,7 +536,8 @@ impl Shell {
                         }
                         Colour(icon, tip, id, reset_label, reset_value) => {
                             let img = icons::icon(icon);
-                            let body = |ui: &mut Ui| colour_menu(app, ui, id, reset_label, reset_value);
+                            let _ = reset_label;
+                            let body = |ui: &mut Ui| crate::colourpicker::menu(app, ui, id, reset_value);
                             let r = match img {
                                 Some(img) => ui.menu_button(img, body).response,
                                 None => ui.menu_button(*icon, body).response,
@@ -679,15 +683,6 @@ fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
 /// The merge commands, which go through the "Heads up!" warning (merge.rs).
 fn is_merge(id: &str) -> bool {
     matches!(id, "home.mergeCells" | "home.mergeDown" | "home.mergeAcross" | "home.unmergeCells")
-}
-
-fn colour_menu(app: &mut SheetApp, ui: &mut Ui, id: &str, reset_label: &str, reset_value: &str) {
-    if ui.button(reset_label).clicked() {
-        app.run_or_alert(id, json!({ "color": reset_value }));
-        ui.close();
-    }
-    ui.add_space(4.0);
-    palette_grid(ui, |hex| app.run_or_alert(id, json!({ "color": hex })));
 }
 
 /// Sheets' colour grid; `pick` gets "#RRGGBB" and the menu closes.
