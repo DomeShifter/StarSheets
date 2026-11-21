@@ -619,27 +619,132 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui) {
     });
 }
 
+/// The Material Symbols icon Sheets shows beside a menu item (docs/sheets-menus.md).
+pub const MENU_ICONS: &[(&str, &str)] = &[
+    ("New spreadsheet", "note_add"),
+    ("Open", "folder_open"),
+    ("Download", "download"),
+    ("Details", "info"),
+    ("Settings", "settings"),
+    ("Print", "print"),
+    ("Undo", "undo"),
+    ("Redo", "redo"),
+    ("Cut", "content_cut"),
+    ("Copy", "content_copy"),
+    ("Paste", "content_paste"),
+    ("Paste special", "content_paste"),
+    ("Delete", "delete"),
+    ("Find and replace", "find_replace"),
+    ("Show", "visibility"),
+    ("Freeze", "grid_on"),
+    ("Group", "add_box"),
+    ("Zoom", "zoom_in"),
+    ("Cells", "check_box_outline_blank"),
+    ("Rows", "table_rows"),
+    ("Columns", "view_column"),
+    ("Sheet", "tab"),
+    ("Chart", "insert_chart"),
+    ("Pivot table", "pivot_table_chart"),
+    ("Image", "image"),
+    ("Function", "functions"),
+    ("Link", "link"),
+    ("Checkbox", "check_box"),
+    ("Dropdown", "arrow_drop_down_circle"),
+    ("Comment", "add_comment"),
+    ("Note", "sticky_note_2"),
+    ("Table", "table"),
+    ("Number", "123"),
+    ("Text", "format_bold"),
+    ("Alignment", "format_align_left"),
+    ("Wrapping", "wrap_text"),
+    ("Merge cells", "cell_merge"),
+    ("Convert to table", "table"),
+    ("Conditional formatting", "format_paint"),
+    ("Clear formatting", "format_clear"),
+    ("Sort range A → Z", "sort_by_alpha"),
+    ("Sort range Z → A", "sort_by_alpha"),
+    ("Advanced range sorting options", "sort"),
+    ("Create a filter", "filter_alt"),
+    ("Add a slicer", "filter_list"),
+    ("Protect sheets and ranges", "lock"),
+    ("Named ranges", "label"),
+    ("Data validation", "rule"),
+    ("Data cleanup", "cleaning_services"),
+    ("Split text to columns", "call_split"),
+    ("Spelling", "spellcheck"),
+    ("Accessibility", "accessibility_new"),
+    ("Calculate now", "calculate"),
+    ("Function list", "functions"),
+];
+
+fn menu_icon(label: &str) -> Option<egui::Image<'static>> {
+    MENU_ICONS.iter().find(|(l, _)| *l == label).and_then(|(_, n)| icons::icon(n))
+}
+
+/// Grey for shortcuts and the submenu arrow, as in Sheets.
+const MENU_GREY: egui::Color32 = egui::Color32::from_rgb(0x80, 0x86, 0x8B);
+
+/// One menu row: icon (or the same space blank when the menu has icons), 14 px label, and the
+/// shortcut in grey on the right. Rows are 32 px tall and fill the menu's width.
+fn menu_row<'a>(label: &'a str, keys: &'a str, with_icons: bool) -> Button<'a> {
+    let text = RichText::new(label).size(14.0).color(theme::TEXT);
+    let b = match (menu_icon(label), with_icons) {
+        (Some(img), _) => Button::image_and_text(img, text),
+        // Keeps the label lined up with its iconed neighbours.
+        (None, true) => match icons::icon("add") {
+            Some(blank) => Button::image_and_text(blank.tint(egui::Color32::TRANSPARENT), text),
+            None => Button::new(text),
+        },
+        (None, false) => Button::new(text),
+    };
+    let b = if keys.is_empty() { b } else { b.shortcut_text(RichText::new(keys).size(13.0).color(MENU_GREY)) };
+    b.frame_when_inactive(false).min_size(vec2(0.0, 32.0))
+}
+
+/// Sheets-style menu: flat full-width rows with icons, grey shortcuts, ▸ for submenus, and
+/// dividers with breathing room (docs/sheets-menus.md).
 fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
-    ui.set_min_width(240.0);
+    let with_icons = items.iter().any(|i| match i {
+        Cmd(l, ..) | CmdWith(l, ..) | Sub(l, _) => menu_icon(l).is_some(),
+        Sep => false,
+    });
+    ui.set_min_width(if with_icons { 280.0 } else { 220.0 });
+    {
+        let st = ui.style_mut();
+        st.spacing.button_padding = vec2(12.0, 7.0);
+        st.spacing.item_spacing = vec2(14.0, 0.0);
+        st.spacing.icon_width = 10.0;
+        let w = &mut st.visuals.widgets;
+        for (state, fill) in [(&mut w.inactive, egui::Color32::TRANSPARENT), (&mut w.hovered, theme::MENU_HOVER), (&mut w.active, theme::HOVER), (&mut w.open, theme::MENU_HOVER)] {
+            state.bg_stroke = Stroke::NONE;
+            state.weak_bg_fill = fill;
+            state.corner_radius = egui::CornerRadius::ZERO;
+            state.expansion = 0.0;
+        }
+    }
     for item in items {
         match item {
             Cmd(label, id, keys) => {
-                if ui.add(Button::new(*label).shortcut_text(*keys)).clicked() {
+                if ui.add_sized([ui.available_width(), 32.0], menu_row(label, keys, with_icons)).clicked() {
                     app.run_or_alert(id, json!({}));
                     ui.close();
                 }
             }
             CmdWith(label, id, keys, params) => {
-                if ui.add(Button::new(*label).shortcut_text(*keys)).clicked() {
+                if ui.add_sized([ui.available_width(), 32.0], menu_row(label, keys, with_icons)).clicked() {
                     app.run_or_alert(id, serde_json::from_str(params).unwrap_or_else(|_| json!({})));
                     ui.close();
                 }
             }
             Sub(label, sub) => {
-                ui.menu_button(*label, |ui| menu_items(app, ui, sub));
+                let b = menu_row(label, "", with_icons).right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(MENU_GREY)));
+                egui::containers::menu::SubMenuButton::from_button(b).ui(ui, |ui| menu_items(app, ui, sub));
             }
             Sep => {
-                ui.separator();
+                ui.add_space(8.0);
+                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+                ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, theme::DIVIDER));
+                ui.add_space(8.0);
             }
         }
     }
@@ -660,6 +765,13 @@ mod tests {
     }
 
     /// Every menu and toolbar entry names a command GridCraft's engine knows.
+    #[test]
+    fn every_menu_icon_is_embedded() {
+        for (label, name) in MENU_ICONS {
+            assert!(icons::has(name), "menu icon {name} for {label} isn't in app/icons");
+        }
+    }
+
     #[test]
     fn every_entry_names_a_real_command() {
         let mut all = Vec::new();

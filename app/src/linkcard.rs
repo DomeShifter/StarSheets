@@ -30,12 +30,17 @@ impl LinkCard {
         if app.editor.is_some() || self.dismissed == Some(cell) {
             return;
         }
-        // Place it once per cell, just below where the pointer was when the cell was chosen.
-        if self.at.is_none_or(|(c, _)| c != cell) {
-            let pos = ui.ctx().input(|i| i.pointer.latest_pos()).unwrap_or_else(|| ui.max_rect().center());
-            self.at = Some((cell, pos + vec2(-12.0, 18.0)));
+        // Just under the cell's bottom-left corner, as in Sheets (re-measured every frame so it
+        // follows scrolling); the pointer is only a fallback.
+        let pos = cell_bottom_left(app, cell).map(|p| p + vec2(0.0, 4.0)).unwrap_or_else(|| {
+            let p = self.at.filter(|(c, _)| *c == cell).map(|(_, p)| p);
+            p.unwrap_or_else(|| ui.ctx().input(|i| i.pointer.latest_pos()).unwrap_or_else(|| ui.max_rect().center()) + vec2(-12.0, 18.0))
+        });
+        self.at = Some((cell, pos));
+        // Hidden while the cell is scrolled out of the grid.
+        if app.grid.cells_rect.is_some_and(|r| !r.contains(pos - vec2(0.0, 6.0))) {
+            return;
         }
-        let Some((_, pos)) = self.at else { return };
         egui::Area::new(egui::Id::new("starsheets_link_card")).fixed_pos(pos).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             Frame::popup(ui.style()).fill(egui::Color32::WHITE).corner_radius(8.0).inner_margin(10.0).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -64,4 +69,16 @@ impl LinkCard {
             });
         });
     }
+}
+
+/// The on-screen bottom-left corner of `cell` on the active sheet, from GridCraft's own geometry.
+fn cell_bottom_left(app: &SheetApp, cell: CellRef) -> Option<egui::Pos2> {
+    let cells = app.grid.cells_rect?;
+    let sh = app.session.active()?.wb.active()?;
+    let scroll = app.view().scroll;
+    // Geo takes the whole grid area (headings included); find the headings' size from a probe.
+    let probe = gridcraft_ui_egui::grid::Geo::new(sh, cells, scroll);
+    let grid = cells.translate(cells.min - probe.cells.min);
+    let geo = gridcraft_ui_egui::grid::Geo::new(sh, grid, scroll);
+    Some(geo.screen_cell_rect(sh, cell).left_bottom())
 }

@@ -36,6 +36,8 @@
 - [x] Right-click menu, error/note markers, link card (patches 0007-0009)
 - [x] Grid at Sheets' 1:1 size, Sheets header sizes, plain arrow cursor, flat menus/toolbar, unboxed formula bar (patch 0012)
 - [x] Typed web/e-mail addresses become links; browser shortcuts that clash with Sheets ones (Ctrl+D, Ctrl+B…) are blocked; hand cursors for dragging cells (patch 0013)
+- [x] Sheets-style menus: icons, 32 px rows, grey shortcuts, ▸ submenus, dividers, rounded panel with shadow (docs/sheets-menus.md); Sheets-blue links (patch 0014); link card under its cell
+- [ ] Menu contents: match docs/sheets-menus.md item by item (missing commands, Help › Keyboard shortcuts)
 - [ ] Dark mode palette
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).
