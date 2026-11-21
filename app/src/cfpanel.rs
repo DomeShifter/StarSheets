@@ -444,7 +444,7 @@ fn scale_editor(ui: &mut Ui, d: &mut Draft) {
     if resp.on_hover_text("Choose a preset").clicked() {
         egui::Popup::toggle_id(ui.ctx(), presets_id);
     }
-    egui::Popup::new(presets_id, ui.ctx().clone(), egui::PopupAnchor::Position(r.left_bottom()), ui.layer_id()).show(|ui| {
+    egui::Popup::new(presets_id, ui.ctx().clone(), egui::PopupAnchor::Position(r.left_bottom()), ui.layer_id()).open_memory(None).show(|ui| {
         for p in SCALE_PRESETS {
             let (pr, presp) = ui.allocate_exact_size(vec2(220.0, 22.0), Sense::click());
             let cols: Vec<Color32> = p.iter().map(|c| c32(*c)).collect();
