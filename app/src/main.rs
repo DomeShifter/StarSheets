@@ -10,6 +10,7 @@ mod calcpreview;
 mod bottom;
 mod cfpanel;
 mod colourpicker;
+mod customdate;
 mod datepicker;
 mod dvpanel;
 #[cfg(target_arch = "wasm32")]

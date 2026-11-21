@@ -22,6 +22,9 @@ new features and the last one for fixes.
 - **File › Settings**: your locale (how typed dates are read: 05/08 is 5 August in the UK), default
   date, time and number formats with examples, and the display language for dialogs. The default
   locale is now English (United Kingdom).
+- Format › Number › **Custom date and time**, like Google Sheets': build a format from parts
+  (day, month, year, hour…, each with its kinds), pick from ready-made ones, and see it on the
+  selected cells as you go.
 - Conditional formatting: a custom formula over whole columns, like Google's `=$A:$A=12` on
   A1:F13, now colours whole rows.
 

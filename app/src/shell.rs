@@ -166,6 +166,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     CmdWith("Date time", "home.numberFormat", "26/09/2008 15:59:00", r#"{"code":"@datetime"}"#),
                     CmdWith("Duration", "home.numberFormat", "24:01:00", r#"{"code":"[h]:mm:ss"}"#),
                     Sep,
+                    Cmd("Custom date and time", "panel:customdate", ""),
                     Cmd("Custom number format", "home.formatCells", ""),
                 ],
             ),
@@ -342,6 +343,7 @@ const NUMBER_FORMATS: &[(&str, &str, &str)] = &[
     ("Date time|26/09/2008 15:59:00", "home.numberFormat", r#"{"code":"@datetime"}"#),
     ("Duration|24:01:00", "home.numberFormat", r#"{"code":"[h]:mm:ss"}"#),
     ("-", "", ""),
+    ("Custom date and time", "panel:customdate", "{}"),
     ("Custom number format", "home.formatCells", "{}"),
 ];
 
@@ -640,7 +642,11 @@ impl Shell {
 fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
     let icon_row = items.iter().all(|(l, _, _)| l.starts_with("icon:"));
     let mut run = |app: &mut SheetApp, ui: &mut Ui, id: &str, p: &str| {
-        app.run_or_alert(id, params(p));
+        if id == "panel:customdate" {
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customdate::REQUEST), true));
+        } else {
+            app.run_or_alert(id, params(p));
+        }
         ui.close();
     };
     if icon_row {
@@ -978,7 +984,9 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                     // "ui:<dialog>" opens one of GridCraft's dialogs (some, like conditional
                     // formatting, are then shown as our own side panel).
                     // "panel:dropdown" opens the data-validation panel on a new drop-down.
-                    if *id == "panel:settings" {
+                    if *id == "panel:customdate" {
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customdate::REQUEST), true));
+                    } else if *id == "panel:settings" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::settings::REQUEST), true));
                     } else if *id == "panel:note" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::notes::REQUEST), true));
@@ -1062,7 +1070,7 @@ mod tests {
                 Font | FontSize | Zoom | Gap => {}
             }
         }
-        let missing: Vec<_> = all.into_iter().filter(|id| gridcraft_engine::find_command(id).is_none()).collect();
+        let missing: Vec<_> = all.into_iter().filter(|id| !id.starts_with("panel:") && gridcraft_engine::find_command(id).is_none()).collect();
         assert!(missing.is_empty(), "unknown command ids: {missing:?}");
     }
 }
