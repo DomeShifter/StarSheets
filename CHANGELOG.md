@@ -6,6 +6,8 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-21
+
 The first public preview. StarSheets is still early: please expect rough edges, and do tell me
 about them.
 
@@ -33,3 +35,10 @@ about them.
 - A file window with folders: new folder, rename, copy, cut and paste, drag to move, search, a bin
   you can restore from, and version history (the last six saves).
 - Importing .xlsx and .csv files, downloading as .xlsx, PDF, HTML or CSV.
+
+### Self-hosting
+- One Docker image (`ghcr.io/domeshifter/starsheets`) with the app and its file storage.
+- A password login, on by default (a random password is printed on first start if you don't set one).
+
+[Unreleased]: https://github.com/DomeShifter/StarSheets/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.1.0
