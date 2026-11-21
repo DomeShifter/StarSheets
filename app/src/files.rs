@@ -71,14 +71,17 @@ pub struct Files {
 
 impl Files {
     pub fn logic(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+        // A new workbook is "Untitled spreadsheet", as in Sheets (GridCraft calls it Book1). The
+        // workbook appears after the first frames, so this is checked every frame.
+        if self.link.is_none()
+            && let Some(d) = app.session.active_mut()
+            && d.path.is_none()
+            && d.title.strip_prefix("Book").is_some_and(|n| n.chars().all(|c| c.is_ascii_digit()))
+        {
+            d.title = "Untitled spreadsheet".into();
+        }
         if !self.booted {
             self.booted = true;
-            if let Some(d) = app.session.active_mut()
-                && d.path.is_none()
-                && d.title.starts_with("Book")
-            {
-                d.title = "Untitled spreadsheet".into();
-            }
             if let Some(id) = query_file() {
                 self.status = "Opening…".into();
                 self.busy = true;

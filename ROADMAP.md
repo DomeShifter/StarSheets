@@ -46,6 +46,7 @@
 - [x] Date picker when editing a cell with a date rule
 - [x] Drop-down colours as in Sheets: light and dark chips, text in the partner colour
 - [x] Phase 2 start: files on a server folder (server/files.py): autosave a moment after each change (new sheets once they have data), File › Open list, Make a copy, Move to bin, version history (last 6), free names with " (2)", a save over a newer copy becomes a "conflicted copy"
+- [x] Filter menu like Sheets (patch 0019); later: sort/filter by colour, filter by condition
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
 
