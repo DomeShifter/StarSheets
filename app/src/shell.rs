@@ -414,18 +414,6 @@ fn fonts() -> Vec<&'static str> {
 const FONT_SIZES: &[u32] = &[6, 7, 8, 9, 10, 11, 12, 14, 18, 24, 36];
 const ZOOMS: &[u32] = &[50, 75, 90, 100, 125, 150, 200];
 
-/// Google's classic colour palette (greys, brights, then six rows of tints and shades).
-const PALETTE: [[u32; 10]; 8] = [
-    [0x000000, 0x434343, 0x666666, 0x999999, 0xB7B7B7, 0xCCCCCC, 0xD9D9D9, 0xEFEFEF, 0xF3F3F3, 0xFFFFFF],
-    [0x980000, 0xFF0000, 0xFF9900, 0xFFFF00, 0x00FF00, 0x00FFFF, 0x4A86E8, 0x0000FF, 0x9900FF, 0xFF00FF],
-    [0xE6B8AF, 0xF4CCCC, 0xFCE5CD, 0xFFF2CC, 0xD9EAD3, 0xD0E0E3, 0xC9DAF8, 0xCFE2F3, 0xD9D2E9, 0xEAD1DC],
-    [0xDD7E6B, 0xEA9999, 0xF9CB9C, 0xFFE599, 0xB6D7A8, 0xA2C4C9, 0xA4C2F4, 0x9FC5E8, 0xB4A7D6, 0xD5A6BD],
-    [0xCC4125, 0xE06666, 0xF6B26B, 0xFFD966, 0x93C47D, 0x76A5AF, 0x6D9EEB, 0x6FA8DC, 0x8E7CC3, 0xC27BA0],
-    [0xA61C00, 0xCC0000, 0xE69138, 0xF1C232, 0x6AA84F, 0x45818E, 0x3C78D8, 0x3D85C6, 0x674EA7, 0xA64D79],
-    [0x85200C, 0x990000, 0xB45F06, 0xBF9000, 0x38761D, 0x134F5C, 0x1155CC, 0x0B5394, 0x351C75, 0x741B47],
-    [0x5B0F00, 0x660000, 0x783F04, 0x7F6000, 0x274E13, 0x0C343D, 0x1C4587, 0x073763, 0x20124D, 0x4C1130],
-];
-
 /// Per-session state of the chrome.
 #[derive(Default)]
 pub struct Shell {
@@ -708,33 +696,6 @@ fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
 /// The merge commands, which go through the "Heads up!" warning (merge.rs).
 fn is_merge(id: &str) -> bool {
     matches!(id, "home.mergeCells" | "home.mergeDown" | "home.mergeAcross" | "home.unmergeCells")
-}
-
-/// Sheets' colour grid; `pick` gets "#RRGGBB" and the menu closes.
-pub fn palette_grid(ui: &mut Ui, mut pick: impl FnMut(String)) {
-    for (i, row) in PALETTE.iter().enumerate() {
-        if i == 2 {
-            ui.add_space(6.0);
-        }
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing = vec2(3.0, 3.0);
-            for c in row {
-                let colour = egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, *c as u8);
-                let (r, resp) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                ui.painter().circle_filled(r.center(), 8.0, colour);
-                if *c == 0xFFFFFF {
-                    ui.painter().circle_stroke(r.center(), 8.0, Stroke::new(1.0, theme::HOVER));
-                }
-                if resp.hovered() {
-                    ui.painter().circle_stroke(r.center(), 9.0, Stroke::new(1.5, theme::BLUE));
-                }
-                if resp.on_hover_text(format!("#{c:06X}")).clicked() {
-                    pick(format!("#{c:06X}"));
-                    ui.close();
-                }
-            }
-        });
-    }
 }
 
 fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<String>) {

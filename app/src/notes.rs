@@ -79,7 +79,8 @@ impl Notes {
         let mut start_edit = false;
         let mut new_size = None;
         let area = egui::Area::new(egui::Id::new("starsheets_note_card")).fixed_pos(at).constrain(false).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            crate::house::card_frame().inner_margin(egui::Margin::same(crate::house::M as i8)).show(ui, |ui| {
+            let writing = self.editing.as_ref().is_some_and(|(doc, c, _)| *doc == uid && *c == cell);
+            let frame = crate::house::card_frame().inner_margin(egui::Margin::same(crate::house::M as i8)).show(ui, |ui| {
                 ui.set_min_size(vec2(w - 24.0, h - 24.0));
                 ui.set_max_size(vec2(w - 24.0, h - 24.0));
                 if let Some((_, _, draft)) = self.editing.as_mut().filter(|(doc, c, _)| *doc == uid && *c == cell) {
@@ -92,12 +93,13 @@ impl Notes {
                         commit = true;
                     }
                 } else {
-                    let r = ui.add(egui::Label::new(RichText::new(&text).size(14.0).color(TEXT)).wrap().sense(Sense::click()));
-                    if r.clicked() {
-                        start_edit = true;
-                    }
+                    ui.add(egui::Label::new(RichText::new(&text).size(14.0).color(TEXT)).wrap().selectable(false));
                 }
             });
+            // A click anywhere on the card starts writing, as in Sheets.
+            if !writing && ui.interact(frame.response.rect, egui::Id::new("starsheets_note_card_click"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text).clicked() {
+                start_edit = true;
+            }
             // The resize grip: three short diagonal lines in the bottom-right corner, on the card's
             // own layer (registered last, so it wins over the text under it).
             let card = ui.min_rect();

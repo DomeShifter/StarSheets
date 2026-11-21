@@ -45,7 +45,17 @@ pub struct Bottom {
     dragging: Option<usize>,
     /// This frame's tab rectangles, for dropping a dragged tab.
     tab_rects: Vec<(usize, egui::Rect)>,
+    /// Each tab's width last frame (by name), so tabs can be laid out in slots while one moves.
+    widths: std::collections::HashMap<String, f32>,
+    /// Each tab's slide away from its slot (by name): (offset, speed), moved by a spring.
+    slide: std::collections::HashMap<String, (f32, f32)>,
+    /// A tab just dropped: its name and where its left edge was, so it springs into its new slot.
+    settle: Option<(String, f32)>,
 }
+
+/// The spring the tabs move on: stiffness and damping (a little under critical, so a dropped
+/// tab overshoots slightly and pings into place, like icons on a phone's home screen).
+const SPRING: (f32, f32) = (420.0, 30.0);
 
 struct Tab {
     index: usize,
@@ -121,10 +131,8 @@ impl Bottom {
                     egui::ScrollArea::horizontal().max_width(strip).id_salt("starsheets_tabs").show(ui, |ui| {
                         ui.horizontal(|ui| {
                             self.tab_rects.clear();
-                            for tab in list.iter().filter(|t| !t.hidden) {
-                                self.tab(app, ui, tab, tab.index == active, list.len());
-                            }
-                            self.drop_tab(app, ui);
+                            let visible: Vec<&Tab> = list.iter().filter(|t| !t.hidden).collect();
+                            self.strip(app, ui, &visible, active, list.len());
                         });
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.quick_sum(app, ui));
@@ -156,6 +164,7 @@ impl Bottom {
             && *i == tab.index
         {
             let r = ui.add(egui::TextEdit::singleline(draft).desired_width(110.0));
+            self.tab_rects.push((tab.index, r.rect));
             let (enter, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
             // Enter keeps the name, Esc cancels, a click elsewhere keeps it (as in Sheets). Focus is
             // only asked for while the box doesn't have it, or it could never be left.
@@ -214,30 +223,114 @@ impl Bottom {
         egui::Popup::menu(&arrow).show(|ui| self.tab_menu(app, ui, tab, count));
     }
 
-    /// While a tab is dragged: a blue line where it would land; on release, moves the sheet.
-    fn drop_tab(&mut self, app: &mut SheetApp, ui: &mut Ui) {
-        let Some(from) = self.dragging else { return };
-        let Some(p) = ui.ctx().pointer_interact_pos().or_else(|| ui.ctx().pointer_latest_pos()) else { return };
-        // The last tab (other than the dragged one) whose middle is left of the pointer.
-        let after = self.tab_rects.iter().filter(|(i, r)| *i != from && r.center().x < p.x).max_by(|a, b| a.1.center().x.total_cmp(&b.1.center().x)).copied();
-        let line_x = match after {
-            Some((_, r)) => r.right() + 1.0,
-            None => self.tab_rects.first().map_or(p.x, |(_, r)| r.left() - 1.0),
-        };
-        if let Some((_, first)) = self.tab_rects.first() {
-            ui.painter().vline(line_x, first.y_range(), Stroke::new(2.0, theme::BLUE));
+    /// The tabs, each in its slot. While one is dragged it follows the pointer and the others
+    /// slide aside to show where it will land; on release the sheet moves and the tab springs
+    /// into its new slot.
+    fn strip(&mut self, app: &mut SheetApp, ui: &mut Ui, visible: &[&Tab], active: usize, count: usize) {
+        let gap = ui.spacing().item_spacing.x;
+        let known = visible.iter().all(|t| self.widths.contains_key(&t.name));
+        let ws: Vec<f32> = visible.iter().map(|t| self.widths.get(&t.name).copied().unwrap_or(0.0)).collect();
+        // Natural left edges, from last frame's widths.
+        let start = ui.cursor().min.x;
+        let mut lefts = Vec::with_capacity(visible.len());
+        let mut x = start;
+        for w in &ws {
+            lefts.push(x);
+            x += w + gap;
         }
-        if ui.input(|i| i.pointer.any_released()) {
-            self.dragging = None;
-            let to = match after {
-                Some((t, _)) if t < from => t + 1,
-                Some((t, _)) => t,
-                None => self.tab_rects.iter().map(|(i, _)| *i).min().unwrap_or(0),
+        let pointer = ui.ctx().pointer_latest_pos();
+        let origin = ui.input(|i| i.pointer.press_origin());
+        let from = self.dragging.and_then(|i| visible.iter().position(|t| t.index == i));
+        // While dragging: how far the tab has moved, and the slot it would land in.
+        let drag = match (from, pointer, origin) {
+            (Some(fp), Some(p), Some(o)) if known => {
+                let moved = p.x - o.x;
+                let centre = lefts[fp] + ws[fp] / 2.0 + moved;
+                let to = (0..visible.len()).filter(|k| *k != fp && lefts[*k] + ws[*k] / 2.0 < centre).count();
+                Some((fp, moved, to))
+            }
+            _ => None,
+        };
+        let dt = ui.input(|i| i.stable_dt).clamp(0.001, 0.05);
+        let mut moving = false;
+        let mut deferred = None;
+        for (k, tab) in visible.iter().enumerate() {
+            if !known {
+                self.tab(app, ui, tab, tab.index == active, count);
+                continue;
+            }
+            let w = ws[k];
+            let (slot, _) = ui.allocate_exact_size(vec2(w, 30.0), egui::Sense::hover());
+            // Where this tab should be, relative to its slot.
+            let target = match drag {
+                Some((fp, moved, _)) if k == fp => moved,
+                Some((fp, _, to)) if fp < k && k <= to => -(ws[fp] + gap),
+                Some((fp, _, to)) if to <= k && k < fp => ws[fp] + gap,
+                _ => 0.0,
             };
-            if to != from {
-                app.run_or_alert("sheet.move", json!({ "sheet": from, "to": to }));
+            if let Some((name, left)) = &self.settle
+                && *name == tab.name
+            {
+                self.slide.insert(tab.name.clone(), (left - slot.left(), 0.0));
+                self.settle = None;
+            }
+            let (mut off, mut vel) = self.slide.get(&tab.name).copied().unwrap_or((0.0, 0.0));
+            if drag.is_some_and(|(fp, ..)| fp == k) {
+                (off, vel) = (target, 0.0);
+            } else {
+                vel += (SPRING.0 * (target - off) - SPRING.1 * vel) * dt;
+                off += vel * dt;
+                if (target - off).abs() < 0.3 && vel.abs() < 3.0 {
+                    (off, vel) = (target, 0.0);
+                }
+            }
+            moving |= off != target || vel != 0.0;
+            self.slide.insert(tab.name.clone(), (off, vel));
+            let rect = slot.translate(vec2(off, 0.0));
+            if drag.is_some_and(|(fp, ..)| fp == k) {
+                deferred = Some((tab, rect));
+            } else {
+                self.tab_at(app, ui, tab, rect, active, count);
             }
         }
+        // The dragged tab last, so it sits above the others, lifted by a shadow.
+        if let Some((tab, rect)) = deferred {
+            ui.painter().add(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(50) }.as_shape(rect, 6));
+            ui.painter().rect_filled(rect, 6.0, egui::Color32::WHITE);
+            self.tab_at(app, ui, tab, rect, active, count);
+            moving = true;
+        }
+        // Remember widths (by name) for the next frame's slots.
+        for (i, r) in &self.tab_rects {
+            if let Some(t) = visible.iter().find(|t| t.index == *i) {
+                self.widths.insert(t.name.clone(), r.width());
+            }
+        }
+        if moving {
+            ui.ctx().request_repaint();
+        }
+        if self.dragging.is_some() && ui.input(|i| i.pointer.any_released()) {
+            if let Some((fp, moved, to)) = drag {
+                let tab = visible[fp];
+                // The other tabs already stand where they belong after the move.
+                for t in visible {
+                    self.slide.insert(t.name.clone(), (0.0, 0.0));
+                }
+                self.settle = Some((tab.name.clone(), lefts[fp] + moved));
+                if to != fp {
+                    app.run_or_alert("sheet.move", json!({ "sheet": tab.index, "to": visible[to].index }));
+                }
+            }
+            self.dragging = None;
+        }
+    }
+
+    /// Draws a tab at `rect` (its slot, slid by an offset).
+    fn tab_at(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, rect: egui::Rect, active: usize, count: usize) {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)), |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            self.tab(app, ui, tab, tab.index == active, count);
+        });
     }
 
     fn tab_menu(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, count: usize) {
@@ -258,14 +351,9 @@ impl Bottom {
             ui.close();
         }
         let colour = row("Change colour").right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(theme::TEXT_DIM)));
+        let now = tab.colour.map(|c| u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b()));
         egui::containers::menu::SubMenuButton::from_button(colour).ui(ui, |ui| {
-            if ui.button("Reset").clicked() {
-                app.run_or_alert("sheet.tabColor", json!({ "sheet": s, "color": "none" }));
-                ui.close();
-            }
-            crate::shell::palette_grid(ui, |hex| {
-                app.run_or_alert("sheet.tabColor", json!({ "sheet": s, "color": hex }));
-            });
+            crate::colourpicker::menu_for(app, ui, "sheet.tabColor", json!({ "sheet": s }), "none", now, false);
         });
         if ui.add_enabled(count > 1, row("Hide sheet")).clicked() {
             app.run_or_alert("sheet.hide", json!({ "sheet": s }));

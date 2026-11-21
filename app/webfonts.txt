@@ -13,7 +13,6 @@ Impact|Anton
 Times New Roman|Tinos
 Trebuchet MS|Fira Sans
 Verdana|Noto Sans
-Amatic SC|Amatic SC
 Caveat|Caveat
 Comfortaa|Comfortaa
 EB Garamond|EB Garamond

@@ -414,15 +414,10 @@ fn colour_pick(ui: &mut Ui, id: &str, colour: Option<u32>, icon: &str, tip: &str
     let mut picked = None;
     let r = ui
         .menu_button(crate::icons::icon(icon).map_or_else(|| egui::Atom::from(tip.to_string()), egui::Atom::from), |ui| {
-            if ui.button("Reset").clicked() {
-                picked = Some(None);
-                ui.close();
-            }
-            crate::shell::palette_grid(ui, |h| {
-                picked = u32::from_str_radix(h.trim_start_matches('#'), 16).ok().map(Some);
-            });
-            if picked.is_some() {
-                ui.close();
+            match crate::colourpicker::palette(ui, colour, false, false) {
+                Some(crate::colourpicker::Choice::Reset) => picked = Some(None),
+                Some(crate::colourpicker::Choice::Colour(rgb)) => picked = Some(Some(rgb)),
+                _ => {}
             }
         })
         .response;

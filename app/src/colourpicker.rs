@@ -42,25 +42,34 @@ fn current(app: &SheetApp, cmd: &str) -> Option<u32> {
     crate::cfpanel::rgb_of(c, &d.wb.theme)
 }
 
-/// The menu body (inside the toolbar's colour button).
-pub fn menu(app: &mut SheetApp, ui: &mut Ui, cmd: &str, reset_value: &str) {
+/// What was chosen in a colour menu.
+pub enum Choice {
+    Reset,
+    Colour(u32),
+    /// ⊕: open the custom colour picker.
+    Custom,
+    /// The "Conditional formatting" link.
+    Conditional,
+}
+
+/// The colour menu's body in Google's layout, for any colour choice: Reset, the palette (✓ on
+/// `now`), STANDARD, CUSTOM with ⊕ (when `custom`), and the conditional formatting link (when
+/// `conditional`). Closes the menu when something is chosen.
+pub fn palette(ui: &mut Ui, now: Option<u32>, custom: bool, conditional: bool) -> Option<Choice> {
     // Rows run edge to edge like every menu; the palette sits 16 px in from the sides.
     let width = 10.0 * 19.0 + 9.0 * 4.0 + 2.0 * f32::from(house::MENU_INSET);
     ui.set_width(width);
     crate::shell::menu_style_width(ui, width);
-    let set = |app: &mut SheetApp, rgb: u32| app.run_or_alert(cmd, json!({ "color": format!("#{rgb:06X}") }));
     let text = |t: &str| RichText::new(t.to_string()).size(house::BODY).color(theme::TEXT);
+    let mut choice = None;
     let reset = match crate::icons::icon("format_color_reset") {
         Some(img) => egui::Button::image_and_text(img.fit_to_exact_size(vec2(18.0, 18.0)), text("Reset")),
         None => egui::Button::new(text("Reset")),
     };
     if ui.add(reset.frame_when_inactive(false).min_size(vec2(0.0, house::ROW_HEIGHT))).clicked() {
-        app.run_or_alert(cmd, json!({ "color": reset_value }));
-        ui.close();
+        choice = Some(Choice::Reset);
     }
-    let now = current(app, cmd);
     let mut picked = None;
-    let mut open_picker = false;
     house::menu_inset(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
         for row in PALETTE {
@@ -70,39 +79,64 @@ pub fn menu(app: &mut SheetApp, ui: &mut Ui, cmd: &str, reset_value: &str) {
         house::caps(ui, "Standard");
         swatches(ui, &STANDARD, now, &mut picked);
     });
-    crate::shell::menu_sep_width(ui, width);
-    house::menu_inset(ui, |ui| {
-        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-        house::caps(ui, "Custom");
-        let custom = load_custom();
-        ui.horizontal(|ui| {
-            for c in &custom {
-                if swatch(ui, *c, now == Some(*c)) {
-                    picked = Some(*c);
+    if custom {
+        crate::shell::menu_sep_width(ui, width);
+        house::menu_inset(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+            house::caps(ui, "Custom");
+            ui.horizontal(|ui| {
+                for c in load_custom() {
+                    if swatch(ui, c, now == Some(c)) {
+                        picked = Some(c);
+                    }
                 }
-            }
-            let add = match crate::icons::icon("add_circle") {
-                Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(20.0, 20.0))),
-                None => egui::Button::new("+"),
-            };
-            if ui.add(add.frame(false)).on_hover_text("Custom colour").clicked() {
-                open_picker = true;
-            }
+                let add = match crate::icons::icon("add_circle") {
+                    Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(20.0, 20.0))),
+                    None => egui::Button::new("+"),
+                };
+                if ui.add(add.frame(false)).on_hover_text("Custom colour").clicked() {
+                    choice = Some(Choice::Custom);
+                }
+            });
         });
-    });
-    crate::shell::menu_sep_width(ui, width);
-    if ui.add(egui::Button::new(text("Conditional formatting")).frame_when_inactive(false).min_size(vec2(0.0, house::ROW_HEIGHT))).clicked() {
-        app.open_dialog("manageRules", json!({}));
-        ui.close();
+    }
+    if conditional {
+        crate::shell::menu_sep_width(ui, width);
+        if ui.add(egui::Button::new(text("Conditional formatting")).frame_when_inactive(false).min_size(vec2(0.0, house::ROW_HEIGHT))).clicked() {
+            choice = Some(Choice::Conditional);
+        }
     }
     if let Some(rgb) = picked {
-        set(app, rgb);
+        choice = Some(Choice::Colour(rgb));
+    }
+    if choice.is_some() {
         ui.close();
     }
-    if open_picker {
-        let start = now.unwrap_or(0x000000);
-        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(PICKER_REQUEST), (cmd.to_string(), start)));
-        ui.close();
+    choice
+}
+
+/// The toolbar's text and fill colour menus.
+pub fn menu(app: &mut SheetApp, ui: &mut Ui, cmd: &str, reset_value: &str) {
+    let now = current(app, cmd);
+    menu_for(app, ui, cmd, json!({}), reset_value, now, true);
+}
+
+/// A colour menu that runs `cmd` with `params` plus `"color"` (e.g. a sheet tab's colour).
+pub fn menu_for(app: &mut SheetApp, ui: &mut Ui, cmd: &str, params: serde_json::Value, reset_value: &str, now: Option<u32>, conditional: bool) {
+    let with = |colour: String| {
+        let mut p = params.clone();
+        p["color"] = json!(colour);
+        p
+    };
+    match palette(ui, now, true, conditional) {
+        Some(Choice::Reset) => app.run_or_alert(cmd, with(reset_value.to_string())),
+        Some(Choice::Colour(rgb)) => app.run_or_alert(cmd, with(format!("#{rgb:06X}"))),
+        Some(Choice::Custom) => {
+            let start = now.unwrap_or(0x000000);
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(PICKER_REQUEST), (cmd.to_string(), start, params.to_string())));
+        }
+        Some(Choice::Conditional) => app.open_dialog("manageRules", json!({})),
+        None => {}
     }
 }
 
@@ -172,6 +206,8 @@ pub struct CustomPicker {
 
 struct Picking {
     cmd: String,
+    /// The command's other parameters (the colour is added to them).
+    params: serde_json::Value,
     h: f32,
     s: f32,
     v: f32,
@@ -204,8 +240,9 @@ impl Picking {
 
 impl CustomPicker {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
-        if let Some((cmd, start)) = ctx.data_mut(|m| m.remove_temp::<(String, u32)>(egui::Id::new(PICKER_REQUEST))) {
-            let mut p = Picking { cmd, h: 0.0, s: 0.0, v: 0.0, hex: String::new(), rgb_text: Default::default() };
+        if let Some((cmd, start, params)) = ctx.data_mut(|m| m.remove_temp::<(String, u32, String)>(egui::Id::new(PICKER_REQUEST))) {
+            let params = serde_json::from_str(&params).unwrap_or_else(|_| json!({}));
+            let mut p = Picking { cmd, params, h: 0.0, s: 0.0, v: 0.0, hex: String::new(), rgb_text: Default::default() };
             p.set_rgb(start);
             self.state = Some(p);
         }
@@ -279,7 +316,9 @@ impl CustomPicker {
                 let rgb = p.rgb();
                 let cmd = p.cmd.clone();
                 remember_custom(rgb);
-                app.run_or_alert(&cmd, json!({ "color": format!("#{rgb:06X}") }));
+                let mut params = p.params.clone();
+                params["color"] = json!(format!("#{rgb:06X}"));
+                app.run_or_alert(&cmd, params);
                 self.state = None;
             }
             Some(false) => self.state = None,

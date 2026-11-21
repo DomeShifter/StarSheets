@@ -7,6 +7,11 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- Dragging a sheet tab: the tab follows the pointer, the others slide aside, and it springs into
+  place on release.
+- Clicking anywhere on a note starts editing it.
+- The sheet tab colour menu uses the same colour menu as the toolbar (custom colours included).
+- Removed the Amatic SC font.
 - Drop-downs in the conditional formatting and data validation panels show every choice at once;
   lists that don't fit the window scroll with a solid, always-visible scroll bar.
 - The font menu shows each font's name in that font, scaled so the names look the same size.
