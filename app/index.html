@@ -15,5 +15,19 @@
 <body>
   <canvas id="starsheets_canvas"></canvas>
   <div id="starsheets_loading">Loading StarSheets&hellip;</div>
+  <script>
+    // Sheets shortcuts that Firefox/Chrome also use (Ctrl+D bookmark, Ctrl+B sidebar, Ctrl+U
+    // source, Ctrl+Shift+R hard reload…): stop the browser's action; StarSheets still gets the key.
+    // Copy/cut/paste and tab/window keys (C X V W T N Tab) are left alone.
+    (function () {
+      var plain = "bdfghikoprsuyz", shifted = "acdeflrvz1234567";
+      window.addEventListener("keydown", function (e) {
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+        var k = (e.key || "").toLowerCase();
+        if (e.shiftKey && e.code && /^Digit[1-7]$/.test(e.code)) k = e.code.slice(5);
+        if (k.length === 1 && (e.shiftKey ? shifted : plain).indexOf(k) >= 0) e.preventDefault();
+      }, true);
+    })();
+  </script>
 </body>
 </html>

@@ -84,7 +84,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default() }))
                 }),
             )
             .await;
@@ -108,6 +108,7 @@ struct WebShell {
     shell: crate::shell::Shell,
     bottom: crate::bottom::Bottom,
     link: crate::linkcard::LinkCard,
+    autolink: crate::autolink::AutoLink,
     prefs: crate::prefs::PrefsSync,
 }
 
@@ -164,6 +165,7 @@ impl eframe::App for WebShell {
         self.shell.ui(&mut self.app, ui);
         self.bottom.ui(&mut self.app, ui);
         self.app.ui(ui);
+        self.autolink.after_frame(&mut self.app);
         self.link.ui(&mut self.app, ui);
     }
 }
