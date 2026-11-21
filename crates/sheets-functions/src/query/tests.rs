@@ -74,7 +74,7 @@ fn pivot() {
 #[test]
 fn dates_and_functions() {
     assert_eq!(run("select A where D >= date '2024-04-01' order by D"), rows(&[&["Name"], &["Eve"], &["Fay"], &["Cat"]]));
-    assert_eq!(run("select A, month(D), quarter(D), dayOfWeek(D) where A = 'Eve'"), rows(&[&["Name", "month(Start)", "quarter(Start)", "dayOfWeek(Start)"], &["Eve", "3", "2", "2"]]));
+    assert_eq!(run("select A, month(D), quarter(D), dayOfWeek(D) where A = 'Eve'"), rows(&[&["Name", "month(Start)", "quarter(Start)", "dayofweek(Start)"], &["Eve", "3", "2", "2"]]));
     assert_eq!(run("select upper(A), C * 2 where A = 'Bob'"), rows(&[&["upper(Name)", "Salary*2"], &["BOB", "6000"]]));
 }
 

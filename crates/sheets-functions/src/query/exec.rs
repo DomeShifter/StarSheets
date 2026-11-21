@@ -268,14 +268,9 @@ impl Cx<'_> {
     }
 }
 
-/// Google's spelling of a function in a label.
+/// A function's name in a label: Google writes them in lower case (`dayofweek(Start)`).
 fn func_name(n: &str) -> &str {
-    match n {
-        "dayofweek" => "dayOfWeek",
-        "datediff" => "dateDiff",
-        "todate" => "toDate",
-        other => other,
-    }
+    n
 }
 
 fn aggregate(a: Agg, vals: Vec<V>) -> V {
