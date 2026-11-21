@@ -508,10 +508,16 @@ fn describe(d: &Draft) -> String {
     }
 }
 
+/// Lower-cases only the first letter (keeps item names and values as typed).
+fn lower_first(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_lowercase().chain(c).collect()).unwrap_or_default()
+}
+
 fn default_help(d: &Draft) -> String {
     match d.crit() {
         Crit::Dropdown | Crit::DropdownRange => "Choose an item from the list".to_string(),
-        _ => format!("Enter a value: {}", describe(d).to_lowercase()),
+        _ => format!("Enter a value: {}", lower_first(&describe(d))),
     }
 }
 
@@ -602,7 +608,7 @@ fn commands(d: &Draft) -> Result<Vec<(&'static str, Json)>, String> {
         p["inputMessage"] = json!(if d.help.trim().is_empty() { default_help(d) } else { d.help.trim().to_string() });
     }
     p["errorTitle"] = json!("There was a problem");
-    p["errorMessage"] = json!(format!("This cell's contents break its rule. Input must be: {}.", describe(d).to_lowercase()));
+    p["errorMessage"] = json!(format!("This cell's contents break its rule. Input must be: {}.", lower_first(&describe(d))));
     let mut out = vec![("data.validation", p)];
     out.extend(extra);
     Ok(out)
