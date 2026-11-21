@@ -35,7 +35,7 @@ const TIME_FORMATS: &[&str] = &["hh:mm:ss", "hh:mm", "h:mm:ss AM/PM", "h:mm AM/P
 /// Default number formats ("" = Automatic, as typed).
 const NUMBER_FORMATS: &[(&str, &str)] = &[("Automatic", ""), ("1,000.12", "#,##0.00"), ("1000.12", "0.00"), ("1,000", "#,##0"), ("1000", "0")];
 /// The example shown for each choice: 26 September 2008, 15:59:00 (Google's sample).
-const SAMPLE: f64 = 39_717.666_e0;
+const SAMPLE: f64 = 39_717.665_972_222_2;
 
 #[derive(Clone, Serialize, Deserialize, PartialEq)]
 pub struct Prefs {

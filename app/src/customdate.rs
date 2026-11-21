@@ -13,7 +13,7 @@ use crate::theme;
 /// Asks for the window (the menu sets it in egui's memory).
 pub const REQUEST: &str = "starsheets_custom_date";
 /// Google's sample: 5 August 1930, 15:59:00.
-const SAMPLE: f64 = 11_175.666_e0;
+const SAMPLE: f64 = 11_175.665_972_222_2;
 
 /// A kind of part: name, and its variants (format code, what it looks like).
 const KINDS: &[(&str, &[(&str, &str)])] = &[
