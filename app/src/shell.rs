@@ -215,7 +215,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             ),
             Sub("Merge cells", &[Cmd("Merge all", "home.mergeCells", ""), Cmd("Merge horizontally", "home.mergeAcross", ""), Cmd("Unmerge", "home.unmergeCells", "")]),
             Cmd("Convert to table", "insert.table", "Ctrl+Alt+T"),
-            Cmd("Conditional formatting", "home.conditionalFormat", ""),
+            Cmd("Conditional formatting", "ui:manageRules", ""),
             Sep,
             Cmd("Clear formatting", "edit.clearFormats", "Ctrl+\\"),
         ],
@@ -926,7 +926,12 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
         match item {
             Cmd(label, id, keys) => {
                 if ui.add_sized([width, 32.0], menu_row(label, keys, with_icons)).clicked() {
-                    app.run_or_alert(id, json!({}));
+                    // "ui:<dialog>" opens one of GridCraft's dialogs (some, like conditional
+                    // formatting, are then shown as our own side panel).
+                    match id.strip_prefix("ui:") {
+                        Some(dialog) => app.open_dialog(dialog, json!({})),
+                        None => app.run_or_alert(id, json!({})),
+                    }
                     ui.close();
                 }
             }
@@ -952,7 +957,9 @@ mod tests {
     fn ids(items: &[Item], out: &mut Vec<&'static str>) {
         for item in items {
             match item {
-                Cmd(_, id, _) | CmdWith(_, id, _, _) => out.push(id),
+                // "ui:" entries open a dialog, not a command.
+                Cmd(_, id, _) | CmdWith(_, id, _, _) if !id.starts_with("ui:") => out.push(id),
+                Cmd(..) | CmdWith(..) => {}
                 Sub(_, sub) => ids(sub, out),
                 Sep => {}
             }

@@ -1,5 +1,5 @@
 diff --git a/crates/ui-egui/src/grid/menus.rs b/crates/ui-egui/src/grid/menus.rs
-index e130982..b3abe1e 100644
+index e130982..c6bc932 100644
 --- a/crates/ui-egui/src/grid/menus.rs
 +++ b/crates/ui-egui/src/grid/menus.rs
 @@ -126,8 +126,9 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
@@ -24,13 +24,14 @@ index e130982..b3abe1e 100644
                      ("Insert note", "ui:newNote"),
 +                    ("Drop-down", "data.validation"),
                      ("-", ""),
-                     ("Conditional formatting", "home.conditionalFormat"),
+-                    ("Conditional formatting", "home.conditionalFormat"),
 -                    ("Data validation", "data.validation"),
++                    ("Conditional formatting", "ui:manageRules"),
 +                    ("Filter by cell value", "ui:filterValue"),
                      ("Define named range", "ui:defineName"),
                  ]
              } else { vec![
-@@ -208,10 +209,16 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
+@@ -208,13 +209,20 @@ pub(super) fn context_menu(app: &mut SheetApp, ui: &mut egui::Ui) {
              let lang = crate::i18n::current(ui.ctx());
              for (label, id) in items {
                  if label == "-" {
@@ -49,7 +50,11 @@ index e130982..b3abe1e 100644
                      close = true;
                      match id {
                          "ui:pasteSpecial" => app.open_dialog("pasteSpecial", json!({})),
-@@ -521,10 +528,56 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
++                        "ui:manageRules" => app.open_dialog("manageRules", json!({})),
+                         "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
+                         "ui:insertCells" => app.open_dialog("insertCells", json!({})),
+                         "ui:deleteCells" => app.open_dialog("deleteCells", json!({})),
+@@ -521,10 +529,56 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
      let Some((at, rows)) = app.grid.header_menu else { return };
      let mut close = false;
      let response = egui::Area::new(egui::Id::unique("header_menu")).fixed_pos(at).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
@@ -78,7 +83,7 @@ index e130982..b3abe1e 100644
 +                    ("-", ""),
 +                    ("Create a filter", "data.filter"),
 +                    ("-", ""),
-+                    ("Conditional formatting", "home.conditionalFormat"),
++                    ("Conditional formatting", "ui:manageRules"),
 +                    ("Data validation", "data.validation"),
 +                ]
 +            } else if sheets {
@@ -101,14 +106,14 @@ index e130982..b3abe1e 100644
 +                    ("Sort sheet A to Z", "data.sortAscending"),
 +                    ("Sort sheet Z to A", "data.sortDescending"),
 +                    ("-", ""),
-+                    ("Conditional formatting", "home.conditionalFormat"),
++                    ("Conditional formatting", "ui:manageRules"),
 +                    ("Data validation", "data.validation"),
 +                ]
 +            } else if rows {
                  vec![
                      ("Cut", "edit.cut"),
                      ("Copy", "edit.copy"),
-@@ -560,18 +613,27 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
+@@ -560,18 +614,28 @@ pub(super) fn header_menu(app: &mut SheetApp, ui: &mut egui::Ui, was_open: bool)
                      ("Group", "data.group"),
                  ]
              };
@@ -134,12 +139,13 @@ index e130982..b3abe1e 100644
                      close = true;
                      match id {
 +                        "ui:pasteSpecial" => app.open_dialog("pasteSpecial", json!({})),
++                        "ui:manageRules" => app.open_dialog("manageRules", json!({})),
 +                        "ui:insertBelow" => insert_after(app, true),
 +                        "ui:insertRight" => insert_after(app, false),
                          "ui:insertPaste" => app.open_dialog("insertPaste", json!({})),
                          "ui:rowHeight" => app.open_dialog("rowHeight", json!({})),
                          "ui:formatCells" => app.open_dialog("formatCells", json!({})),
-@@ -610,3 +672,56 @@ pub(super) fn is_checkbox(sh: &Sheet, app: &SheetApp) -> bool {
+@@ -610,3 +674,56 @@ pub(super) fn is_checkbox(sh: &Sheet, app: &SheetApp) -> bool {
      let Some(d) = app.session.active() else { return false };
      d.wb.styles.get(sh.style_id(d.selection.active)).num_fmt.as_str() == "checkbox"
  }
