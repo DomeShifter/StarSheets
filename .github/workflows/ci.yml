@@ -37,6 +37,8 @@ jobs:
         run: |
           curl -sSfL "https://github.com/trunk-rs/trunk/releases/download/${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" | tar xz -C /usr/local/bin trunk
           trunk --version
+      - name: Fetch web fonts (Google Fonts, OFL/Apache)
+        run: python3 scripts/fetch-fonts.py
       - name: Build
         working-directory: app
         run: trunk build --release

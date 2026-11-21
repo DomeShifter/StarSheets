@@ -26,6 +26,7 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0018-ui-egui-sheets-dropdown-look | With `sheets_marks`: a grey ▾ inside every drop-down cell (click opens the list), and a red corner on cells that break a "warning" validation rule | to offer as a PR |
 | 0019-ui-egui-sheets-filter-menu | With a host menu look: Sheets' filter menu (Sort A to Z / Z to A, Filter by values with Select all / Clear, Displaying N, ticked list, Cancel / OK); with `sheets_marks`: Sheets' green filter icon in headers | to offer as a PR |
 | 0020-ui-egui-sheets-formula-bar-press-edits | With `sheets_formula_bar`: a press in the formula bar starts editing with the caret where it was pressed; the shown text isn't selectable (a selection there made Ctrl+C copy the whole cell) | to offer as a PR |
+| 0021-ui-egui-web-font-faces | `fonts::add_web_face(family, bold, italic, bytes)`: a web host adds font faces at run time (a web build has no installed fonts); workbook fonts rebind when one arrives | to offer as a PR |
 | 0002-ui-egui-theme-token-override | `Tokens::install` / `Tokens::for_mode`: a host can replace the colour palettes | to offer as a PR |
 | 0003-ui-egui-chrome-sheet-tabs-switch | `Chrome.sheet_tabs: bool`: a host can hide the sheet tabs and status bar | to offer as a PR |
 | 0004-ui-egui-sheets-cell-keys | `UiState.sheets_keys`: Enter edits (and is consumed so the new editor doesn't commit at once), Backspace only clears, no Enter-paste, static copy outline | to offer as a PR (as an option) |

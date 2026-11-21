@@ -49,6 +49,7 @@
 - [x] Filter menu like Sheets (patch 0019); later: sort/filter by colour, filter by condition
 - [x] Conditional formatting date choices (today, tomorrow, yesterday, past week/month/year; before/after one week/month/year ago)
 - [x] Importing into a sheet that has data opens the file in a new tab
+- [x] Fonts: 28 free fonts (look-alikes for Arial, Calibri, Cambria, Comic Sans, Courier New, Georgia, Impact, Times New Roman, Trebuchet, Verdana, plus Sheets' Google fonts), fetched on first use (patch 0021, app/webfonts.txt)
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
 

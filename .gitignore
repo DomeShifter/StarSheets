@@ -1,4 +1,5 @@
 /upstream/
 /target/
 /dist/
+/app/webfonts/
 .DS_Store

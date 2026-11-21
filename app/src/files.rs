@@ -513,6 +513,11 @@ fn send(
     });
 }
 
+/// A plain GET (used for the web fonts).
+pub(crate) async fn get_bytes(url: &str) -> Result<(u16, web_sys::Headers, Vec<u8>), String> {
+    fetch(Method::Get, url, None, None).await
+}
+
 async fn fetch(method: Method, url: &str, body: Option<Vec<u8>>, if_match: Option<String>) -> Result<(u16, web_sys::Headers, Vec<u8>), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let init = web_sys::RequestInit::new();
