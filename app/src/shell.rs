@@ -46,7 +46,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Version history", "panel:versions", ""),
             Sep,
             Cmd("Details", "file.properties", ""),
-            Cmd("Settings", "file.options", ""),
+            Cmd("Settings", "panel:settings", ""),
             Sep,
             Cmd("Print", "file.print", "Ctrl+P"),
         ],
@@ -161,9 +161,9 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     CmdWith("Currency", "home.numberFormat", "£1,000.12", r##"{"code":"£#,##0.00"}"##),
                     CmdWith("Currency rounded", "home.numberFormat", "£1,000", r##"{"code":"£#,##0"}"##),
                     Sep,
-                    CmdWith("Date", "home.numberFormat", "26/09/2008", r#"{"code":"dd/mm/yyyy"}"#),
-                    CmdWith("Time", "home.numberFormat", "15:59:00", r#"{"code":"hh:mm:ss"}"#),
-                    CmdWith("Date time", "home.numberFormat", "26/09/2008 15:59:00", r#"{"code":"dd/mm/yyyy hh:mm:ss"}"#),
+                    CmdWith("Date", "home.numberFormat", "26/09/2008", r#"{"code":"@date"}"#),
+                    CmdWith("Time", "home.numberFormat", "15:59:00", r#"{"code":"@time"}"#),
+                    CmdWith("Date time", "home.numberFormat", "26/09/2008 15:59:00", r#"{"code":"@datetime"}"#),
                     CmdWith("Duration", "home.numberFormat", "24:01:00", r#"{"code":"[h]:mm:ss"}"#),
                     Sep,
                     Cmd("Custom number format", "home.formatCells", ""),
@@ -337,9 +337,9 @@ const NUMBER_FORMATS: &[(&str, &str, &str)] = &[
     ("Currency|£1,000.12", "home.numberFormat", r##"{"code":"£#,##0.00"}"##),
     ("Currency rounded|£1,000", "home.numberFormat", r##"{"code":"£#,##0"}"##),
     ("-", "", ""),
-    ("Date|26/09/2008", "home.numberFormat", r#"{"code":"dd/mm/yyyy"}"#),
-    ("Time|15:59:00", "home.numberFormat", r#"{"code":"hh:mm:ss"}"#),
-    ("Date time|26/09/2008 15:59:00", "home.numberFormat", r#"{"code":"dd/mm/yyyy hh:mm:ss"}"#),
+    ("Date|26/09/2008", "home.numberFormat", r#"{"code":"@date"}"#),
+    ("Time|15:59:00", "home.numberFormat", r#"{"code":"@time"}"#),
+    ("Date time|26/09/2008 15:59:00", "home.numberFormat", r#"{"code":"@datetime"}"#),
     ("Duration|24:01:00", "home.numberFormat", r#"{"code":"[h]:mm:ss"}"#),
     ("-", "", ""),
     ("Custom number format", "home.formatCells", "{}"),
@@ -457,8 +457,12 @@ fn current(app: &SheetApp) -> Current {
     }
 }
 
+/// A menu entry's parameters; `@date`, `@time` and `@datetime` become the default formats from
+/// File › Settings.
 fn params(text: &str) -> serde_json::Value {
-    serde_json::from_str(text).unwrap_or_else(|_| json!({}))
+    let (date, time, datetime) = crate::settings::default_codes();
+    let text = text.replace("\"@datetime\"", &format!("{datetime:?}")).replace("\"@date\"", &format!("{date:?}")).replace("\"@time\"", &format!("{time:?}"));
+    serde_json::from_str(&text).unwrap_or_else(|_| json!({}))
 }
 
 /// Sheets-style flat buttons for the menu bar and toolbar: no border or fill at rest, a soft
@@ -974,7 +978,9 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                     // "ui:<dialog>" opens one of GridCraft's dialogs (some, like conditional
                     // formatting, are then shown as our own side panel).
                     // "panel:dropdown" opens the data-validation panel on a new drop-down.
-                    if *id == "panel:note" {
+                    if *id == "panel:settings" {
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::settings::REQUEST), true));
+                    } else if *id == "panel:note" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::notes::REQUEST), true));
                     } else if *id == "panel:dropdown" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
@@ -992,7 +998,7 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
             }
             CmdWith(label, id, keys, params) => {
                 if ui.add_sized([width, 32.0], menu_row(label, keys, with_icons)).clicked() {
-                    app.run_or_alert(id, serde_json::from_str(params).unwrap_or_else(|_| json!({})));
+                    app.run_or_alert(id, self::params(params));
                     ui.close();
                 }
             }

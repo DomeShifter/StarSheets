@@ -19,6 +19,12 @@ new features and the last one for fixes.
 - A calculation preview while you type a formula, as in Google Sheets: a small bubble shows the
   result so far, even for an unfinished formula, or of just the part you select.
 
+- **File › Settings**: your locale (how typed dates are read: 05/08 is 5 August in the UK), default
+  date, time and number formats with examples, and the display language for dialogs. The default
+  locale is now English (United Kingdom).
+- Conditional formatting: a custom formula over whole columns, like Google's `=$A:$A=12` on
+  A1:F13, now colours whole rows.
+
 ### Fixed
 - The screen no longer flashes when you change a cell's font size.
 - Copied cells no longer get an outline.

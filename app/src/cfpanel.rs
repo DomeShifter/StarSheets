@@ -707,6 +707,28 @@ fn top_left(range: &str) -> Option<String> {
     Some(gridcraft_engine::core::RangeRef::parse(range.split(',').next()?.trim())?.start.a1())
 }
 
+/// Google Sheets reads a whole column in a custom formula (`=$A:$A=12`) as that column's cell in
+/// each row of the range, so one rule can colour whole rows; GridCraft (like Excel) wants the
+/// first row's cell (`=$A1=12`). `top_row` is the range's first row (1-based). Text in quotes
+/// is left alone.
+pub(crate) fn sheets_rows(formula: &str, top_row: u32) -> String {
+    let re = regex::Regex::new(r"(\$?)([A-Za-z]{1,3}):(\$?)([A-Za-z]{1,3})\b").expect("valid pattern");
+    formula
+        .split('"')
+        .enumerate()
+        .map(|(i, part)| {
+            if i % 2 == 1 {
+                return part.to_string();
+            }
+            re.replace_all(part, |c: &regex::Captures| {
+                if c[2].eq_ignore_ascii_case(&c[4]) { format!("{}{}{top_row}", &c[1], c[2].to_ascii_uppercase()) } else { c[0].to_string() }
+            })
+            .into_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\"")
+}
+
 pub(crate) fn date_number(s: &str) -> Option<i64> {
     let parts: Vec<i64> = s.trim().split(['/', '-', '.']).map(|x| x.trim().parse().ok()).collect::<Option<_>>()?;
     let [d, m, y] = parts[..] else { return None };
@@ -782,7 +804,10 @@ fn rule_json(d: &Draft) -> Result<Json, String> {
         }
         "cellIs" if boxes == 2 => json!({ "type": "cellIs", "operator": op, "value": v1, "value2": d.value2.trim(), "style": style }),
         "cellIs" => json!({ "type": "cellIs", "operator": op, "value": v1, "style": style }),
-        "expression" => json!({ "type": "expression", "formula": v1, "style": style }),
+        "expression" => {
+            let row = gridcraft_engine::core::RangeRef::parse(d.range.split(',').next().unwrap_or("").trim()).map_or(1, |r| r.start.row + 1);
+            json!({ "type": "expression", "formula": sheets_rows(&v1, row), "style": style })
+        }
         "blanks" | "noBlanks" => json!({ "type": kind, "style": style }),
         _ => json!({ "type": kind, "text": v1, "style": style }),
     };
@@ -947,6 +972,32 @@ mod tests {
                 assert_eq!((back.condition, back.when), (ci, w), "{op} {w}");
             }
         }
+    }
+
+    #[test]
+    fn whole_columns_mean_this_row() {
+        assert_eq!(sheets_rows("=$A:$A=12", 1), "=$A1=12");
+        assert_eq!(sheets_rows("=AND($B:$B>3, C:C=\"x:y\")", 4), "=AND($B4>3, C4=\"x:y\")");
+        assert_eq!(sheets_rows("=SUM(A:C)>0", 1), "=SUM(A:C)>0");
+    }
+
+    #[test]
+    fn whole_rows_light_up_from_one_column() {
+        let mut s = gridcraft_engine::Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        for (c, v) in [("A1", "45"), ("A4", "12"), ("A5", "45"), ("A10", "12")] {
+            s.execute("cell.set", json!({"cell": c, "input": v})).unwrap();
+        }
+        let mut d = Draft::new("A1:F13".into());
+        d.condition = 18;
+        d.value1 = "=$A:$A=12".into();
+        s.execute("home.conditionalFormat", json!({"range": "A1:F13", "rule": rule_json(&d).unwrap()})).unwrap();
+        let doc = s.active().unwrap();
+        let sh = doc.wb.active().unwrap();
+        let hit = |a1: &str| gridcraft_engine::calc::evaluate(&doc.wb, 0, gridcraft_engine::core::CellRef::parse(a1).unwrap(), &sheets_rows("=$A:$A=12", 1).replace("$A1", &format!("$A{}", &a1[1..])));
+        assert_eq!(hit("F4"), gridcraft_engine::core::Value::Bool(true));
+        assert_eq!(hit("C5"), gridcraft_engine::core::Value::Bool(false));
+        assert!(matches!(&sh.cond_formats[0].rule, gridcraft_engine::model::CfRule::Expression { formula, .. } if formula.contains("$A1")));
     }
 
     #[test]

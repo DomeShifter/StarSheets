@@ -22,6 +22,7 @@ mod linkcard;
 mod merge;
 mod notes;
 mod sheets_formulas;
+mod settings;
 mod shell;
 mod theme;
 #[cfg(target_arch = "wasm32")]

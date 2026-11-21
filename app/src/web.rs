@@ -81,11 +81,12 @@ pub fn start() {
                     app.ui.animations = false;
                     app.ui.sheets_keys = true;
                     app.ui.menu_look = Some(crate::shell::MENU_LOOK);
+                    crate::settings::Prefs::load().apply(&mut app);
                     let mut prefs = crate::prefs::PrefsSync::new(stored_ui, stored_prefs);
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default() }))
                 }),
             )
             .await;
@@ -113,6 +114,7 @@ struct WebShell {
     cf: crate::cfpanel::CfPanel,
     dv: crate::dvpanel::DvPanel,
     dates: crate::datepicker::DatePicker,
+    settings: crate::settings::SettingsWindow,
     notes: crate::notes::Notes,
     calc: crate::calcpreview::CalcPreview,
     merge: crate::merge::MergeGuard,
@@ -205,6 +207,7 @@ impl eframe::App for WebShell {
         self.dates.ui(&mut self.app, ui);
         self.notes.intercept(&mut self.app, &ctx);
         self.notes.ui(&mut self.app, ui);
+        self.settings.ui(&mut self.app, &ctx);
         self.calc.ui(&self.app, ui);
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);
