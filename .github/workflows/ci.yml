@@ -46,7 +46,7 @@ jobs:
         run: |
           printf '{"commit":"%s","upstream":"%s","built":"%s"}\n' "$GITHUB_SHA" "$(sed -n 's/^tag = "\(.*\)"/\1/p' upstream.pin)" "$(date -u +%FT%TZ)" > dist/build.json
           du -sh dist; ls -la dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: starsheets-web
           path: dist/
