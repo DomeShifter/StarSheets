@@ -192,7 +192,39 @@ impl eframe::App for WebShell {
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
         self.link.ui(&mut self.app, ui);
+        copy_without_https(ui.ctx());
     }
+}
+
+/// On plain http eframe can't copy (it needs a secure context): take this frame's copied text
+/// and give it to the page's copy bridge (`__ssCopy` in index.html) instead.
+fn copy_without_https(ctx: &egui::Context) {
+    if web_sys::window().is_none_or(|w| w.is_secure_context()) {
+        return;
+    }
+    let mut texts = Vec::new();
+    ctx.output_mut(|o| {
+        o.commands.retain(|c| match c {
+            egui::OutputCommand::CopyText(t) => {
+                texts.push(t.clone());
+                false
+            }
+            _ => true,
+        });
+    });
+    if let Some(t) = texts.pop() {
+        page_copy(&t, None);
+    }
+}
+
+/// Calls the page's copy bridge; true when the text reached the clipboard.
+fn page_copy(text: &str, html: Option<&str>) -> bool {
+    let Some(w) = web_sys::window() else { return false };
+    let Ok(f) = js_sys::Reflect::get(&w, &"__ssCopy".into()).and_then(|f| f.dyn_into::<js_sys::Function>().map_err(JsValue::from)) else {
+        return false;
+    };
+    let html = html.map_or(JsValue::UNDEFINED, JsValue::from_str);
+    f.call2(&JsValue::NULL, &JsValue::from_str(text), &html).is_ok_and(|v| v.is_truthy())
 }
 
 fn services(inbox: Inbox, ctx: egui::Context) -> Services {
@@ -256,6 +288,10 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
 fn copy_html(html: &str, text: &str) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
+    // Plain http: no clipboard API, but the page's copy bridge can still copy (see index.html).
+    if !window.is_secure_context() {
+        return if page_copy(text, Some(html)) { Ok(()) } else { Err("the browser refused to copy (plain http)".into()) };
+    }
     let clipboard = window.navigator().clipboard();
     if clipboard.is_undefined() || clipboard.is_null() {
         return Err("browser clipboard is unavailable (a secure context is required)".into());
