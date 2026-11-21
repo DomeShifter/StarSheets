@@ -73,6 +73,11 @@ impl LinkCard {
 
 /// The on-screen bottom-left corner of `cell` on the active sheet, from GridCraft's own geometry.
 pub(crate) fn cell_bottom_left(app: &SheetApp, cell: CellRef) -> Option<egui::Pos2> {
+    cell_rect(app, cell).map(|r| r.left_bottom())
+}
+
+/// Where a cell is on screen.
+pub(crate) fn cell_rect(app: &SheetApp, cell: CellRef) -> Option<egui::Rect> {
     let cells = app.grid.cells_rect?;
     let sh = app.session.active()?.wb.active()?;
     let scroll = app.view().scroll;
@@ -80,5 +85,5 @@ pub(crate) fn cell_bottom_left(app: &SheetApp, cell: CellRef) -> Option<egui::Po
     let probe = gridcraft_ui_egui::grid::Geo::new(sh, cells, scroll);
     let grid = cells.translate(cells.min - probe.cells.min);
     let geo = gridcraft_ui_egui::grid::Geo::new(sh, grid, scroll);
-    Some(geo.screen_cell_rect(sh, cell).left_bottom())
+    Some(geo.screen_cell_rect(sh, cell))
 }

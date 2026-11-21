@@ -6,6 +6,7 @@
 #[cfg(target_arch = "wasm32")]
 mod prefs;
 mod autolink;
+mod calcpreview;
 mod bottom;
 mod cfpanel;
 mod datepicker;

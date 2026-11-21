@@ -10,6 +10,8 @@ new features and the last one for fixes.
 - Format › Merge cells › **Merge vertically**, and Google's "Heads up!" warning when merging would
   drop values (with "Don't show this again for 5 minutes"). Merge options that can't apply to the
   selection are greyed out.
+- A calculation preview while you type a formula, as in Google Sheets: a small bubble shows the
+  result so far, even for an unfinished formula, or of just the part you select.
 
 ### Fixed
 - The screen no longer flashes when you change a cell's font size.

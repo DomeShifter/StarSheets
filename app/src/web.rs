@@ -85,7 +85,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default() }))
                 }),
             )
             .await;
@@ -113,6 +113,7 @@ struct WebShell {
     cf: crate::cfpanel::CfPanel,
     dv: crate::dvpanel::DvPanel,
     dates: crate::datepicker::DatePicker,
+    calc: crate::calcpreview::CalcPreview,
     merge: crate::merge::MergeGuard,
     files: crate::files::Files,
     webfonts: crate::fonts::WebFontLoader,
@@ -201,6 +202,7 @@ impl eframe::App for WebShell {
         self.autolink.after_frame(&mut self.app);
         self.link.ui(&mut self.app, ui);
         self.dates.ui(&mut self.app, ui);
+        self.calc.ui(&self.app, ui);
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);
         copy_without_https(ui.ctx());
