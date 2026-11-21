@@ -1,44 +1,90 @@
 # StarSheets
 
-A spreadsheet for the web that looks and works like Google Sheets. It's free, open source and self-hostable.
+A spreadsheet that looks and feels like Google Sheets, that you can run yourself.
 
-StarSheets is built on the engine and grid of [GridCraft](https://github.com/storytold/gridcraft), a fast Rust spreadsheet by the ArtCraft team. GridCraft aims to match Microsoft Excel. StarSheets keeps GridCraft's calculation engine, file handling and grid, and replaces the Excel-style screen with a Google Sheets-style one: menu bar, a one-row toolbar and side panels. Saving like Google Drive and sharing come in later phases.
+![StarSheets showing a sales table with charts](docs/images/starsheets.png)
 
-> **Status: phase 0 (test build).** Not ready for real work. See [ROADMAP.md](ROADMAP.md).
+I wanted the spreadsheet I'm used to (Google Sheets' menus, shortcuts and side panels) without my
+files living in someone else's cloud. StarSheets is my attempt at that: it runs in your browser,
+your spreadsheets are ordinary `.xlsx` files in a folder you choose, and it's free and open source.
 
-StarSheets is not affiliated with Google or with the ArtCraft team. "Google Sheets" is a trademark of Google LLC and is mentioned only to describe the look we aim for.
+It stands on the shoulders of [GridCraft](https://github.com/storytold/gridcraft), a fast
+spreadsheet engine written in Rust by the ArtCraft team. GridCraft does the hard parts
+(formulas, files, the grid, charts); StarSheets puts a Google Sheets-style face on it and adds
+the things Google Sheets users reach for.
 
-## How it's built
+> **Status: early preview.** It's usable and I use it myself, but there are rough edges and
+> missing pieces. Please don't trust it with anything you can't afford to lose yet, and do
+> [tell me what breaks](../../issues/new/choose).
+
+## What you get
+
+- **Google Sheets' layout and habits**: menu bar, one-row toolbar, side panels, right-click menus,
+  sheet tabs, Google's sizes, fonts and keyboard shortcuts.
+- **Conditional formatting and data validation** in Google-style side panels, previewed live as
+  you choose. Drop-down lists with coloured items, date pickers, colour scales.
+- **Google Sheets formulas** on top of GridCraft's hundreds of Excel-compatible ones: `QUERY`,
+  `ARRAYFORMULA` and `{…}` arrays.
+- **Files without a Save button**: every change saves itself a moment later, into plain `.xlsx`
+  files. A file window with folders, copy and paste, drag and drop, a bin and version history.
+- **Excel files open well**, because GridCraft was built to match Excel.
+
+What's not here (yet): working on one sheet together with others in real time, sharing links,
+comments with mentions, add-ons, and desktop apps. See the [roadmap](ROADMAP.md).
+
+## Try it with Docker
+
+```sh
+docker run -d -p 8080:8080 -v starsheets:/data \
+  -e STARSHEETS_PASSWORD=choose-a-password \
+  ghcr.io/domeshifter/starsheets:latest
+```
+
+Then open <http://localhost:8080>. Your spreadsheets are kept as `.xlsx` files in the `starsheets`
+volume. There's a ready-made [compose file](docker/compose.yml) too.
+
+- Without `STARSHEETS_PASSWORD`, a random password is made on first start and printed in the
+  container's log (`docker logs …`).
+- On a private network you trust, `STARSHEETS_AUTH=off` turns the login off.
+- Copy and paste work best over HTTPS (browsers limit the clipboard on plain `http://`), so a
+  reverse proxy with a certificate is a good idea if you use it from other machines.
+
+## Build it yourself
+
+You need Rust (stable) with the `wasm32-unknown-unknown` target, [trunk](https://trunkrs.dev) and
+Python 3.
+
+```sh
+scripts/fetch-upstream.sh          # GridCraft at the pinned release, with StarSheets' patches
+python3 scripts/fetch-fonts.py     # the free fonts in the font menu
+cd app && trunk build --release    # the app, in dist/
+```
+
+Serve `dist/` with any web server, or run `server/files.py` with `SITE=dist` to get the app and
+the file storage together. More in [docs/deploy.md](docs/deploy.md) and
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+## How it fits together
 
 | Part | Where it comes from |
 |---|---|
-| Formula engine, xlsx/csv import and export, charts, grid, formula bar, dialogs | GridCraft crates, pinned to one release (`upstream.pin`), with a few small patches (`patches/`) |
-| Title row, menu bar, toolbar, colours | StarSheets (`app/src/shell.rs`, `app/src/theme.rs`) |
-| Web runner | adapted from GridCraft's web app (`app/src/web.rs`) |
+| Formula engine, xlsx/csv import and export, grid, charts | [GridCraft](https://github.com/storytold/gridcraft), pinned to one release, with small patches (`patches/`, listed in [docs/upstream.md](docs/upstream.md)) |
+| Google Sheets look: title, menus, toolbar, side panels | `app/` |
+| Google-only functions (QUERY) | `crates/sheets-functions` |
+| File storage, login | `server/files.py` |
 
-Everything runs in the browser through WebAssembly. Details: [docs/architecture.md](docs/architecture.md).
+Design choices and the reasons for them are in [docs/decisions.md](docs/decisions.md).
 
-## Build
+## Thanks
 
-You need Rust (stable) with the `wasm32-unknown-unknown` target, and [trunk](https://trunkrs.dev).
-
-```sh
-scripts/fetch-upstream.sh        # GridCraft at the pinned tag, patches applied
-cd app && trunk build --release  # output in dist/
-```
-
-CI builds every push. The finished site is attached to each run as the `starsheets-web` artifact.
-
-## Documents
-
-| File | What |
-|---|---|
-| [ROADMAP.md](ROADMAP.md) | Phases and progress |
-| [docs/sheets-reference.md](docs/sheets-reference.md) | The Google Sheets layout, menus, toolbar, shortcuts and features we emulate |
-| [docs/decisions.md](docs/decisions.md) | Each design choice and why |
-| [docs/upstream.md](docs/upstream.md) | Which GridCraft release we use, how to update it, our patches |
-| [docs/architecture.md](docs/architecture.md) | How the code fits together |
+To the ArtCraft team for GridCraft, to the [egui](https://github.com/emilk/egui) project, and to
+the designers of the fonts StarSheets uses (Roboto and the Google Fonts families listed in each
+build's `webfonts/NOTICE.txt`, all under the SIL Open Font License) and of Google's Material Symbols icons.
 
 ## Licence
 
-MIT OR Apache-2.0, the same as GridCraft. See [LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE) and [NOTICE](NOTICE).
+MIT or Apache-2.0, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE),
+[NOTICE](NOTICE)).
+
+StarSheets is not affiliated with or endorsed by Google or the ArtCraft team. "Google Sheets" is a
+trademark of Google LLC, mentioned only to describe the look StarSheets aims for.

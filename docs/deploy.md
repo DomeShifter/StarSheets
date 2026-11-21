@@ -1,9 +1,24 @@
-# Deploying
+# Running StarSheets on a server
 
-StarSheets is a static site: serve the `dist/` folder with any web server.
+## The easy way: Docker
 
-- WebAssembly must be served as `application/wasm` and should be gzip-compressed.
-- Hashed files (`*-<hash>.js`, `*_bg.wasm`) can be cached forever; `index.html` should not be cached.
-- Use HTTPS (or localhost): the browser's clipboard and file APIs need a secure context, and WebGPU is only offered there (otherwise WebGL2 is used).
+See the README: `ghcr.io/domeshifter/starsheets` holds the app and its file server in one
+container (port 8080, files in `/data`). Settings:
 
-A ready-made option: take the `starsheets-web` artifact from the latest green CI run on `main` and serve it with nginx.
+| Setting | What it does |
+|---|---|
+| `STARSHEETS_PASSWORD` | The password to sign in. Without it, a random one is made on first start and printed in the log |
+| `STARSHEETS_AUTH=off` | No login, for a private network you trust |
+| `LOCATION` | How the app tells people where files are kept ("Saved to …") |
+| `KEEP` | How many earlier versions of each file to keep (default 6) |
+
+Spreadsheets are ordinary `.xlsx` files in `/data`, in folders as you make them in the app.
+`/data/.starsheets` holds the file ids, versions and sign-in sessions, and `/data/.bin` the bin.
+
+## By hand
+
+- The app is a static site (`dist/` from `trunk build --release`). Serve WebAssembly as
+  `application/wasm`, compressed; hashed files can be cached forever, `index.html` should not be.
+- `server/files.py` (Python 3, standard library only) stores the files. Put it behind the same
+  host name as the app under `/api/`, or let it serve the app too with `SITE=path/to/dist`.
+- Use HTTPS (or localhost): browsers only give full clipboard access to secure pages.
