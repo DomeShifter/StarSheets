@@ -18,8 +18,8 @@
 - [x] Patch: theme override (`Tokens::install`)
 - [x] Title row, menu bar and toolbar driven by data tables
 - [x] Sheets palette
-- [ ] CI builds the web app
-- [ ] Hosted on the home server
+- [x] CI builds the web app (about 5 minutes per build)
+- [x] Hosted on the home server
 - [ ] Spike report: what works, what needs more patches (→ docs/decisions.md)
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).
