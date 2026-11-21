@@ -103,7 +103,7 @@ GridCraft behaves like Excel. StarSheets switches each row below to the Sheets w
 | 5 | Enter with a copied range still marked | Nothing special (Enter edits) | Pastes the copied range and ends copy mode | **done** (patch 0004) |
 | 6 | Copied range outline | Static dashed blue outline | Animated "marching ants" | **done** (patch 0004) |
 | 7 | Copy marker after pasting | Stays; you can paste again | Same for Ctrl+V; ends after Enter-paste | same already |
-| 8 | Default font / size / row height / column width | Arial 10 · 21 px rows · 100 px columns | Calibri 11 · 20 px rows · 64 px columns | font **done** (Roboto, patch 0006); sizes **next** |
+| 8 | Default font / size / row height / column width | Arial 10 · 21 px rows · 100 px columns | Calibri 11 · 20 px rows · 64 px columns | font **done** (Roboto 10, patch 0006); row/column sizes **later** (must only apply to new sheets, not to opened Excel files) |
 | 9 | Single click on a link cell | Selects it and shows a link card (preview, copy, edit, remove); open from the card or Alt+Enter | Ctrl+click follows (or click follows) | **next** |
 | 10 | Formula error in a cell | Red triangle top-right; hover shows the error explanation | Green triangle top-left + warning icon menu | **next** |
 | 11 | Notes and comments markers | Note: small black triangle top-right; comment: orange-yellow triangle, opens in side thread | Red triangle (note), purple (comment) | **later** |

@@ -31,7 +31,8 @@
 - [ ] Sheets keyboard shortcuts (docs/sheets-reference.md §5)
 - [ ] Right-click menu in Sheets' order
 - [ ] Side panels instead of dialogs (conditional formatting, data validation, charts)
-- [ ] Sheets default sizes: 10 pt, 21 px rows, 100 px columns
+- [x] Default text size 10 pt
+- [ ] Default 21 px rows and 100 px columns for new sheets only (xlsx-safe)
 - [ ] Dark mode palette
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).
