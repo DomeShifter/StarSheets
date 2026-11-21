@@ -154,7 +154,7 @@ impl Browser {
         }
         let mut open = true;
         let title = if self.in_bin { "Bin" } else { "Open a file" };
-        egui::Window::new(title).id(egui::Id::new("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
+        let shown = egui::Window::new(title).id(egui::Id::new("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
             ui.set_width(W);
             if self.in_bin {
                 self.bin_ui(ui, &mut out);
@@ -165,6 +165,16 @@ impl Browser {
                 ui.label(RichText::new(e).color(Color32::from_rgb(0xC5, 0x39, 0x29)));
             }
         });
+        // A click outside the window closes it, as with a menu (not while one of its own menus
+        // is open, or a rename or drag is under way).
+        if let Some(rect) = shown.map(|r| r.response.rect)
+            && self.renaming.is_none()
+            && self.dragging.is_none()
+            && !egui::Popup::is_any_open(ctx)
+            && ctx.input(|i| i.pointer.any_pressed() && i.pointer.press_origin().is_some_and(|p| !rect.contains(p)))
+        {
+            open = false;
+        }
         if !open {
             self.open = false;
             self.dragging = None;
