@@ -27,6 +27,11 @@ new features and the last one for fixes.
   padding, pill-shaped buttons, 36 px fields, padded menus (docs/house-style.md).
 
 ### Added
+- **Chart editor**, after Google Sheets: a side panel with Setup (chart type, stacking, data range,
+  X-axis, series, switch rows/columns) and Customise (colours, smooth lines, doughnut hole and
+  rotation, chart and axis titles, series colour, trendline, data labels, legend, gridlines).
+  Changes show on the chart straight away. Opens on Insert › Chart, a double-click on a chart or
+  "Edit chart" in its right-click menu.
 - Format › Merge cells › **Merge vertically**, and Google's "Heads up!" warning when merging would
   drop values (with "Don't show this again for 5 minutes"). Merge options that can't apply to the
   selection are greyed out.

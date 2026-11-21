@@ -119,7 +119,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sub("Columns", &[Cmd("Insert column left", "home.insertColumns", "Ctrl+Alt+=")]),
             Cmd("Sheet", "home.insertSheet", "Shift+F11"),
             Sep,
-            Cmd("Chart", "insert.chart", ""),
+            Cmd("Chart", "panel:chart", ""),
             Cmd("Pivot table", "insert.pivotTable", ""),
             Cmd("Image", "insert.picture", ""),
             Sep,
@@ -320,7 +320,7 @@ pub const TOOLBAR: &[Tool] = &[
     Menu("text_rotation_angleup", "Text rotation", ROTATION),
     Gap,
     Btn("link", "Insert link (Ctrl+K)", "insert.link", "{}"),
-    Btn("insert_chart", "Insert chart", "insert.chart", "{}"),
+    Btn("insert_chart", "Insert chart", "panel:chart", "{}"),
     Btn("filter_alt", "Create a filter", "data.filter", "{}"),
     Menu("functions", "Functions", FUNCTIONS),
 ];
@@ -510,7 +510,11 @@ impl Shell {
                     match tool {
                         Btn(icon, tip, id, p) => {
                             if icon_or_text(ui, icon, tip).clicked() {
-                                app.run_or_alert(id, params(p));
+                                if *id == "panel:chart" {
+                                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::chartpanel::REQUEST), true));
+                                } else {
+                                    app.run_or_alert(id, params(p));
+                                }
                             }
                         }
                         Txt(text, tip, id, p) => {
@@ -973,6 +977,8 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::settings::REQUEST), true));
                     } else if *id == "panel:note" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::notes::REQUEST), true));
+                    } else if *id == "panel:chart" {
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::chartpanel::REQUEST), true));
                     } else if *id == "panel:dropdown" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
                     } else if let Some(what) = id.strip_prefix("panel:") {

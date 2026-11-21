@@ -9,6 +9,7 @@ mod autolink;
 mod calcpreview;
 mod bottom;
 mod cfpanel;
+mod chartpanel;
 mod colourpicker;
 mod customdate;
 mod datepicker;
