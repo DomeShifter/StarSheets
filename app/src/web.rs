@@ -85,7 +85,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dv: crate::dvpanel::DvPanel::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), dv: crate::dvpanel::DvPanel::default() }))
                 }),
             )
             .await;
@@ -112,6 +112,7 @@ struct WebShell {
     autolink: crate::autolink::AutoLink,
     cf: crate::cfpanel::CfPanel,
     dv: crate::dvpanel::DvPanel,
+    dates: crate::datepicker::DatePicker,
     prefs: crate::prefs::PrefsSync,
 }
 
@@ -192,6 +193,7 @@ impl eframe::App for WebShell {
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
         self.link.ui(&mut self.app, ui);
+        self.dates.ui(&mut self.app, ui);
         copy_without_https(ui.ctx());
     }
 }

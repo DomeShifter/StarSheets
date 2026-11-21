@@ -8,6 +8,7 @@ mod prefs;
 mod autolink;
 mod bottom;
 mod cfpanel;
+mod datepicker;
 mod dvpanel;
 mod fonts;
 mod icons;
