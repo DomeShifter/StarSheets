@@ -125,14 +125,19 @@ impl Bottom {
     }
 
     fn all_sheets(&mut self, app: &mut SheetApp, ui: &mut Ui, list: &[Tab], active: usize) {
-        ui.set_min_width(200.0);
+        let width = crate::shell::menu_style(ui, true);
         for tab in list {
             let label = if tab.hidden { format!("{} (hidden)", tab.name) } else { tab.name.clone() };
-            if ui.add(Button::new(label).selected(tab.index == active)).clicked() {
+            // Sheets ticks the current sheet.
+            let row = match (tab.index == active, icons::icon("check")) {
+                (true, Some(tick)) => Button::image_and_text(tick, RichText::new(label).size(14.0).color(theme::TEXT)).shortcut_text(""),
+                _ => crate::shell::menu_row(&label, "", true),
+            };
+            if ui.add_sized([width, 32.0], row.frame_when_inactive(false)).clicked() {
                 if tab.hidden {
                     app.run_or_alert("sheet.unhide", json!({ "sheet": tab.index }));
                 }
-                app.run_or_alert("sheet.activate", json!({ "sheet": tab.index }));
+                switch_to(app, tab.index);
                 ui.close();
             }
         }
@@ -162,30 +167,36 @@ impl Bottom {
             ui.painter().hline(rect.x_range().shrink(6.0), rect.bottom() - 2.0, Stroke::new(3.0, c));
         }
         if r.clicked() && !active {
-            app.run_or_alert("sheet.activate", json!({ "sheet": tab.index }));
+            switch_to(app, tab.index);
         }
         if r.double_clicked() {
             self.renaming = Some((tab.index, tab.name.clone()));
         }
         r.context_menu(|ui| self.tab_menu(app, ui, tab, count));
+        // Sheets: clicking the current tab (its ▾) opens the same menu.
+        let toggle = (r.clicked() && active).then_some(egui::SetOpenCommand::Toggle);
+        egui::Popup::menu(&r).open_memory(toggle).show(|ui| self.tab_menu(app, ui, tab, count));
     }
 
     fn tab_menu(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, count: usize) {
-        ui.set_min_width(200.0);
+        // Sheets' tab menu: plain rows, no icons (docs/sheets-menus.md).
+        let width = crate::shell::menu_style(ui, false);
+        let row = |label: &str| crate::shell::menu_row(label, "", false).min_size(vec2(width, 32.0));
         let s = tab.index;
-        if ui.add_enabled(count > 1, Button::new("Delete")).clicked() {
+        if ui.add_enabled(count > 1, row("Delete")).clicked() {
             app.run_or_alert("home.deleteSheet", json!({ "sheet": s }));
             ui.close();
         }
-        if ui.button("Duplicate").clicked() {
+        if ui.add(row("Duplicate")).clicked() {
             app.run_or_alert("sheet.move", json!({ "sheet": s, "to": s + 1, "copy": true }));
             ui.close();
         }
-        if ui.button("Rename").clicked() {
+        if ui.add(row("Rename")).clicked() {
             self.renaming = Some((s, tab.name.clone()));
             ui.close();
         }
-        ui.menu_button("Change colour", |ui| {
+        let colour = row("Change colour").right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(theme::TEXT_DIM)));
+        egui::containers::menu::SubMenuButton::from_button(colour).ui(ui, |ui| {
             if ui.button("Reset").clicked() {
                 app.run_or_alert("sheet.tabColor", json!({ "sheet": s, "color": "none" }));
                 ui.close();
@@ -194,16 +205,16 @@ impl Bottom {
                 app.run_or_alert("sheet.tabColor", json!({ "sheet": s, "color": hex }));
             });
         });
-        if ui.add_enabled(count > 1, Button::new("Hide sheet")).clicked() {
+        if ui.add_enabled(count > 1, row("Hide sheet")).clicked() {
             app.run_or_alert("sheet.hide", json!({ "sheet": s }));
             ui.close();
         }
-        ui.separator();
-        if ui.add_enabled(s + 1 < count, Button::new("Move right")).clicked() {
+        crate::shell::menu_sep_width(ui, width);
+        if ui.add_enabled(s + 1 < count, row("Move right")).clicked() {
             app.run_or_alert("sheet.move", json!({ "sheet": s, "to": s + 1 }));
             ui.close();
         }
-        if ui.add_enabled(s > 0, Button::new("Move left")).clicked() {
+        if ui.add_enabled(s > 0, row("Move left")).clicked() {
             app.run_or_alert("sheet.move", json!({ "sheet": s, "to": s - 1 }));
             ui.close();
         }
@@ -253,4 +264,16 @@ fn icon_button(ui: &mut Ui, name: &str, tip: &str) -> egui::Response {
         None => ui.add(Button::new(name).frame(false).min_size(vec2(30.0, 30.0))),
     }
     .on_hover_text(tip)
+}
+
+/// Goes to another sheet. Like Sheets, a cell being typed into is saved first (GridCraft keeps
+/// the edit open across sheets, and the next click then jumps back to finish it). A formula
+/// being typed stays open, so cells on the other sheet can still be clicked into it.
+pub fn switch_to(app: &mut SheetApp, sheet: usize) {
+    let formula = app.editor.as_ref().is_some_and(|e| e.text.trim_start().starts_with('='));
+    if app.editor.is_some() && !formula && !app.commit_edit(0, 0, false, false) {
+        // The entry was refused (GridCraft shows why); stay on this sheet.
+        return;
+    }
+    app.run_or_alert("sheet.activate", json!({ "sheet": sheet }));
 }

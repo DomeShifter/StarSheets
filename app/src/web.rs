@@ -80,6 +80,7 @@ pub fn start() {
                     // no gliding selection outline, Google's cell keys (Enter edits, Backspace only clears).
                     app.ui.animations = false;
                     app.ui.sheets_keys = true;
+                    app.ui.menu_look = Some(crate::shell::MENU_LOOK);
                     let mut prefs = crate::prefs::PrefsSync::new(stored_ui, stored_prefs);
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);

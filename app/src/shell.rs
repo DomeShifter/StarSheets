@@ -91,7 +91,18 @@ pub const MENUS: &[(&str, &[Item])] = &[
             ),
             Sub("Group", &[Cmd("Group", "data.group", "Alt+Shift+→"), Cmd("Ungroup", "data.ungroup", "Alt+Shift+←")]),
             Sep,
-            Cmd("Zoom", "view.zoom", ""),
+            Sub(
+                "Zoom",
+                &[
+                    CmdWith("50%", "view.zoom", "", r#"{"percent":50}"#),
+                    CmdWith("75%", "view.zoom", "", r#"{"percent":75}"#),
+                    CmdWith("90%", "view.zoom", "", r#"{"percent":90}"#),
+                    CmdWith("100%", "view.zoom", "", r#"{"percent":100}"#),
+                    CmdWith("125%", "view.zoom", "", r#"{"percent":125}"#),
+                    CmdWith("150%", "view.zoom", "", r#"{"percent":150}"#),
+                    CmdWith("200%", "view.zoom", "", r#"{"percent":200}"#),
+                ],
+            ),
         ],
     ),
     (
@@ -106,20 +117,53 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Pivot table", "insert.pivotTable", ""),
             Cmd("Image", "insert.picture", ""),
             Sep,
-            Cmd("Function", "formulas.insertFunction", ""),
+            Sub(
+                "Function",
+                &[
+                    CmdWith("SUM", "formulas.autoSum", "", r#"{"function":"SUM"}"#),
+                    CmdWith("AVERAGE", "formulas.autoSum", "", r#"{"function":"AVERAGE"}"#),
+                    CmdWith("COUNT", "formulas.autoSum", "", r#"{"function":"COUNT"}"#),
+                    CmdWith("MAX", "formulas.autoSum", "", r#"{"function":"MAX"}"#),
+                    CmdWith("MIN", "formulas.autoSum", "", r#"{"function":"MIN"}"#),
+                    Sep,
+                    Cmd("All functions…", "formulas.insertFunction", ""),
+                ],
+            ),
             Cmd("Link", "insert.link", "Ctrl+K"),
-            Cmd("Checkbox", "insert.checkbox", ""),
-            Cmd("Dropdown", "data.validation", ""),
+            Sep,
+            Cmd("Tick box", "insert.checkbox", ""),
+            Cmd("Drop-down", "data.validation", ""),
             Sep,
             Cmd("Comment", "review.newComment", "Ctrl+Alt+M"),
             Cmd("Note", "review.newNote", "Shift+F2"),
-            Cmd("Table", "insert.table", "Ctrl+Alt+T"),
         ],
     ),
     (
         "Format",
         &[
-            Cmd("Number", "home.formatCells", ""),
+            Sub(
+                "Number",
+                &[
+                    CmdWith("Automatic", "home.numberFormat", "", r#"{"format":"General"}"#),
+                    CmdWith("Plain text", "home.numberFormat", "", r#"{"format":"Text"}"#),
+                    Sep,
+                    CmdWith("Number", "home.numberFormat", "1,000.12", r##"{"code":"#,##0.00"}"##),
+                    CmdWith("Percent", "home.numberFormat", "10.12%", r#"{"code":"0.00%"}"#),
+                    CmdWith("Scientific", "home.numberFormat", "1.01E+03", r#"{"code":"0.00E+00"}"#),
+                    Sep,
+                    CmdWith("Accounting", "home.numberFormat", "£ (1,000.12)", r#"{"format":"Accounting"}"#),
+                    CmdWith("Financial", "home.numberFormat", "(1,000.12)", r##"{"code":"#,##0.00;(#,##0.00)"}"##),
+                    CmdWith("Currency", "home.numberFormat", "£1,000.12", r##"{"code":"£#,##0.00"}"##),
+                    CmdWith("Currency rounded", "home.numberFormat", "£1,000", r##"{"code":"£#,##0"}"##),
+                    Sep,
+                    CmdWith("Date", "home.numberFormat", "26/09/2008", r#"{"code":"dd/mm/yyyy"}"#),
+                    CmdWith("Time", "home.numberFormat", "15:59:00", r#"{"code":"hh:mm:ss"}"#),
+                    CmdWith("Date time", "home.numberFormat", "26/09/2008 15:59:00", r#"{"code":"dd/mm/yyyy hh:mm:ss"}"#),
+                    CmdWith("Duration", "home.numberFormat", "24:01:00", r#"{"code":"[h]:mm:ss"}"#),
+                    Sep,
+                    Cmd("Custom number format", "home.formatCells", ""),
+                ],
+            ),
             Sub(
                 "Text",
                 &[
@@ -141,8 +185,34 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     Cmd("Bottom", "home.alignBottom", ""),
                 ],
             ),
-            Sub("Wrapping", &[Cmd("Wrap", "home.wrapText", "")]),
+            Sub("Wrapping", &[CmdWith("Overflow", "home.wrapText", "", r#"{"on":false}"#), CmdWith("Wrap", "home.wrapText", "", r#"{"on":true}"#)]),
+            Sub(
+                "Rotation",
+                &[
+                    CmdWith("None", "home.orientation", "", r#"{"angle":0}"#),
+                    CmdWith("Tilt up", "home.orientation", "", r#"{"angle":45}"#),
+                    CmdWith("Tilt down", "home.orientation", "", r#"{"angle":-45}"#),
+                    CmdWith("Stack vertically", "home.orientation", "", r#"{"angle":"vertical"}"#),
+                    CmdWith("Rotate up", "home.orientation", "", r#"{"angle":90}"#),
+                    CmdWith("Rotate down", "home.orientation", "", r#"{"angle":-90}"#),
+                ],
+            ),
             Sep,
+            Sub(
+                "Font size",
+                &[
+                    CmdWith("6", "home.fontSize", "", r#"{"size":6}"#),
+                    CmdWith("8", "home.fontSize", "", r#"{"size":8}"#),
+                    CmdWith("9", "home.fontSize", "", r#"{"size":9}"#),
+                    CmdWith("10", "home.fontSize", "", r#"{"size":10}"#),
+                    CmdWith("11", "home.fontSize", "", r#"{"size":11}"#),
+                    CmdWith("12", "home.fontSize", "", r#"{"size":12}"#),
+                    CmdWith("14", "home.fontSize", "", r#"{"size":14}"#),
+                    CmdWith("18", "home.fontSize", "", r#"{"size":18}"#),
+                    CmdWith("24", "home.fontSize", "", r#"{"size":24}"#),
+                    CmdWith("36", "home.fontSize", "", r#"{"size":36}"#),
+                ],
+            ),
             Sub("Merge cells", &[Cmd("Merge all", "home.mergeCells", ""), Cmd("Merge horizontally", "home.mergeAcross", ""), Cmd("Unmerge", "home.unmergeCells", "")]),
             Cmd("Convert to table", "insert.table", "Ctrl+Alt+T"),
             Cmd("Conditional formatting", "home.conditionalFormat", ""),
@@ -153,9 +223,15 @@ pub const MENUS: &[(&str, &[Item])] = &[
     (
         "Data",
         &[
-            Cmd("Sort range A → Z", "data.sortAscending", ""),
-            Cmd("Sort range Z → A", "data.sortDescending", ""),
-            Cmd("Advanced range sorting options", "data.sort", ""),
+            Sub(
+                "Sort range",
+                &[
+                    Cmd("Sort range by column A to Z", "data.sortAscending", ""),
+                    Cmd("Sort range by column Z to A", "data.sortDescending", ""),
+                    Sep,
+                    Cmd("Advanced range sorting options", "data.sort", ""),
+                ],
+            ),
             Sep,
             Cmd("Create a filter", "data.filter", ""),
             Cmd("Add a slicer", "insert.slicer", ""),
@@ -164,17 +240,17 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Named ranges", "formulas.nameManager", ""),
             Sep,
             Cmd("Data validation", "data.validation", ""),
-            Sub("Data cleanup", &[Cmd("Remove duplicates", "data.removeDuplicates", "")]),
+            Sub("Data clean-up", &[Cmd("Remove duplicates", "data.removeDuplicates", "")]),
             Cmd("Split text to columns", "data.textToColumns", ""),
         ],
     ),
     (
         "Tools",
         &[
-            Cmd("Spelling", "review.spelling", ""),
-            Cmd("Accessibility", "review.checkAccessibility", ""),
+            Sub("Spelling", &[Cmd("Spell check", "review.spelling", "")]),
+            Sub("Calculation controls", &[CmdWith("Calculate now", "formulas.calculateNow", "", "{}")]),
             Sep,
-            CmdWith("Calculate now", "formulas.calculateNow", "", "{}"),
+            Cmd("Accessibility", "review.checkAccessibility", ""),
         ],
     ),
     ("Help", &[Cmd("Function list", "formulas.insertFunction", "")]),
@@ -240,34 +316,34 @@ const NUMBER_FORMATS: &[(&str, &str, &str)] = &[
     ("Automatic", "home.numberFormat", r#"{"format":"General"}"#),
     ("Plain text", "home.numberFormat", r#"{"format":"Text"}"#),
     ("-", "", ""),
-    ("Number           1,000.12", "home.numberFormat", r##"{"code":"#,##0.00"}"##),
-    ("Percent          10.12%", "home.numberFormat", r#"{"code":"0.00%"}"#),
-    ("Scientific       1.01E+03", "home.numberFormat", r#"{"code":"0.00E+00"}"#),
+    ("Number|1,000.12", "home.numberFormat", r##"{"code":"#,##0.00"}"##),
+    ("Percent|10.12%", "home.numberFormat", r#"{"code":"0.00%"}"#),
+    ("Scientific|1.01E+03", "home.numberFormat", r#"{"code":"0.00E+00"}"#),
     ("-", "", ""),
-    ("Accounting       £ (1,000.12)", "home.numberFormat", r#"{"format":"Accounting"}"#),
-    ("Financial        (1,000.12)", "home.numberFormat", r##"{"code":"#,##0.00;(#,##0.00)"}"##),
-    ("Currency         £1,000.12", "home.numberFormat", r##"{"code":"£#,##0.00"}"##),
-    ("Currency rounded £1,000", "home.numberFormat", r##"{"code":"£#,##0"}"##),
+    ("Accounting|£ (1,000.12)", "home.numberFormat", r#"{"format":"Accounting"}"#),
+    ("Financial|(1,000.12)", "home.numberFormat", r##"{"code":"#,##0.00;(#,##0.00)"}"##),
+    ("Currency|£1,000.12", "home.numberFormat", r##"{"code":"£#,##0.00"}"##),
+    ("Currency rounded|£1,000", "home.numberFormat", r##"{"code":"£#,##0"}"##),
     ("-", "", ""),
-    ("Date             26/09/2008", "home.numberFormat", r#"{"code":"dd/mm/yyyy"}"#),
-    ("Time             15:59:00", "home.numberFormat", r#"{"code":"hh:mm:ss"}"#),
-    ("Date time        26/09/2008 15:59:00", "home.numberFormat", r#"{"code":"dd/mm/yyyy hh:mm:ss"}"#),
-    ("Duration         24:01:00", "home.numberFormat", r#"{"code":"[h]:mm:ss"}"#),
+    ("Date|26/09/2008", "home.numberFormat", r#"{"code":"dd/mm/yyyy"}"#),
+    ("Time|15:59:00", "home.numberFormat", r#"{"code":"hh:mm:ss"}"#),
+    ("Date time|26/09/2008 15:59:00", "home.numberFormat", r#"{"code":"dd/mm/yyyy hh:mm:ss"}"#),
+    ("Duration|24:01:00", "home.numberFormat", r#"{"code":"[h]:mm:ss"}"#),
     ("-", "", ""),
     ("Custom number format", "home.formatCells", "{}"),
 ];
 
 const BORDERS: &[(&str, &str, &str)] = &[
-    ("icon:border_all", "home.borders", r#"{"preset":"all"}"#),
-    ("icon:border_inner", "home.borders", r#"{"preset":"inside"}"#),
-    ("icon:border_horizontal", "home.borders", r#"{"preset":"insideHorizontal"}"#),
-    ("icon:border_vertical", "home.borders", r#"{"preset":"insideVertical"}"#),
-    ("icon:border_outer", "home.borders", r#"{"preset":"outside"}"#),
-    ("icon:border_left", "home.borders", r#"{"preset":"left"}"#),
-    ("icon:border_top", "home.borders", r#"{"preset":"top"}"#),
-    ("icon:border_right", "home.borders", r#"{"preset":"right"}"#),
-    ("icon:border_bottom", "home.borders", r#"{"preset":"bottom"}"#),
-    ("icon:border_clear", "home.borders", r#"{"preset":"none"}"#),
+    ("icon:border_all|All borders", "home.borders", r#"{"preset":"all"}"#),
+    ("icon:border_inner|Inner borders", "home.borders", r#"{"preset":"inside"}"#),
+    ("icon:border_horizontal|Horizontal borders", "home.borders", r#"{"preset":"insideHorizontal"}"#),
+    ("icon:border_vertical|Vertical borders", "home.borders", r#"{"preset":"insideVertical"}"#),
+    ("icon:border_outer|Outer borders", "home.borders", r#"{"preset":"outside"}"#),
+    ("icon:border_left|Left border", "home.borders", r#"{"preset":"left"}"#),
+    ("icon:border_top|Top border", "home.borders", r#"{"preset":"top"}"#),
+    ("icon:border_right|Right border", "home.borders", r#"{"preset":"right"}"#),
+    ("icon:border_bottom|Bottom border", "home.borders", r#"{"preset":"bottom"}"#),
+    ("icon:border_clear|Clear borders", "home.borders", r#"{"preset":"none"}"#),
 ];
 
 const MERGE: &[(&str, &str, &str)] = &[
@@ -277,26 +353,27 @@ const MERGE: &[(&str, &str, &str)] = &[
 ];
 
 const H_ALIGN: &[(&str, &str, &str)] = &[
-    ("icon:format_align_left", "home.alignLeft", "{}"),
-    ("icon:format_align_center", "home.alignCenter", "{}"),
-    ("icon:format_align_right", "home.alignRight", "{}"),
+    ("icon:format_align_left|Left", "home.alignLeft", "{}"),
+    ("icon:format_align_center|Centre", "home.alignCenter", "{}"),
+    ("icon:format_align_right|Right", "home.alignRight", "{}"),
 ];
 
 const V_ALIGN: &[(&str, &str, &str)] = &[
-    ("icon:vertical_align_top", "home.alignTop", "{}"),
-    ("icon:vertical_align_center", "home.alignMiddle", "{}"),
-    ("icon:vertical_align_bottom", "home.alignBottom", "{}"),
+    ("icon:vertical_align_top|Top", "home.alignTop", "{}"),
+    ("icon:vertical_align_center|Middle", "home.alignMiddle", "{}"),
+    ("icon:vertical_align_bottom|Bottom", "home.alignBottom", "{}"),
 ];
 
-const WRAP: &[(&str, &str, &str)] = &[("Overflow", "home.wrapText", r#"{"on":false}"#), ("Wrap", "home.wrapText", r#"{"on":true}"#)];
+// Sheets also has Clip; GridCraft has no clip mode yet.
+const WRAP: &[(&str, &str, &str)] = &[("icon:keyboard_tab|Overflow", "home.wrapText", r#"{"on":false}"#), ("icon:wrap_text|Wrap", "home.wrapText", r#"{"on":true}"#)];
 
 const ROTATION: &[(&str, &str, &str)] = &[
-    ("None", "home.orientation", r#"{"angle":0}"#),
-    ("Tilt up", "home.orientation", r#"{"angle":45}"#),
-    ("Tilt down", "home.orientation", r#"{"angle":-45}"#),
-    ("Stack vertically", "home.orientation", r#"{"angle":"vertical"}"#),
-    ("Rotate up", "home.orientation", r#"{"angle":90}"#),
-    ("Rotate down", "home.orientation", r#"{"angle":-90}"#),
+    ("icon:text_rotation_none|None", "home.orientation", r#"{"angle":0}"#),
+    ("icon:text_rotation_angleup|Tilt up", "home.orientation", r#"{"angle":45}"#),
+    ("icon:text_rotation_angledown|Tilt down", "home.orientation", r#"{"angle":-45}"#),
+    ("icon:text_rotate_vertical|Stack vertically", "home.orientation", r#"{"angle":"vertical"}"#),
+    ("icon:text_rotate_up|Rotate up", "home.orientation", r#"{"angle":90}"#),
+    ("icon:text_rotation_down|Rotate down", "home.orientation", r#"{"angle":-90}"#),
 ];
 
 const FUNCTIONS: &[(&str, &str, &str)] = &[
@@ -527,6 +604,8 @@ impl Shell {
     }
 }
 
+/// A toolbar dropdown, Sheets style: a strip of icons (borders, alignment, wrapping, rotation)
+/// or a list whose entries may show a grey example on the right ("Currency|£1,000.12").
 fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
     let icon_row = items.iter().all(|(l, _, _)| l.starts_with("icon:"));
     let mut run = |app: &mut SheetApp, ui: &mut Ui, id: &str, p: &str| {
@@ -534,22 +613,33 @@ fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
         ui.close();
     };
     if icon_row {
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(5.0 * 32.0);
-            for (label, id, p) in items {
-                let name = label.trim_start_matches("icon:");
-                if icon_or_text(ui, name, name).clicked() {
+        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        flat(ui);
+        let per_row = if items.len() > 6 { 5 } else { items.len() };
+        egui::Grid::new(ui.id().with("strip")).spacing(vec2(4.0, 4.0)).show(ui, |ui| {
+            for (i, (label, id, p)) in items.iter().enumerate() {
+                let (name, tip) = label.trim_start_matches("icon:").split_once('|').unwrap_or((label.trim_start_matches("icon:"), ""));
+                let tip = if tip.is_empty() { name } else { tip };
+                if icon_or_text(ui, name, tip).clicked() {
                     run(app, ui, id, p);
+                }
+                if (i + 1) % per_row == 0 {
+                    ui.end_row();
                 }
             }
         });
         return;
     }
-    ui.set_min_width(220.0);
+    let width = menu_style(ui, false).max(if items.iter().any(|(l, _, _)| l.contains('|')) { 280.0 } else { 0.0 });
+    ui.set_min_width(width);
+    ui.set_max_width(width);
     for (label, id, p) in items {
         if *label == "-" {
-            ui.separator();
-        } else if ui.button(RichText::new(*label).monospace()).clicked() {
+            menu_sep_width(ui, width);
+            continue;
+        }
+        let (name, sample) = label.split_once('|').unwrap_or((label, ""));
+        if ui.add_sized([width, 32.0], menu_row(name, sample, false)).clicked() {
             run(app, ui, id, p);
         }
     }
@@ -648,8 +738,6 @@ pub const MENU_ICONS: &[(&str, &str)] = &[
     ("Image", "image"),
     ("Function", "functions"),
     ("Link", "link"),
-    ("Checkbox", "check_box"),
-    ("Dropdown", "arrow_drop_down_circle"),
     ("Comment", "add_comment"),
     ("Note", "sticky_note_2"),
     ("Table", "table"),
@@ -669,16 +757,51 @@ pub const MENU_ICONS: &[(&str, &str)] = &[
     ("Protect sheets and ranges", "lock"),
     ("Named ranges", "label"),
     ("Data validation", "rule"),
-    ("Data cleanup", "cleaning_services"),
     ("Split text to columns", "call_split"),
     ("Spelling", "spellcheck"),
     ("Accessibility", "accessibility_new"),
     ("Calculate now", "calculate"),
     ("Function list", "functions"),
+    ("Rotation", "text_rotation_angleup"),
+    ("Font size", "format_size"),
+    ("Sort range", "sort"),
+    ("Data clean-up", "cleaning_services"),
+    ("Calculation controls", "functions"),
+    ("Tick box", "check_box"),
+    // Right-click menus (cells, row and column headers, sheet tabs).
+    ("Insert cells", "add"),
+    ("Delete cells", "delete"),
+    ("Delete row", "delete"),
+    ("Delete column", "delete"),
+    ("Clear row", "close"),
+    ("Clear column", "close"),
+    ("Hide row", "visibility_off"),
+    ("Hide column", "visibility_off"),
+    ("Unhide rows", "visibility"),
+    ("Unhide columns", "visibility"),
+    ("Resize the row", "aspect_ratio"),
+    ("Resize the column", "aspect_ratio"),
+    ("Sort sheet A to Z", "sort_by_alpha"),
+    ("Sort sheet Z to A", "sort_by_alpha"),
+    ("Insert link", "link"),
+    ("Insert note", "sticky_note_2"),
+    ("Drop-down", "arrow_drop_down_circle"),
+    ("Filter by cell value", "filter_list"),
 ];
 
 fn menu_icon(label: &str) -> Option<egui::Image<'static>> {
-    MENU_ICONS.iter().find(|(l, _)| *l == label).and_then(|(_, n)| icons::icon(n))
+    let exact = MENU_ICONS.iter().find(|(l, _)| *l == label).map(|(_, n)| *n);
+    // GridCraft's counted labels ("Insert 3 rows above", "Delete rows 3 - 5", patch 0015).
+    let name = exact.or_else(|| {
+        if label.starts_with("Insert ") && (label.contains(" row") || label.contains(" column")) {
+            Some("add")
+        } else if label.starts_with("Delete rows") || label.starts_with("Delete columns") {
+            Some("delete")
+        } else {
+            None
+        }
+    })?;
+    icons::icon(name)
 }
 
 /// Grey for shortcuts and the submenu arrow, as in Sheets.
@@ -686,8 +809,8 @@ const MENU_GREY: egui::Color32 = egui::Color32::from_rgb(0x80, 0x86, 0x8B);
 
 /// One menu row: icon (or the same space blank when the menu has icons), 14 px label, and the
 /// shortcut in grey on the right. Rows are 32 px tall and fill the menu's width.
-fn menu_row<'a>(label: &'a str, keys: &'a str, with_icons: bool) -> Button<'a> {
-    let text = RichText::new(label).size(14.0).color(theme::TEXT);
+pub fn menu_row(label: &str, keys: &str, with_icons: bool) -> Button<'static> {
+    let text = RichText::new(label.to_string()).size(14.0).color(theme::TEXT);
     let b = match (menu_icon(label), with_icons) {
         (Some(img), _) => Button::image_and_text(img, text),
         // Keeps the label lined up with its iconed neighbours.
@@ -698,34 +821,53 @@ fn menu_row<'a>(label: &'a str, keys: &'a str, with_icons: bool) -> Button<'a> {
         (None, false) => Button::new(text),
     };
     // Always add the (maybe empty) shortcut: its stretch keeps the label at the left.
-    let b = b.shortcut_text(RichText::new(keys).size(13.0).color(MENU_GREY));
+    let b = b.shortcut_text(RichText::new(keys.to_string()).size(13.0).color(MENU_GREY));
     b.frame_when_inactive(false).min_size(vec2(0.0, 32.0))
 }
 
 /// Sheets-style menu: flat full-width rows with icons, grey shortcuts, ▸ for submenus, and
 /// dividers with breathing room (docs/sheets-menus.md).
+/// Sets a menu `Ui` up the Sheets way (flat full-width rows, grey hover) and returns its width:
+/// ~320 px with icons, 220 px for plain submenus.
+pub fn menu_style(ui: &mut Ui, with_icons: bool) -> f32 {
+    let width = if with_icons { 320.0 } else { 220.0 };
+    ui.set_min_width(width);
+    ui.set_max_width(width);
+    let st = ui.style_mut();
+    st.spacing.button_padding = vec2(12.0, 7.0);
+    st.spacing.item_spacing = vec2(14.0, 0.0);
+    st.spacing.icon_width = 10.0;
+    let w = &mut st.visuals.widgets;
+    for (state, fill) in [(&mut w.inactive, egui::Color32::TRANSPARENT), (&mut w.hovered, theme::MENU_HOVER), (&mut w.active, theme::HOVER), (&mut w.open, theme::MENU_HOVER)] {
+        state.bg_stroke = Stroke::NONE;
+        state.weak_bg_fill = fill;
+        state.corner_radius = egui::CornerRadius::ZERO;
+        state.expansion = 0.0;
+    }
+    width
+}
+
+/// A Sheets menu divider: a light line with 8 px above and below.
+pub fn menu_sep_width(ui: &mut Ui, width: f32) {
+    ui.add_space(8.0);
+    let (r, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
+    ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, theme::DIVIDER));
+    ui.add_space(8.0);
+}
+
+/// GridCraft's cell and header menus drawn with our rows (patch 0015).
+pub const MENU_LOOK: gridcraft_ui_egui::MenuLook = gridcraft_ui_egui::MenuLook {
+    style: |ui| menu_style(ui, true),
+    row: |label, keys| menu_row(label, keys, true),
+    sep: |ui| menu_sep_width(ui, 320.0),
+};
+
 fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
     let with_icons = items.iter().any(|i| match i {
         Cmd(l, ..) | CmdWith(l, ..) | Sub(l, _) => menu_icon(l).is_some(),
         Sep => false,
     });
-    // Sheets' widths: ~320 px with icons, narrower submenus without.
-    let width = if with_icons { 320.0 } else { 220.0 };
-    ui.set_min_width(width);
-    ui.set_max_width(width);
-    {
-        let st = ui.style_mut();
-        st.spacing.button_padding = vec2(12.0, 7.0);
-        st.spacing.item_spacing = vec2(14.0, 0.0);
-        st.spacing.icon_width = 10.0;
-        let w = &mut st.visuals.widgets;
-        for (state, fill) in [(&mut w.inactive, egui::Color32::TRANSPARENT), (&mut w.hovered, theme::MENU_HOVER), (&mut w.active, theme::HOVER), (&mut w.open, theme::MENU_HOVER)] {
-            state.bg_stroke = Stroke::NONE;
-            state.weak_bg_fill = fill;
-            state.corner_radius = egui::CornerRadius::ZERO;
-            state.expansion = 0.0;
-        }
-    }
+    let width = menu_style(ui, with_icons);
     for item in items {
         match item {
             Cmd(label, id, keys) => {
@@ -744,12 +886,7 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                 let b = menu_row(label, "", with_icons).min_size(vec2(width, 32.0)).right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(MENU_GREY)));
                 egui::containers::menu::SubMenuButton::from_button(b).ui(ui, |ui| menu_items(app, ui, sub));
             }
-            Sep => {
-                ui.add_space(8.0);
-                let (r, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
-                ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, theme::DIVIDER));
-                ui.add_space(8.0);
-            }
+            Sep => menu_sep_width(ui, width),
         }
     }
 }
@@ -792,6 +929,7 @@ mod tests {
                 Menu(_, _, items) => {
                     for (label, id, _) in *items {
                         if let Some(icon) = label.strip_prefix("icon:") {
+                            let icon = icon.split('|').next().unwrap_or(icon);
                             assert!(icons::has(icon), "missing icon {icon}");
                         }
                         if !id.is_empty() {
