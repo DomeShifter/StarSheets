@@ -1,6 +1,6 @@
 # StarSheets roadmap
 
-> **Last updated:** 2026-11-21 · **Now:** phase 0 (test build)
+> **Last updated:** 2026-11-21 · **Now:** phase 1 (look and feel); phase 0 done except the spike report
 
 | Phase | Goal | Done when | Status |
 |---|---|---|---|
@@ -21,5 +21,14 @@
 - [x] CI builds the web app (about 5 minutes per build)
 - [x] Hosted on the home server
 - [ ] Spike report: what works, what needs more patches (→ docs/decisions.md)
+
+## Phase 1 checklist
+- [x] Toolbar: Material icons, font and size boxes showing the active cell, zoom, number formats, colour palette, borders, merge, alignment, wrapping, rotation, functions
+- [ ] Bottom bar: + / sheet list / tabs / quick sum (needs a patch to hide GridCraft's tabs and status bar)
+- [ ] Sheets keyboard shortcuts (docs/sheets-reference.md §5)
+- [ ] Right-click menu in Sheets' order
+- [ ] Side panels instead of dialogs (conditional formatting, data validation, charts)
+- [ ] Fonts: open look-alikes for the UI and Arial 10 cells
+- [ ] Dark mode palette
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).
