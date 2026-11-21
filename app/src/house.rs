@@ -70,6 +70,9 @@ pub fn install(ctx: &egui::Context) {
             handle_min_length: 24.0,
             dormant_background_opacity: 0.35,
             dormant_handle_opacity: 0.7,
+            // The handle in the text colour: egui's default uses the widget fill, which the
+            // house forms make white (an invisible handle on a white panel).
+            foreground_color: true,
             ..egui::style::ScrollStyle::solid()
         };
         s.visuals.window_corner_radius = CornerRadius::same(PANEL_RADIUS);

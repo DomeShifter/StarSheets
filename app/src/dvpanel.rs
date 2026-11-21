@@ -219,7 +219,7 @@ impl DvPanel {
                     });
                 });
                 ui.add_space(8.0);
-                egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(crate::house::panel_scroll_height(ui)).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(crate::house::panel_scroll_height(ui)).show(ui, |ui| {
                     ui.set_width(PANEL_W);
                     if let Some(mut d) = self.draft.take() {
                         self.adopt_if_edited(app, &mut d);
