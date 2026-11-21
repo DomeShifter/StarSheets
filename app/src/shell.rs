@@ -371,6 +371,10 @@ fn icon_or_text(ui: &mut Ui, name: &str, tip: &str) -> egui::Response {
 
 impl Shell {
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        // Ctrl+Shift+F: hide/show the menus (taken before the grid sees it).
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND | egui::Modifiers::SHIFT, egui::Key::F)) {
+            self.compact = !self.compact;
+        }
         if !self.compact {
             egui::Panel::top("starsheets_title")
                 .exact_size(64.0)

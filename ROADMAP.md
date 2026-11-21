@@ -28,7 +28,8 @@
 - [x] Roboto as the default font (patches 0005, 0006)
 - [x] Enter edits, no selection animation, Backspace only clears (patch 0004)
 - [ ] Cell interactions list, remaining rows (docs/sheets-reference.md §4b)
-- [ ] Sheets keyboard shortcuts (docs/sheets-reference.md §5)
+- [x] Sheets keyboard shortcuts that differ from Excel (patch 0011; Ctrl+Shift+F and Alt+1 in the app)
+- [ ] Still to do from §5: Ctrl+/ shortcut list, Alt+/ tool finder, Alt+Shift+K sheet list, comment navigation keys
 - [ ] Side panels instead of dialogs (conditional formatting, data validation, charts)
 - [x] Default text size 10 pt
 - [x] Default 21 px rows and 100 px columns for new sheets only (patch 0010; opened files keep their sizes)

@@ -94,6 +94,13 @@ impl Bottom {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     let (list, active) = tabs(app);
+                    // Alt+1: rename the current sheet.
+                    if app.editor.is_none()
+                        && ui.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::Num1))
+                        && let Some(tab) = list.iter().find(|t| t.index == active)
+                    {
+                        self.renaming = Some((tab.index, tab.name.clone()));
+                    }
                     if icon_button(ui, "add", "Add sheet (Shift+F11)").clicked() {
                         app.run_or_alert("home.insertSheet", json!({ "before": list.len() }));
                     }
