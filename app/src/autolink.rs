@@ -1,5 +1,5 @@
-//! Sheets turns a typed web or e-mail address into a link when the edit is committed. GridCraft
-//! doesn't, so we watch for an edit that ends and run its `insert.link` on that cell.
+//! Sheets turns a typed or pasted web or e-mail address into a link. GridCraft doesn't, so we
+//! watch for an edit that ends, or a paste, and run its `insert.link` on those cells.
 
 use gridcraft_engine::core::CellRef;
 use gridcraft_ui_egui::SheetApp;
@@ -9,11 +9,27 @@ use serde_json::json;
 pub struct AutoLink {
     /// The cell being edited last frame: (document, sheet, cell).
     editing: Option<(u64, usize, CellRef)>,
+    /// Frames left in which to check the selection after a paste (the pasted block is selected).
+    after_paste: u8,
 }
 
+/// The most cells one paste is checked over (a pasted whole column stays cheap).
+const PASTE_SCAN_MAX: u64 = 20_000;
+
 impl AutoLink {
+    /// Call from the raw input hook: notes a paste so the next frames check what it filled.
+    pub fn saw_input(&mut self, raw: &egui::RawInput) {
+        if raw.events.iter().any(|e| matches!(e, egui::Event::Paste(_))) {
+            self.after_paste = 3;
+        }
+    }
+
     /// Call once per frame, after GridCraft's UI ran.
     pub fn after_frame(&mut self, app: &mut SheetApp) {
+        if self.after_paste > 0 && app.editor.is_none() {
+            self.after_paste -= 1;
+            link_pasted(app);
+        }
         let now = app.editor.as_ref().map(|e| (e.doc, e.sheet, e.cell));
         if let Some((doc, sheet, cell)) = self.editing
             && now != self.editing
@@ -45,6 +61,44 @@ pub fn address(text: &str) -> Option<String> {
         return rest.contains('@').then(|| t.to_string());
     }
     None
+}
+
+/// Links every address in the selected block(s), within the used part of the sheet.
+fn link_pasted(app: &mut SheetApp) {
+    let found: Vec<(CellRef, String)> = app
+        .session
+        .active()
+        .and_then(|d| {
+            let sh = d.wb.active()?;
+            let used = sh.used_range()?;
+            let mut out = Vec::new();
+            let mut seen = 0u64;
+            for r in &d.selection.ranges {
+                let (r0, r1) = (r.start.row.max(used.start.row), r.end.row.min(used.end.row));
+                let (c0, c1) = (r.start.col.max(used.start.col), r.end.col.min(used.end.col));
+                for row in r0..=r1 {
+                    for col in c0..=c1 {
+                        seen += 1;
+                        if seen > PASTE_SCAN_MAX {
+                            return Some(out);
+                        }
+                        let at = CellRef { row, col };
+                        let Some(cell) = sh.cell(at) else { continue };
+                        if cell.formula.is_some() || sh.hyperlinks.contains_key(&at) {
+                            continue;
+                        }
+                        if let Some(t) = cell.value.as_text().and_then(address) {
+                            out.push((at, t));
+                        }
+                    }
+                }
+            }
+            Some(out)
+        })
+        .unwrap_or_default();
+    for (at, target) in found {
+        app.run_or_alert("insert.link", json!({ "cell": at.a1(), "target": target }));
+    }
 }
 
 fn link_if_address(app: &mut SheetApp, doc: u64, sheet: usize, cell: CellRef) {
