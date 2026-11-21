@@ -17,6 +17,7 @@ mod files;
 mod fonts;
 mod icons;
 mod linkcard;
+mod merge;
 mod sheets_formulas;
 mod shell;
 mod theme;

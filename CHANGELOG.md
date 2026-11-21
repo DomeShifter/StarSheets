@@ -6,6 +6,15 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+### Added
+- Format › Merge cells › **Merge vertically**, and Google's "Heads up!" warning when merging would
+  drop values (with "Don't show this again for 5 minutes"). Merge options that can't apply to the
+  selection are greyed out.
+
+### Fixed
+- The screen no longer flashes when you change a cell's font size.
+- Copied cells no longer get an outline.
+
 ## [0.1.0] - 2026-11-21
 
 The first public preview. StarSheets is still early: please expect rough edges, and do tell me

@@ -219,7 +219,15 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     CmdWith("36", "home.fontSize", "", r#"{"size":36}"#),
                 ],
             ),
-            Sub("Merge cells", &[Cmd("Merge all", "home.mergeCells", ""), Cmd("Merge horizontally", "home.mergeAcross", ""), Cmd("Unmerge", "home.unmergeCells", "")]),
+            Sub(
+                "Merge cells",
+                &[
+                    Cmd("Merge all", "home.mergeCells", ""),
+                    Cmd("Merge vertically", "home.mergeDown", ""),
+                    Cmd("Merge horizontally", "home.mergeAcross", ""),
+                    Cmd("Unmerge", "home.unmergeCells", ""),
+                ],
+            ),
             Cmd("Convert to table", "insert.table", "Ctrl+Alt+T"),
             Cmd("Conditional formatting", "ui:manageRules", ""),
             Sep,
@@ -354,6 +362,7 @@ const BORDERS: &[(&str, &str, &str)] = &[
 
 const MERGE: &[(&str, &str, &str)] = &[
     ("Merge all", "home.mergeCells", "{}"),
+    ("Merge vertically", "home.mergeDown", "{}"),
     ("Merge horizontally", "home.mergeAcross", "{}"),
     ("Unmerge", "home.unmergeCells", "{}"),
 ];
@@ -655,10 +664,21 @@ fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
             continue;
         }
         let (name, sample) = label.split_once('|').unwrap_or((label, ""));
-        if ui.add_sized([width, 32.0], menu_row(name, sample, false)).clicked() {
+        if is_merge(id) {
+            let on = crate::merge::enabled(app, id);
+            if ui.add_enabled_ui(on, |ui| ui.add_sized([width, 32.0], menu_row(name, sample, false))).inner.clicked() {
+                ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::merge::REQUEST), id.to_string()));
+                ui.close();
+            }
+        } else if ui.add_sized([width, 32.0], menu_row(name, sample, false)).clicked() {
             run(app, ui, id, p);
         }
     }
+}
+
+/// The merge commands, which go through the "Heads up!" warning (merge.rs).
+fn is_merge(id: &str) -> bool {
+    matches!(id, "home.mergeCells" | "home.mergeDown" | "home.mergeAcross" | "home.unmergeCells")
 }
 
 fn colour_menu(app: &mut SheetApp, ui: &mut Ui, id: &str, reset_label: &str, reset_value: &str) {
@@ -949,6 +969,13 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
     let width = menu_style(ui, with_icons);
     for item in items {
         match item {
+            Cmd(label, id, keys) if is_merge(id) => {
+                let on = crate::merge::enabled(app, id);
+                if ui.add_enabled_ui(on, |ui| ui.add_sized([width, 32.0], menu_row(label, keys, with_icons))).inner.clicked() {
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::merge::REQUEST), id.to_string()));
+                    ui.close();
+                }
+            }
             Cmd(label, id, keys) => {
                 if ui.add_sized([width, 32.0], menu_row(label, keys, with_icons)).clicked() {
                     // "ui:<dialog>" opens one of GridCraft's dialogs (some, like conditional
