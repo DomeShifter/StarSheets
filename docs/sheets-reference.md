@@ -105,8 +105,8 @@ GridCraft behaves like Excel. StarSheets switches each row below to the Sheets w
 | 7 | Copy marker after pasting | Stays; you can paste again | Same for Ctrl+V; ends after Enter-paste | same already |
 | 8 | Default font / size / row height / column width | Arial 10 · 21 px rows · 100 px columns | Calibri 11 · 20 px rows · 64 px columns | font **done** (Roboto 10, patch 0006); row/column sizes **later** (must only apply to new sheets, not to opened Excel files) |
 | 9 | Single click on a link cell | Selects it and shows a link card (preview, copy, edit, remove); open from the card or Alt+Enter | Ctrl+click follows (or click follows) | **next** |
-| 10 | Formula error in a cell | Red triangle top-right; hover shows the error explanation | Green triangle top-left + warning icon menu | **next** |
-| 11 | Notes and comments markers | Note: small black triangle top-right; comment: orange-yellow triangle, opens in side thread | Red triangle (note), purple (comment) | **later** |
+| 10 | Formula error in a cell | Red triangle top-right; hover shows the error explanation | Green triangle top-left + warning icon menu | triangle **done** (patch 0008); hover explanation **next** |
+| 11 | Notes and comments markers | Note: small black triangle top-right; comment: orange-yellow triangle, opens in side thread | Red triangle (note), purple (comment) | colours **done** (patch 0008); comment side thread **later** |
 | 12 | Selection colours | Blue outline, light blue fill, active cell has no fill; headers of selected rows/columns turn light blue | Green outline, grey fill | **done** (palette) |
 | 13 | Fill handle | Small blue square at the bottom-right of the selection; drag to fill; double-click fills down | Same, green | **done** (palette) |
 | 14 | Typing a formula | Help card under the cell (syntax, example, description; F1 toggles); live result preview tooltip | Function tooltip only | **later** |
@@ -120,7 +120,7 @@ GridCraft behaves like Excel. StarSheets switches each row below to the Sheets w
 | 22 | Dropdown (data validation) cells | Shown as coloured chips with a ▾ arrow; click the chip to pick | Arrow only when selected | **later** |
 | 23 | Undo after typing | Undoes the whole edit | Same | same already |
 | 24 | Double-click a column border | Fits to data ("Fit to data") | Autofit | same already |
-| 25 | Right-click on a cell | Sheets' shorter menu (see §2) with "View more cell actions" | Excel's long menu | **next** |
+| 25 | Right-click on a cell | Sheets' shorter menu (see §2) with "View more cell actions" | Excel's long menu | **done** (patch 0007; "View more cell actions" submenu later) |
 | 26 | Dragging a selection's border | Moves the cells (hand cursor) | Same | same already |
 | 27 | Empty selection drag past the edge | Scrolls smoothly | Same | same already |
 | 28 | Freeze panes | Drag the thick grey bars at the top-left corner | View › Freeze | **later** |

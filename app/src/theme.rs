@@ -50,6 +50,7 @@ pub fn light() -> Tokens {
     t.sheet_fill = BLUE;
     t.sheet_focus = BLUE;
     t.error_check_green = rgb(0x188038);
+    t.sheets_marks = true;
     t.on_accent = Color32::WHITE;
     t
 }
