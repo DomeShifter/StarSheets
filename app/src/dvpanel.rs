@@ -914,6 +914,22 @@ mod tests {
     }
 
     #[test]
+    fn item_colours_are_told_apart_from_other_rules() {
+        let mut d = draft(Crit::Dropdown, "", "");
+        d.items = vec![Item { text: "Open".into(), colour: Some(0xD4EDBC) }, Item { text: "Closed".into(), colour: None }];
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        for (cmd, p) in commands(&d).unwrap() {
+            s.execute(cmd, p).unwrap();
+        }
+        s.execute("home.conditionalFormat", json!({ "range": "B2:B9", "rule": { "type": "cellIs", "operator": "equal", "value": "\"Maybe\"", "style": { "fill": "#FF0000" } } })).unwrap();
+        let sh = s.active().unwrap().wb.active().unwrap().clone();
+        let colour: Vec<bool> = sh.cond_formats.iter().map(|cf| is_item_colour(&sh, cf)).collect();
+        assert_eq!(colour.iter().filter(|c| **c).count(), 1, "{colour:?}");
+        assert_eq!(colour.len(), 2);
+    }
+
+    #[test]
     fn dates_print_back() {
         assert_eq!(date_text(date_number("05/03/2026").unwrap()), "05/03/2026");
         assert_eq!(date_text(date_number("29/02/2024").unwrap()), "29/02/2024");
@@ -923,4 +939,17 @@ mod tests {
 /// Identifies the workbook as it is now (it is replaced on every change).
 fn wb_ptr(app: &SheetApp) -> usize {
     app.session.active().map_or(0, |d| std::sync::Arc::as_ptr(&d.wb) as usize)
+}
+
+/// Whether a conditional-formatting rule is a drop-down item's colour: "is equal to" an item of a
+/// drop-down rule over exactly the same cells.
+pub fn is_item_colour(sh: &gridcraft_engine::model::Sheet, cf: &gridcraft_engine::model::CondFormat) -> bool {
+    let CfRule::CellIs { op: CfOperator::Equal, a, b: None, .. } = &cf.rule else { return false };
+    let value = a.trim().trim_matches('"').replace("\"\"", "\"");
+    sh.validations.iter().any(|v| {
+        v.kind == ValidationKind::List
+            && v.ranges == cf.ranges
+            && v.f1.trim().starts_with('"')
+            && v.f1.trim().trim_matches('"').replace("\"\"", "\"").split(',').any(|item| item.trim() == value)
+    })
 }
