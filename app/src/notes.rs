@@ -69,11 +69,11 @@ impl Notes {
         let mut start_edit = false;
         let mut new_size = None;
         let area = egui::Area::new(egui::Id::new("starsheets_note_card")).fixed_pos(at).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            egui::Frame::popup(ui.style()).fill(Color32::WHITE).corner_radius(4.0).inner_margin(egui::Margin::same(10)).show(ui, |ui| {
-                ui.set_min_size(vec2(w - 20.0, h - 20.0));
-                ui.set_max_size(vec2(w - 20.0, h - 20.0));
+            crate::house::card_frame().inner_margin(egui::Margin::same(crate::house::M as i8)).show(ui, |ui| {
+                ui.set_min_size(vec2(w - 24.0, h - 24.0));
+                ui.set_max_size(vec2(w - 24.0, h - 24.0));
                 if let Some((_, _, draft)) = self.editing.as_mut().filter(|(doc, c, _)| *doc == uid && *c == cell) {
-                    let r = ui.add(egui::TextEdit::multiline(draft).frame(egui::Frame::NONE).text_color(TEXT).desired_width(w - 20.0).desired_rows(3).font(egui::FontId::proportional(14.0)));
+                    let r = ui.add(egui::TextEdit::multiline(draft).frame(egui::Frame::NONE).text_color(TEXT).desired_width(w - 24.0).desired_rows(3).font(egui::FontId::proportional(14.0)));
                     if self.focus {
                         r.request_focus();
                         self.focus = false;

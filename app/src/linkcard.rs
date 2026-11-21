@@ -1,7 +1,7 @@
 //! Sheets' link card: selecting a cell with a link shows a small card (the address, open, copy,
 //! edit, remove) instead of following the link (patch 0009 stops GridCraft's click-to-follow).
 
-use egui::{Align2, Button, Frame, RichText, Ui, vec2};
+use egui::{Align2, Button, RichText, Ui, vec2};
 use gridcraft_engine::core::CellRef;
 use gridcraft_ui_egui::SheetApp;
 use serde_json::json;
@@ -42,7 +42,7 @@ impl LinkCard {
             return;
         }
         egui::Area::new(egui::Id::new("starsheets_link_card")).fixed_pos(pos).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            Frame::popup(ui.style()).fill(egui::Color32::WHITE).corner_radius(8.0).inner_margin(10.0).show(ui, |ui| {
+            crate::house::card_frame().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let shown: String = if target.chars().count() > 48 { target.chars().take(45).chain("…".chars()).collect() } else { target.clone() };
                     if ui.link(RichText::new(shown).color(theme::BLUE)).on_hover_text("Open link").clicked() {

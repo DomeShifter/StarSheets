@@ -46,7 +46,7 @@ impl CalcPreview {
             .pivot(Align2::LEFT_BOTTOM)
             .order(egui::Order::Tooltip)
             .show(ui.ctx(), |ui| {
-                egui::Frame::popup(ui.style()).fill(Color32::WHITE).corner_radius(4.0).inner_margin(egui::Margin::symmetric(8, 4)).show(ui, |ui| {
+                crate::house::bubble_frame().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&text).size(14.0).color(Color32::from_rgb(0x1A, 0x73, 0xE8)));
                         if ui.add(egui::Button::new(RichText::new("×").size(14.0).color(Color32::from_gray(0x80))).frame(false)).on_hover_text("Hide").clicked() {

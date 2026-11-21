@@ -68,11 +68,6 @@ pub fn light() -> Tokens {
 pub fn install(ctx: &egui::Context) {
     Tokens::install(ctx, light(), Tokens::dark());
     theme::apply(ctx, false);
-    // Sheets' menu panels: 8 px corners, a soft shadow, rows running edge to edge (the menu's
-    // own margin is only top and bottom).
-    ctx.all_styles_mut(|s| {
-        s.visuals.menu_corner_radius = egui::CornerRadius::same(8);
-        s.visuals.popup_shadow = egui::epaint::Shadow { offset: [0, 2], blur: 10, spread: 0, color: Color32::from_black_alpha(45) };
-        s.spacing.menu_margin = egui::Margin::symmetric(0, 6);
-    });
+    // Padding, corners and shadows for every window, menu and dialog (house.rs).
+    crate::house::install(ctx);
 }

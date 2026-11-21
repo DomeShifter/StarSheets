@@ -10,7 +10,7 @@ use serde_json::{Value as Json, json};
 
 use crate::theme;
 
-const GREEN: Color32 = Color32::from_rgb(0x14, 0x6C, 0x2E);
+const GREEN: Color32 = crate::house::GREEN;
 const PANEL_W: f32 = 320.0;
 
 /// Google Sheets' conditions, in its order: label, GridCraft rule type, operator, value boxes.
@@ -161,7 +161,7 @@ impl CfPanel {
         egui::Panel::right("starsheets_cf")
             .exact_size(PANEL_W + 32.0)
             .resizable(false)
-            .frame(Frame::NONE.fill(Color32::WHITE).inner_margin(Margin::symmetric(16, 12)).stroke(Stroke::new(1.0, theme::DIVIDER)))
+            .frame(crate::house::panel_frame())
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Conditional format rules").size(16.0).color(theme::TEXT));
@@ -301,10 +301,10 @@ impl CfPanel {
         let mut out = None;
         ui.horizontal(|ui| {
             ui.add_space(PANEL_W - 200.0);
-            if ui.add(egui::Button::new(RichText::new("Cancel").color(GREEN)).stroke(Stroke::new(1.0, theme::BOX)).fill(Color32::WHITE).corner_radius(4.0).min_size(vec2(90.0, 36.0))).clicked() {
+            if ui.add(crate::house::secondary("Cancel")).clicked() {
                 out = Some(false);
             }
-            if ui.add(egui::Button::new(RichText::new("Done").color(Color32::WHITE)).fill(GREEN).corner_radius(4.0).min_size(vec2(90.0, 36.0))).clicked() {
+            if ui.add(crate::house::primary("Done")).clicked() {
                 out = Some(true);
             }
         });

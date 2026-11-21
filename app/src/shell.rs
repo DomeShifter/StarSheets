@@ -884,10 +884,16 @@ pub fn menu_row(label: &str, keys: &str, with_icons: bool) -> Button<'static> {
 /// ~320 px with icons, 220 px for plain submenus.
 pub fn menu_style(ui: &mut Ui, with_icons: bool) -> f32 {
     let width = if with_icons { 320.0 } else { 220.0 };
+    menu_style_width(ui, width);
+    width
+}
+
+/// The Sheets menu look for a menu of any width (house.rs: 16 px side padding, 32 px rows).
+pub fn menu_style_width(ui: &mut Ui, width: f32) {
     ui.set_min_width(width);
     ui.set_max_width(width);
     let st = ui.style_mut();
-    st.spacing.button_padding = vec2(12.0, 7.0);
+    st.spacing.button_padding = vec2(f32::from(crate::house::MENU_INSET), 7.0);
     st.spacing.item_spacing = vec2(14.0, 0.0);
     st.spacing.icon_width = 10.0;
     let w = &mut st.visuals.widgets;
@@ -897,7 +903,6 @@ pub fn menu_style(ui: &mut Ui, with_icons: bool) -> f32 {
         state.corner_radius = egui::CornerRadius::ZERO;
         state.expansion = 0.0;
     }
-    width
 }
 
 /// A Sheets menu divider: a light line with 8 px above and below.

@@ -11,8 +11,8 @@ use crate::theme;
 
 const W: f32 = 820.0;
 const ROW: f32 = 36.0;
-const GREEN: Color32 = Color32::from_rgb(0x14, 0x6C, 0x2E);
-const SELECTED: Color32 = Color32::from_rgb(0xE8, 0xF0, 0xFE);
+const GREEN: Color32 = crate::house::GREEN;
+const SELECTED: Color32 = crate::house::SELECTED;
 
 /// A file (by id) or a folder (by path).
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -159,7 +159,7 @@ impl Browser {
         }
         let mut open = true;
         let title = if self.in_bin { "Bin" } else { "Open a file" };
-        let shown = egui::Window::new(title).id(egui::Id::new("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
+        let shown = egui::Window::new(RichText::new(title).size(crate::house::TITLE).color(crate::theme::TEXT)).frame(crate::house::dialog_frame()).id(egui::Id::new("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
             ui.set_width(W);
             if self.in_bin {
                 self.bin_ui(ui, &mut out);
@@ -167,7 +167,7 @@ impl Browser {
                 self.files_ui(ui, keys, &mut out);
             }
             if let Some(e) = &self.error {
-                ui.label(RichText::new(e).color(Color32::from_rgb(0xC5, 0x39, 0x29)));
+                ui.label(RichText::new(e).size(crate::house::NOTE).color(crate::house::ERROR));
             }
         });
         // A click outside the window closes it, as with a menu (not while one of its own menus

@@ -6,6 +6,10 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+### Changed
+- One house style for every dialog, menu, card and panel, following Google Sheets: 24 px dialog
+  padding, pill-shaped buttons, 36 px fields, padded menus (docs/house-style.md).
+
 ### Added
 - Format › Merge cells › **Merge vertically**, and Google's "Heads up!" warning when merging would
   drop values (with "Don't show this again for 5 minutes"). Merge options that can't apply to the

@@ -3,12 +3,12 @@
 //! Aug or August…), ▾ to add a part, a list of ready-made formats, and Apply. The selection
 //! shows the format while you build it; closing the window takes it back.
 
-use egui::{Color32, RichText, Stroke, vec2};
+use egui::{RichText, Stroke, vec2};
 use gridcraft_engine::core::Value;
 use gridcraft_ui_egui::SheetApp;
 use serde_json::json;
 
-use crate::theme;
+use crate::{house, theme};
 
 /// Asks for the window (the menu sets it in egui's memory).
 pub const REQUEST: &str = "starsheets_custom_date";
@@ -75,21 +75,13 @@ impl CustomDate {
         }
         let Some(parts) = self.parts.as_mut() else { return };
         let mut done = None;
-        egui::Modal::new(egui::Id::new("starsheets_custom_date")).show(ctx, |ui| {
-            ui.set_width(470.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Custom date and time formats").size(20.0).color(theme::TEXT));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new("✕").size(16.0)).frame(false)).clicked() {
-                        done = Some(false);
-                    }
-                });
-            });
-            ui.add_space(12.0);
+        let mut closed = false;
+        house::dialog(ctx, "starsheets_custom_date", 470.0, "Custom date and time formats", Some(&mut closed), |ui| {
             // The builder bar.
             ui.horizontal(|ui| {
-                egui::Frame::NONE.stroke(Stroke::new(1.0, theme::BOX)).corner_radius(4.0).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
-                    ui.set_width(360.0);
+                let bar = ui.available_width() - 36.0 - 88.0 - 2.0 * house::S - 2.0 * house::S;
+                egui::Frame::NONE.stroke(Stroke::new(1.0, theme::BOX)).corner_radius(f32::from(house::FIELD_RADIUS)).inner_margin(egui::Margin::same(house::S as i8)).show(ui, |ui| {
+                    ui.set_width(bar);
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = vec2(2.0, 4.0);
                         let mut remove = None;
@@ -98,16 +90,18 @@ impl CustomDate {
                                 Part::Token(k, v) => {
                                     let (kind, variants) = KINDS[*k];
                                     let label = format!("{kind} ({})", sample(variants[*v].0, *k));
-                                    let chip = ui.add(egui::Button::new(RichText::new(label).size(13.0)).fill(Color32::WHITE).stroke(Stroke::new(1.0, theme::BOX)).corner_radius(3.0));
+                                    let chip = ui.add(egui::Button::new(RichText::new(label).size(13.0)).fill(house::SELECTED).stroke(Stroke::NONE).corner_radius(f32::from(house::FIELD_RADIUS)));
                                     egui::Popup::menu(&chip).id(egui::Id::new(("date_part", i))).show(|ui| {
+                                        let width = crate::shell::menu_style(ui, false);
                                         for (vi, (_, text)) in variants.iter().enumerate() {
-                                            if ui.selectable_label(*v == vi, *text).clicked() {
+                                            let mark = if *v == vi { "✓  " } else { "     " };
+                                            if ui.add(crate::shell::menu_row(&format!("{mark}{text}"), "", false)).clicked() {
                                                 *v = vi;
                                                 ui.close();
                                             }
                                         }
-                                        ui.separator();
-                                        if ui.button("Delete").clicked() {
+                                        crate::shell::menu_sep_width(ui, width);
+                                        if ui.add(crate::shell::menu_row("Delete", "", false)).clicked() {
                                             remove = Some(i);
                                             ui.close();
                                         }
@@ -124,10 +118,11 @@ impl CustomDate {
                         }
                     });
                 });
-                let add = ui.add(egui::Button::new("▾").min_size(vec2(26.0, 30.0)));
+                let add = ui.add(egui::Button::new("▾").min_size(vec2(36.0, house::FIELD_HEIGHT))).on_hover_text("Add a part");
                 egui::Popup::menu(&add).id(egui::Id::new("date_add")).show(|ui| {
+                    crate::shell::menu_style(ui, false);
                     for (k, (kind, _)) in KINDS.iter().enumerate() {
-                        if ui.button(*kind).clicked() {
+                        if ui.add(crate::shell::menu_row(kind, "", false)).clicked() {
                             if !parts.is_empty() {
                                 parts.push(Part::Sep(" ".into()));
                             }
@@ -136,15 +131,15 @@ impl CustomDate {
                         }
                     }
                 });
-                let green = Color32::from_rgb(0x14, 0x6C, 0x2E);
-                if ui.add(egui::Button::new(RichText::new("Apply").color(Color32::WHITE)).fill(green).corner_radius(4.0).min_size(vec2(80.0, 34.0))).clicked() {
+                if ui.add(house::primary("Apply")).clicked() {
                     done = Some(true);
                 }
             });
-            ui.add_space(10.0);
+            house::gap(ui);
             egui::ScrollArea::vertical().max_height(330.0).show(ui, |ui| {
+                crate::shell::menu_style_width(ui, ui.available_width());
                 for code in PRESETS {
-                    let r = ui.add(egui::Button::new(RichText::new(sample_code(code)).size(14.0)).frame(false).min_size(vec2(450.0, 34.0)));
+                    let r = ui.add(egui::Button::new(RichText::new(sample_code(code)).size(house::BODY).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(ui.available_width(), house::ROW_HEIGHT)));
                     if r.clicked() {
                         *parts = parse(code);
                     }
@@ -155,6 +150,9 @@ impl CustomDate {
                 done = Some(false);
             }
         });
+        if closed {
+            done = Some(false);
+        }
         let code = to_code(parts);
         // Live preview: the selection shows the format as it is built.
         if self.preview.as_ref().is_none_or(|(c, _)| *c != code) && done.is_none() {

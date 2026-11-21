@@ -7,7 +7,7 @@ use egui::{Color32, Pos2, Rect, RichText, Sense, Stroke, Ui, vec2};
 use gridcraft_ui_egui::SheetApp;
 use serde_json::json;
 
-use crate::theme;
+use crate::{house, theme};
 
 /// Google's palette: a grey row, a bright row, then lighter to darker tints of the bright row.
 const PALETTE: [[u32; 10]; 8] = [
@@ -44,47 +44,54 @@ fn current(app: &SheetApp, cmd: &str) -> Option<u32> {
 
 /// The menu body (inside the toolbar's colour button).
 pub fn menu(app: &mut SheetApp, ui: &mut Ui, cmd: &str, reset_value: &str) {
-    ui.set_width(232.0);
+    // Rows run edge to edge like every menu; the palette sits 16 px in from the sides.
+    let width = 10.0 * 19.0 + 9.0 * 4.0 + 2.0 * f32::from(house::MENU_INSET);
+    ui.set_width(width);
+    crate::shell::menu_style_width(ui, width);
     let set = |app: &mut SheetApp, rgb: u32| app.run_or_alert(cmd, json!({ "color": format!("#{rgb:06X}") }));
-    // Reset.
+    let text = |t: &str| RichText::new(t.to_string()).size(house::BODY).color(theme::TEXT);
     let reset = match crate::icons::icon("format_color_reset") {
-        Some(img) => egui::Button::image_and_text(img.fit_to_exact_size(vec2(18.0, 18.0)), "Reset"),
-        None => egui::Button::new("Reset"),
+        Some(img) => egui::Button::image_and_text(img.fit_to_exact_size(vec2(18.0, 18.0)), text("Reset")),
+        None => egui::Button::new(text("Reset")),
     };
-    if ui.add(reset.frame(false)).clicked() {
+    if ui.add(reset.frame_when_inactive(false).min_size(vec2(0.0, house::ROW_HEIGHT))).clicked() {
         app.run_or_alert(cmd, json!({ "color": reset_value }));
         ui.close();
     }
-    ui.add_space(4.0);
     let now = current(app, cmd);
     let mut picked = None;
-    for row in PALETTE {
-        swatches(ui, &row, now, &mut picked);
-    }
-    ui.add_space(6.0);
-    ui.label(RichText::new("STANDARD").size(11.0).strong().color(theme::TEXT_DIM));
-    swatches(ui, &STANDARD, now, &mut picked);
-    ui.separator();
-    ui.label(RichText::new("CUSTOM").size(11.0).strong().color(theme::TEXT_DIM));
-    let custom = load_custom();
     let mut open_picker = false;
-    ui.horizontal(|ui| {
+    house::menu_inset(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
-        for c in &custom {
-            if swatch(ui, *c, now == Some(*c)) {
-                picked = Some(*c);
-            }
+        for row in PALETTE {
+            swatches(ui, &row, now, &mut picked);
         }
-        let add = match crate::icons::icon("add_circle") {
-            Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(20.0, 20.0))),
-            None => egui::Button::new("+"),
-        };
-        if ui.add(add.frame(false)).on_hover_text("Custom colour").clicked() {
-            open_picker = true;
-        }
+        ui.add_space(house::S);
+        house::caps(ui, "Standard");
+        swatches(ui, &STANDARD, now, &mut picked);
     });
-    ui.separator();
-    if ui.add(egui::Button::new(RichText::new("Conditional formatting").size(14.0)).frame(false)).clicked() {
+    crate::shell::menu_sep_width(ui, width);
+    house::menu_inset(ui, |ui| {
+        ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+        house::caps(ui, "Custom");
+        let custom = load_custom();
+        ui.horizontal(|ui| {
+            for c in &custom {
+                if swatch(ui, *c, now == Some(*c)) {
+                    picked = Some(*c);
+                }
+            }
+            let add = match crate::icons::icon("add_circle") {
+                Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(20.0, 20.0))),
+                None => egui::Button::new("+"),
+            };
+            if ui.add(add.frame(false)).on_hover_text("Custom colour").clicked() {
+                open_picker = true;
+            }
+        });
+    });
+    crate::shell::menu_sep_width(ui, width);
+    if ui.add(egui::Button::new(text("Conditional formatting")).frame_when_inactive(false).min_size(vec2(0.0, house::ROW_HEIGHT))).clicked() {
         app.open_dialog("manageRules", json!({}));
         ui.close();
     }
@@ -204,10 +211,10 @@ impl CustomPicker {
         }
         let Some(p) = self.state.as_mut() else { return };
         let mut done = None;
-        egui::Modal::new(egui::Id::new("starsheets_custom_colour")).show(ctx, |ui| {
-            ui.set_width(232.0);
+        let mut closed = false;
+        house::dialog(ctx, "starsheets_custom_colour", 300.0, "Custom colour", Some(&mut closed), |ui| {
             // Saturation (across) and brightness (down) for the chosen hue.
-            let (sq, resp) = ui.allocate_exact_size(vec2(226.0, 150.0), Sense::click_and_drag());
+            let (sq, resp) = ui.allocate_exact_size(vec2(300.0, 180.0), Sense::click_and_drag());
             paint_sv(ui, sq, p.h);
             if let Some(pos) = resp.interact_pointer_pos() {
                 p.s = ((pos.x - sq.left()) / sq.width()).clamp(0.0, 1.0);
@@ -216,12 +223,11 @@ impl CustomPicker {
             }
             let knob = Pos2::new(sq.left() + p.s * sq.width(), sq.top() + (1.0 - p.v) * sq.height());
             ui.painter().circle(knob, 7.0, c32(p.rgb()), Stroke::new(2.0, Color32::WHITE));
-            ui.add_space(10.0);
+            ui.add_space(house::M);
             ui.horizontal(|ui| {
                 let (dot, _) = ui.allocate_exact_size(vec2(34.0, 34.0), Sense::hover());
                 ui.painter().circle_filled(dot.center(), 16.0, c32(p.rgb()));
-                ui.add_space(6.0);
-                let (bar, hr) = ui.allocate_exact_size(vec2(170.0, 12.0), Sense::click_and_drag());
+                let (bar, hr) = ui.allocate_exact_size(vec2(300.0 - 34.0 - house::S, 12.0), Sense::click_and_drag());
                 paint_hue(ui, bar);
                 if let Some(pos) = hr.interact_pointer_pos() {
                     p.h = ((pos.x - bar.left()) / bar.width()).clamp(0.0, 1.0) * 360.0;
@@ -230,11 +236,11 @@ impl CustomPicker {
                 let x = bar.left() + p.h / 360.0 * bar.width();
                 ui.painter().circle(egui::pos2(x, bar.center().y), 8.0, c32(hsv_to_rgb(p.h, 1.0, 1.0)), Stroke::new(2.0, Color32::WHITE));
             });
-            ui.add_space(10.0);
+            ui.add_space(house::M);
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new("Hex").size(11.0).color(theme::TEXT_DIM));
-                    let r = ui.add(egui::TextEdit::singleline(&mut p.hex).desired_width(74.0).margin(vec2(6.0, 6.0)));
+                    house::caps(ui, "Hex");
+                    let r = ui.add(egui::TextEdit::singleline(&mut p.hex).desired_width(96.0).margin(vec2(house::S, house::S)));
                     if r.changed()
                         && let Some(rgb) = parse_hex(&p.hex)
                     {
@@ -245,8 +251,8 @@ impl CustomPicker {
                 });
                 for (i, name) in ["R", "G", "B"].iter().enumerate() {
                     ui.vertical(|ui| {
-                        ui.label(RichText::new(*name).size(11.0).color(theme::TEXT_DIM));
-                        let r = ui.add(egui::TextEdit::singleline(&mut p.rgb_text[i]).desired_width(32.0).margin(vec2(6.0, 6.0)));
+                        house::caps(ui, name);
+                        let r = ui.add(egui::TextEdit::singleline(&mut p.rgb_text[i]).desired_width(36.0).margin(vec2(house::S, house::S)));
                         if r.changed() {
                             let parts: Vec<u32> = p.rgb_text.iter().map(|t| t.trim().parse::<u32>().unwrap_or(0).min(255)).collect();
                             let keep = p.rgb_text.clone();
@@ -256,21 +262,18 @@ impl CustomPicker {
                     });
                 }
             });
-            ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.add_space(70.0);
-                let green = Color32::from_rgb(0x14, 0x6C, 0x2E);
-                if ui.add(egui::Button::new(RichText::new("Cancel").color(green)).fill(Color32::WHITE).stroke(Stroke::new(1.0, theme::BOX)).corner_radius(4.0).min_size(vec2(84.0, 34.0))).clicked() {
-                    done = Some(false);
-                }
-                if ui.add(egui::Button::new(RichText::new("OK").color(Color32::WHITE)).fill(green).corner_radius(4.0).min_size(vec2(64.0, 34.0))).clicked() {
-                    done = Some(true);
-                }
-            });
+            match house::actions(ui, &["Cancel", "OK"]) {
+                Some(0) => done = Some(false),
+                Some(_) => done = Some(true),
+                None => {}
+            }
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 done = Some(false);
             }
         });
+        if closed {
+            done = Some(false);
+        }
         match done {
             Some(true) => {
                 let rgb = p.rgb();

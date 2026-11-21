@@ -3,12 +3,9 @@
 //! when merging would drop values (only the top-left one of each merged block is kept), with
 //! "Don't show this again for 5 minutes".
 
-use egui::{Color32, RichText, vec2};
 use gridcraft_engine::core::{CellRef, RangeRef};
 use gridcraft_ui_egui::SheetApp;
 use serde_json::json;
-
-use crate::theme;
 
 /// Asks for a merge command, through egui's memory (menus and toolbar set it).
 pub const REQUEST: &str = "starsheets_merge";
@@ -64,35 +61,22 @@ impl MergeGuard {
         }
         let Some(cmd) = self.pending.clone() else { return };
         let mut answer = None;
-        egui::Modal::new(egui::Id::new("starsheets_merge_warning")).show(ctx, |ui| {
-            ui.set_width(460.0);
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Heads up!").size(20.0).color(theme::TEXT));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(RichText::new("✕").size(16.0)).frame(false)).clicked() {
-                        answer = Some(false);
-                    }
-                });
-            });
-            ui.add_space(10.0);
-            ui.label(RichText::new("Merging cells will only preserve the top-leftmost value. Merge anyway?").size(14.0).color(theme::TEXT));
-            ui.add_space(8.0);
+        let mut closed = false;
+        crate::house::dialog(ctx, "starsheets_merge_warning", 460.0, "Heads up!", Some(&mut closed), |ui| {
+            crate::house::text(ui, "Merging cells will only preserve the top-leftmost value. Merge anyway?");
             ui.checkbox(&mut self.dont_ask, "Don't show this again for 5 minutes");
-            ui.add_space(14.0);
-            ui.horizontal(|ui| {
-                ui.add_space(460.0 - 190.0);
-                let green = Color32::from_rgb(0x14, 0x6C, 0x2E);
-                if ui.add(egui::Button::new(RichText::new("Cancel").color(green)).fill(Color32::WHITE).stroke(egui::Stroke::new(1.0, theme::BOX)).corner_radius(4.0).min_size(vec2(96.0, 36.0))).clicked() {
-                    answer = Some(false);
-                }
-                if ui.add(egui::Button::new(RichText::new("OK").color(Color32::WHITE)).fill(green).corner_radius(4.0).min_size(vec2(72.0, 36.0))).clicked() {
-                    answer = Some(true);
-                }
-            });
+            match crate::house::actions(ui, &["Cancel", "OK"]) {
+                Some(0) => answer = Some(false),
+                Some(_) => answer = Some(true),
+                None => {}
+            }
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 answer = Some(false);
             }
         });
+        if closed {
+            answer = Some(false);
+        }
         match answer {
             Some(true) => {
                 if self.dont_ask {

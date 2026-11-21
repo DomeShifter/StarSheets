@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use egui::{Color32, RichText, Ui, vec2};
+use egui::{RichText, Ui, vec2};
 use gridcraft_engine::model::Workbook;
 use gridcraft_ui_egui::SheetApp;
 use serde_json::{Value as Json, json};
@@ -431,10 +431,10 @@ impl Files {
         if let Some(vs) = self.versions.clone() {
             let mut open = true;
             let mut restore = None;
-            egui::Window::new("Version history").open(&mut open).collapsible(false).resizable(false).anchor(egui::Align2::RIGHT_TOP, vec2(-20.0, 90.0)).show(ui.ctx(), |ui| {
+            egui::Window::new(RichText::new("Version history").size(crate::house::TITLE).color(theme::TEXT)).open(&mut open).collapsible(false).resizable(false).frame(crate::house::dialog_frame()).anchor(egui::Align2::RIGHT_TOP, vec2(-20.0, 90.0)).show(ui.ctx(), |ui| {
+                crate::house::form_style(ui);
                 ui.set_width(320.0);
-                ui.label(RichText::new("Earlier copies are kept each time the file saves (the last 6).").color(theme::TEXT_DIM));
-                ui.add_space(6.0);
+                crate::house::note(ui, "Earlier copies are kept each time the file saves (the last 6).");
                 if vs.is_empty() {
                     ui.label("No earlier versions yet.");
                 }
@@ -442,7 +442,7 @@ impl Files {
                     ui.horizontal(|ui| {
                         ui.label(date_text(*when));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(egui::Button::new(RichText::new("Restore").color(Color32::from_rgb(0x14, 0x6C, 0x2E))).frame(false)).clicked() {
+                            if ui.add(crate::house::link("Restore")).clicked() {
                                 restore = Some(v.clone());
                             }
                         });
@@ -483,13 +483,10 @@ impl Files {
     /// The server's sign-in box (when it was started with a password).
     fn login_ui(&mut self, ctx: &egui::Context) {
         let mut go = false;
-        egui::Modal::new(egui::Id::new("starsheets_login")).show(ctx, |ui| {
-            ui.set_width(320.0);
-            ui.label(RichText::new("Sign in to StarSheets").size(18.0).color(theme::TEXT));
-            ui.add_space(6.0);
-            ui.label(RichText::new("This server keeps its spreadsheets behind a password.").color(theme::TEXT_DIM));
-            ui.add_space(10.0);
-            let r = ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("Password").desired_width(f32::INFINITY).margin(vec2(8.0, 8.0)));
+        crate::house::dialog(ctx, "starsheets_login", 360.0, "Sign in to StarSheets", None, |ui| {
+            crate::house::note(ui, "This server keeps its spreadsheets behind a password.");
+            crate::house::gap(ui);
+            let r = ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("Password").desired_width(f32::INFINITY).margin(vec2(crate::house::M, crate::house::S + 1.0)));
             // Focus the box once (grabbing it every frame swallowed the Enter that signs in).
             if !self.login_focused {
                 r.request_focus();
@@ -500,10 +497,9 @@ impl Files {
                 r.request_focus();
             }
             if let Some(e) = &self.login_error {
-                ui.label(RichText::new(e).color(Color32::from_rgb(0xC5, 0x39, 0x29)));
+                ui.label(RichText::new(e).size(crate::house::NOTE).color(crate::house::ERROR));
             }
-            ui.add_space(8.0);
-            if ui.add(egui::Button::new(RichText::new("Sign in").color(Color32::WHITE)).fill(Color32::from_rgb(0x14, 0x6C, 0x2E)).corner_radius(4.0).min_size(vec2(90.0, 34.0))).clicked() {
+            if crate::house::actions(ui, &["Sign in"]).is_some() {
                 go = true;
             }
         });

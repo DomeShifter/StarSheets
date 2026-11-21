@@ -18,6 +18,7 @@ mod filebrowser;
 #[cfg(target_arch = "wasm32")]
 mod files;
 mod fonts;
+mod house;
 mod icons;
 mod linkcard;
 mod merge;

@@ -2,7 +2,7 @@
 //! shows a month calendar under the cell. Clicking a day puts that date in the cell; "Today"
 //! jumps to the current month.
 
-use egui::{Align2, Color32, Frame, RichText, Sense, Ui, vec2};
+use egui::{Align2, Color32, RichText, Sense, Ui, vec2};
 use gridcraft_engine::core::{CellRef, Value};
 use gridcraft_engine::model::ValidationKind;
 use gridcraft_ui_egui::SheetApp;
@@ -42,7 +42,7 @@ impl DatePicker {
         let Some((_, mut year, mut month)) = self.shown else { return };
         let mut picked = None;
         egui::Area::new(egui::Id::new("starsheets_date_picker")).fixed_pos(pos + vec2(0.0, 4.0)).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            Frame::popup(ui.style()).fill(Color32::WHITE).corner_radius(8.0).inner_margin(12.0).show(ui, |ui| {
+            crate::house::card_frame().show(ui, |ui| {
                 ui.set_width(CELL * 7.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("{} {year}", MONTHS[(month - 1) as usize])).size(16.0).color(theme::TEXT));

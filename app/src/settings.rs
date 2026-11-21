@@ -3,12 +3,11 @@
 //! formats new entries get, and the display language of GridCraft's dialogs. Kept in the browser,
 //! and handed to GridCraft's input reader (patch 0026).
 
-use egui::{Color32, RichText, vec2};
 use gridcraft_engine::core::Value;
 use gridcraft_ui_egui::SheetApp;
 use serde::{Deserialize, Serialize};
 
-use crate::theme;
+use crate::house;
 
 /// Asks for the Settings window (File › Settings), through egui's memory.
 pub const REQUEST: &str = "starsheets_settings";
@@ -121,21 +120,13 @@ impl SettingsWindow {
         }
         let Some(d) = self.draft.as_mut() else { return };
         let mut done = None;
-        egui::Modal::new(egui::Id::new("starsheets_settings")).show(ctx, |ui| {
-            ui.set_width(520.0);
-            ui.label(RichText::new("Settings").size(20.0).color(theme::TEXT));
-            ui.add_space(4.0);
-            ui.label(RichText::new("These apply to everything you open in this browser.").color(theme::TEXT_DIM));
-            ui.add_space(14.0);
-            let row = |ui: &mut egui::Ui, label: &str, note: &str| {
-                ui.label(RichText::new(label).size(14.0).strong().color(theme::TEXT));
-                if !note.is_empty() {
-                    ui.label(RichText::new(note).size(12.0).color(theme::TEXT_DIM));
-                }
-            };
-            row(ui, "Locale", "How typed dates are read (05/08/2026 is 5 August in the UK, May 8 in the US), and the formats below.");
+        let mut closed = false;
+        house::dialog(ctx, "starsheets_settings", 520.0, "Settings", Some(&mut closed), |ui| {
+            house::note(ui, "These apply to everything you open in this browser.");
+            house::gap(ui);
+            house::label(ui, "Locale", "How typed dates are read (05/08/2026 is 5 August in the UK, May 8 in the US), and the formats below.");
             let before = d.locale;
-            egui::ComboBox::from_id_salt("set_locale").width(500.0).selected_text(LOCALES[d.locale].0).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("set_locale").width(ui.available_width()).selected_text(LOCALES[d.locale].0).show_ui(ui, |ui| {
                 for (i, l) in LOCALES.iter().enumerate() {
                     ui.selectable_value(&mut d.locale, i, l.0);
                 }
@@ -145,52 +136,53 @@ impl SettingsWindow {
                 d.date = date.into();
                 d.time = time.into();
             }
-            ui.add_space(12.0);
+            house::gap(ui);
             ui.columns(3, |cols| {
-                row(&mut cols[0], "Date", "");
-                egui::ComboBox::from_id_salt("set_date").width(150.0).selected_text(sample(&d.date)).show_ui(&mut cols[0], |ui| {
+                for c in cols.iter_mut() {
+                    house::form_style(c);
+                }
+                let w = cols[0].available_width();
+                house::label(&mut cols[0], "Date", "");
+                egui::ComboBox::from_id_salt("set_date").width(w).selected_text(sample(&d.date)).show_ui(&mut cols[0], |ui| {
                     for f in DATE_FORMATS {
                         ui.selectable_value(&mut d.date, f.to_string(), sample(f));
                     }
                 });
-                row(&mut cols[1], "Time", "");
-                egui::ComboBox::from_id_salt("set_time").width(150.0).selected_text(sample(&d.time)).show_ui(&mut cols[1], |ui| {
+                house::label(&mut cols[1], "Time", "");
+                egui::ComboBox::from_id_salt("set_time").width(w).selected_text(sample(&d.time)).show_ui(&mut cols[1], |ui| {
                     for f in TIME_FORMATS {
                         ui.selectable_value(&mut d.time, f.to_string(), sample(f));
                     }
                 });
-                row(&mut cols[2], "Numbers", "");
+                house::label(&mut cols[2], "Numbers", "");
                 let shown = NUMBER_FORMATS.iter().find(|(_, c)| *c == d.number).map_or("Automatic", |(l, _)| l);
-                egui::ComboBox::from_id_salt("set_number").width(150.0).selected_text(shown).show_ui(&mut cols[2], |ui| {
+                egui::ComboBox::from_id_salt("set_number").width(w).selected_text(shown).show_ui(&mut cols[2], |ui| {
                     for (label, code) in NUMBER_FORMATS {
                         ui.selectable_value(&mut d.number, code.to_string(), *label);
                     }
                 });
             });
-            ui.label(RichText::new("New dates, times and numbers you type get these formats; cells already formatted keep theirs.").size(12.0).color(theme::TEXT_DIM));
-            ui.add_space(12.0);
-            row(ui, "Display language", "For dialogs. StarSheets' own menus and toolbar are in English for now.");
+            house::note(ui, "New dates, times and numbers you type get these formats; cells already formatted keep theirs.");
+            house::gap(ui);
+            house::label(ui, "Display language", "For dialogs. StarSheets' own menus and toolbar are in English for now.");
             let langs = gridcraft_ui_egui::i18n::Language::ALL;
-            egui::ComboBox::from_id_salt("set_lang").width(500.0).selected_text(langs.get(d.language).map_or("English", |l| l.name())).show_ui(ui, |ui| {
+            egui::ComboBox::from_id_salt("set_lang").width(ui.available_width()).selected_text(langs.get(d.language).map_or("English", |l| l.name())).show_ui(ui, |ui| {
                 for (i, l) in langs.iter().enumerate() {
                     ui.selectable_value(&mut d.language, i, l.name());
                 }
             });
-            ui.add_space(18.0);
-            ui.horizontal(|ui| {
-                ui.add_space(520.0 - 210.0);
-                let green = Color32::from_rgb(0x14, 0x6C, 0x2E);
-                if ui.add(egui::Button::new(RichText::new("Cancel").color(green)).fill(Color32::WHITE).stroke(egui::Stroke::new(1.0, theme::BOX)).corner_radius(4.0).min_size(vec2(96.0, 36.0))).clicked() {
-                    done = Some(false);
-                }
-                if ui.add(egui::Button::new(RichText::new("Save settings").color(Color32::WHITE)).fill(green).corner_radius(4.0).min_size(vec2(110.0, 36.0))).clicked() {
-                    done = Some(true);
-                }
-            });
+            match house::actions(ui, &["Cancel", "Save settings"]) {
+                Some(0) => done = Some(false),
+                Some(_) => done = Some(true),
+                None => {}
+            }
             if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 done = Some(false);
             }
         });
+        if closed {
+            done = Some(false);
+        }
         match done {
             Some(true) => {
                 if let Some(p) = self.draft.take() {
