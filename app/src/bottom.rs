@@ -327,7 +327,9 @@ impl Bottom {
 
     /// Draws a tab at `rect` (its slot, slid by an offset).
     fn tab_at(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, rect: egui::Rect, active: usize, count: usize) {
-        ui.scope_builder(egui::UiBuilder::new().max_rect(rect).layout(Layout::left_to_right(Align::Center)), |ui| {
+        // A fixed id per tab: the dragged one is drawn last, and an id that followed drawing order
+        // would change mid-drag and drop it.
+        ui.scope_builder(egui::UiBuilder::new().id_salt(("starsheets_tab", &tab.name)).max_rect(rect).layout(Layout::left_to_right(Align::Center)), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             self.tab(app, ui, tab, tab.index == active, count);
         });
