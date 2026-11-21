@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Downloads the fonts in app/webfonts.txt from Google Fonts as TTF (egui reads TTF/OTF, not
 WOFF2) into app/webfonts/<slug>/{regular,bold,italic,bolditalic}.ttf. A style a family lacks is
-skipped (the app then draws it from the regular face). Run before `trunk build`.
+skipped (the app then draws it from the regular face). Each font's licence (OFL or Apache) is
+saved beside it as LICENSE.txt, and app/webfonts/NOTICE.txt lists every font, its licence and
+where it came from; a font without a licence fails the build. Run before `trunk build`.
 Usage: scripts/fetch-fonts.py [--check]   (--check: only report what each family has)"""
 import os, re, sys, urllib.parse, urllib.request
 
@@ -21,9 +23,24 @@ def get(url):
         return r.read()
 
 
+def licence(family):
+    """(licence text, where it came from) for a Google Fonts family."""
+    s = family.replace(" ", "").lower()
+    for path in (f"google/fonts/main/ofl/{s}/OFL.txt", f"google/fonts/main/apache/{s}/LICENSE.txt",
+                 f"google/fonts/main/ufl/{s}/UFL.txt", f"googlefonts/{s}/main/OFL.txt"):
+        try:
+            return get(f"https://raw.githubusercontent.com/{path}").decode("utf-8"), f"https://github.com/{path.replace('/main/', '/blob/main/', 1)}"
+        except Exception:
+            continue
+    return None, None
+
+
 def main():
     check = "--check" in sys.argv
     failed = []
+    notice = ["Fonts served with StarSheets", "",
+              "Each folder holds one font family from Google Fonts and its licence (LICENSE.txt).",
+              "The menu name is what StarSheets calls it; the family is the font actually used.", ""]
     for line in open(os.path.join(ROOT, "webfonts.txt"), encoding="utf-8"):
         line = line.strip()
         if not line or line.startswith("#"):
@@ -46,9 +63,18 @@ def main():
                 path = os.path.join(folder, style + ".ttf")
                 if not os.path.exists(path):
                     open(path, "wb").write(get(m.group(1)))
-        print(f"{menu:18} {family:18} {' '.join(have) or 'NOTHING'}")
+        text, source = licence(family)
+        kind = "missing" if text is None else ("SIL Open Font License 1.1" if "Open Font License" in text else "Apache License 2.0" if "Apache License" in text else "Ubuntu Font Licence" if "Ubuntu Font" in text else "see LICENSE.txt")
+        if text is None:
+            failed.append(f"{menu} (no licence)")
+        elif not check:
+            open(os.path.join(OUT, slug(menu), "LICENSE.txt"), "w", encoding="utf-8").write(text)
+        notice.append(f"{slug(menu)}/  {menu} = {family}  ·  {kind}  ·  {source}")
+        print(f"{menu:18} {family:18} {kind:28} {' '.join(have) or 'NOTHING'}")
         if "regular" not in have:
             failed.append(menu)
+    if not check:
+        open(os.path.join(OUT, "NOTICE.txt"), "w", encoding="utf-8").write("\n".join(notice) + "\n")
     if failed:
         sys.exit(f"no regular face for: {', '.join(failed)}")
 

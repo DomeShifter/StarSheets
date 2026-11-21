@@ -11,7 +11,10 @@ GridCraft's apps/gridcraft-web and say so at the top. GridCraft's own NOTICE and
 ATTRIBUTION.md list the third-party material it bundles; built StarSheets sites include it.
 
 Bundled assets: Roboto fonts (app/fonts, SIL Open Font License 1.1) and Material Symbols icons
-(app/icons, Apache License 2.0); see the README in each folder.
+(app/icons, Apache License 2.0); see the README in each folder. The 28 web fonts in the font
+menu (app/webfonts.txt) are downloaded from Google Fonts at build time and served with their
+licences (all SIL Open Font License 1.1): webfonts/NOTICE.txt and webfonts/<font>/LICENSE.txt in
+every built site.
 
 The ArtCraft and GridCraft names and logos are trademarks of the ArtCraft Team and are not used
 by StarSheets. "Google Sheets" is a trademark of Google LLC; StarSheets is not affiliated with

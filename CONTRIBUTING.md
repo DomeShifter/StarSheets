@@ -1,0 +1,35 @@
+# Contributing
+
+Thank you for being here. StarSheets is a small project, and every bug report, idea and fix helps.
+
+## Reporting a bug or suggesting an idea
+
+Please [open an issue](../../issues/new/choose). For a bug, the most useful things are: what you
+did, what you expected, what happened instead, and your browser or system. A small .xlsx file or a
+screenshot helps a lot. If the same thing works differently in Google Sheets, that's worth saying:
+matching Google Sheets is the goal.
+
+## Changing the code
+
+1. Read [docs/architecture.md](docs/architecture.md) and [docs/upstream.md](docs/upstream.md).
+   StarSheets is built on [GridCraft](https://github.com/storytold/gridcraft): we never edit
+   GridCraft's code directly. Changes to it are small patches in `patches/`, each listed in
+   docs/upstream.md.
+2. Build:
+   ```sh
+   scripts/fetch-upstream.sh             # GridCraft at the pinned release, with our patches
+   python3 scripts/fetch-fonts.py        # the web fonts (needed for a full build)
+   cd app && trunk build --release       # the web app, in app/dist/
+   cargo test -p starsheets -p sheets-functions
+   ```
+3. Keep pull requests small and about one thing. Say what it changes for someone using StarSheets.
+4. Menus and the toolbar are tables in `app/src/shell.rs`; a test checks that every entry names a
+   real command.
+5. Google-only functions (like QUERY) live in `crates/sheets-functions`, with their own tests.
+
+Where Google Sheets and Excel behave differently, StarSheets follows Google Sheets, but we try not
+to break opening and saving Excel files.
+
+## How we talk to each other
+
+Kindly. See the [code of conduct](CODE_OF_CONDUCT.md).
