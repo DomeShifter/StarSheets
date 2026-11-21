@@ -51,6 +51,8 @@ pub struct Bottom {
     slide: std::collections::HashMap<String, (f32, f32)>,
     /// A tab just dropped: its name and where its left edge was, so it springs into its new slot.
     settle: Option<(String, f32)>,
+    /// The pointer's x when the drag began (egui forgets the press position on release).
+    drag_origin: Option<f32>,
 }
 
 /// The spring the tabs move on: stiffness and damping (a little under critical, so a dropped
@@ -239,7 +241,12 @@ impl Bottom {
             x += w + gap;
         }
         let pointer = ui.ctx().pointer_latest_pos();
-        let origin = ui.input(|i| i.pointer.press_origin());
+        if self.dragging.is_none() {
+            self.drag_origin = None;
+        } else if self.drag_origin.is_none() {
+            self.drag_origin = ui.input(|i| i.pointer.press_origin()).map(|p| p.x);
+        }
+        let origin = self.drag_origin.map(|x| egui::pos2(x, 0.0));
         let from = self.dragging.and_then(|i| visible.iter().position(|t| t.index == i));
         // While dragging: how far the tab has moved, and the slot it would land in.
         let drag = match (from, pointer, origin) {
@@ -322,6 +329,7 @@ impl Bottom {
                 }
             }
             self.dragging = None;
+            self.drag_origin = None;
         }
     }
 
