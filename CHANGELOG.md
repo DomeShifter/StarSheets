@@ -22,6 +22,7 @@ new features and the last one for fixes.
 ### Fixed
 - The screen no longer flashes when you change a cell's font size.
 - Copied cells no longer get an outline.
+- Ctrl+\ (clear formatting) works on UK and other keyboards whose \ key sits next to Z.
 
 ## [0.1.0] - 2026-11-21
 
