@@ -54,7 +54,9 @@ enum Reply {
     Versions(Vec<(String, i64)>),
     Opened { id: String, name: String, version: String, bytes: Vec<u8>, folder: String, modified: i64 },
     /// How the server describes where files are kept.
-    Info(String),
+    Info(String, bool),
+    /// The password was accepted: start again, signed in.
+    SignedIn,
     Renamed(String),
     Navigate(String),
     /// An import saved to the server, to open in a new tab.
@@ -78,6 +80,10 @@ pub struct Files {
     browser_to_file: bool,
     /// Where the server keeps files, for the status line's hover text (GET /api/info).
     location: String,
+    /// The server wants a password (and the box's text and message).
+    need_login: bool,
+    password: String,
+    login_error: Option<String>,
     /// The folder a new spreadsheet is saved in (`?folder=` from "New spreadsheet" in a folder).
     new_folder: String,
     versions: Option<Vec<(String, i64)>>,
@@ -101,7 +107,8 @@ impl Files {
             self.new_folder = query_param("folder").unwrap_or_default();
             send(Method::Get, "api/info".into(), None, None, self.inbox.clone(), ctx.clone(), |_, _, body| {
                 let v: Json = serde_json::from_slice(&body).unwrap_or_default();
-                Reply::Info(v["location"].as_str().unwrap_or("the server").to_string())
+                let locked = v["auth"].as_bool().unwrap_or(false) && !v["signed_in"].as_bool().unwrap_or(true);
+                Reply::Info(v["location"].as_str().unwrap_or("the server").to_string(), locked)
             });
             if let Some(id) = query_file() {
                 self.status = "Opening…".into();
@@ -214,6 +221,14 @@ impl Files {
                 self.link = None;
                 post_new(doc, sent, bytes, name, &self.new_folder, self.inbox.clone(), ctx.clone());
             }
+            Reply::Failed(e) if self.need_login || e == "please sign in" => {
+                self.busy = false;
+                if e == "please sign in" {
+                    self.need_login = true;
+                } else {
+                    self.login_error = Some(if e == "wrong password" { "That password isn't right.".into() } else { e });
+                }
+            }
             Reply::Failed(e) => {
                 self.busy = false;
                 self.renaming = false;
@@ -240,7 +255,16 @@ impl Files {
                 self.browser.loading = false;
             }
             Reply::Refresh => self.refresh(ctx),
-            Reply::Info(location) => self.location = location,
+            Reply::Info(location, locked) => {
+                self.location = location;
+                self.need_login = locked;
+            }
+            Reply::SignedIn => {
+                set_unsaved_flag(false);
+                if let Some(w) = web_sys::window() {
+                    let _ = w.location().reload();
+                }
+            }
             Reply::NewFolder(path) => {
                 self.refresh(ctx);
                 self.browser.rename_new_folder(&path);
@@ -395,6 +419,10 @@ impl Files {
 
     /// The file window and the version list.
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        if self.need_login {
+            self.login_ui(ui.ctx());
+            return;
+        }
         let keys = std::mem::take(&mut self.browser_keys);
         for action in self.browser.ui(ui.ctx(), &keys) {
             self.act(app, ui.ctx(), action);
@@ -451,6 +479,35 @@ fn display_name(d: &gridcraft_engine::DocState) -> String {
 }
 
 impl Files {
+    /// The server's sign-in box (when it was started with a password).
+    fn login_ui(&mut self, ctx: &egui::Context) {
+        let mut go = false;
+        egui::Modal::new(egui::Id::new("starsheets_login")).show(ctx, |ui| {
+            ui.set_width(320.0);
+            ui.label(RichText::new("Sign in to StarSheets").size(18.0).color(theme::TEXT));
+            ui.add_space(6.0);
+            ui.label(RichText::new("This server keeps its spreadsheets behind a password.").color(theme::TEXT_DIM));
+            ui.add_space(10.0);
+            let r = ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("Password").desired_width(f32::INFINITY).margin(vec2(8.0, 8.0)));
+            r.request_focus();
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                go = true;
+            }
+            if let Some(e) = &self.login_error {
+                ui.label(RichText::new(e).color(Color32::from_rgb(0xC5, 0x39, 0x29)));
+            }
+            ui.add_space(8.0);
+            if ui.add(egui::Button::new(RichText::new("Sign in").color(Color32::WHITE)).fill(Color32::from_rgb(0x14, 0x6C, 0x2E)).corner_radius(4.0).min_size(vec2(90.0, 34.0))).clicked() {
+                go = true;
+            }
+        });
+        if go && !self.password.is_empty() {
+            self.login_error = None;
+            let body = serde_json::to_vec(&json!({ "password": self.password })).unwrap_or_default();
+            send(Method::Post, "api/login".into(), Some(body), None, self.inbox.clone(), ctx.clone(), |_, _, _| Reply::SignedIn);
+        }
+    }
+
     /// "Saved to the NAS › Work › Budget.xlsx · 2 minutes ago (14:05)".
     fn status_tip(&self, app: &SheetApp, unsaved: bool) -> String {
         let place = if self.location.is_empty() { "the server" } else { &self.location };

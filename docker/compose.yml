@@ -1,0 +1,15 @@
+# StarSheets with Docker Compose: `docker compose up -d`, then open http://localhost:8080
+# Your spreadsheets are kept as ordinary .xlsx files in ./spreadsheets.
+services:
+  starsheets:
+    image: ghcr.io/domeshifter/starsheets:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./spreadsheets:/data
+    environment:
+      # Choose your own password (without one, a random password is printed in the log on first start).
+      STARSHEETS_PASSWORD: "change-me"
+      # How the app describes where files are kept.
+      LOCATION: "the server"
+    restart: unless-stopped

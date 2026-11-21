@@ -1,9 +1,11 @@
 # Builds the web app on every push and pull request. The built site is kept as the
-# `starsheets-web` artifact; the server pulls the latest one from main (docs/deploy.md).
+# `starsheets-web` artifact; a self-hosted server can pull the latest one from main
+# (docs/deploy.md). A version tag (vX.Y.Z) also publishes the Docker image and drafts a release.
 name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -68,3 +70,57 @@ jobs:
           key: test
       - name: Test
         run: cargo test -p starsheets -p sheets-functions
+
+  release:
+    name: Release (Docker image + draft release)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [web, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag must match the version in Cargo.toml
+        run: |
+          want="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          [ "$want" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $want"; exit 1; }
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v4
+        with:
+          name: starsheets-web
+          path: site
+      - name: Compress the site (served pre-compressed) and zip it for the release
+        run: |
+          (cd site && zip -qr "../starsheets-web-$VERSION.zip" .)
+          find site -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' -o -name '*.json' \) -exec gzip -k -9 {} \;
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/domeshifter/starsheets:${{ env.VERSION }}
+            ghcr.io/domeshifter/starsheets:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/DomeShifter/StarSheets
+            org.opencontainers.image.description=A spreadsheet that looks and feels like Google Sheets, that you can run yourself.
+            org.opencontainers.image.licenses=MIT OR Apache-2.0
+      - name: Draft the release (notes from CHANGELOG.md)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on {print}' CHANGELOG.md > notes.md
+          [ -s notes.md ] || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
+          printf '\n---\n**Docker:** `docker run -p 8080:8080 -v starsheets:/data ghcr.io/domeshifter/starsheets:%s` (see docker/compose.yml)\n' "$VERSION" >> notes.md
+          gh release create "$GITHUB_REF_NAME" --draft --title "StarSheets $VERSION" --notes-file notes.md "starsheets-web-$VERSION.zip"
+

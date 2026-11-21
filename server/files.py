@@ -32,13 +32,24 @@ hidden id (STORE/.starsheets/index.json) so the app follows a file across rename
 file added by hand gets an id when it is first listed. The last KEEP versions of each file are
 kept in STORE/.starsheets/versions/ID/. Folders and files starting with "." are not shown.
 
-Also GET /api/info -> {location}: how the store is described to people (LOCATION).
+Also GET /api/info -> {location, auth, signed_in}; POST /api/login {password}; POST /api/logout.
+
+Login: on unless STARSHEETS_AUTH=off. The password is STARSHEETS_PASSWORD; without one, a random
+password is made on first start, kept in STORE/.starsheets/password and printed in the log. A
+login gives an HttpOnly cookie for 30 days. Everything under /api/ except info and login needs it.
+
+The app itself: with SITE set (a built StarSheets site), every other path serves its files
+(index.html never cached, hashed files cached for good, a .gz copy sent when the browser takes it).
 
 Standard library only. Settings: STORE (folder), KEEP (versions, default 6), PORT (8080),
-LOCATION (e.g. "the NAS, James › StarSheets"; default "the server").
+LOCATION (how people are told where files are kept, e.g. "the office server"; default "the server"),
+STARSHEETS_AUTH, STARSHEETS_PASSWORD, SITE.
 """
 
+import hashlib
+import hmac
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -52,6 +63,10 @@ STORE = os.environ.get("STORE", "/data")
 KEEP = int(os.environ.get("KEEP", "6"))
 PORT = int(os.environ.get("PORT", "8080"))
 LOCATION = os.environ.get("LOCATION", "the server")
+AUTH = os.environ.get("STARSHEETS_AUTH", "on").strip().lower() not in ("off", "false", "0", "no")
+SITE = os.environ.get("SITE", "")
+SESSION_DAYS = 30
+COOKIE = "starsheets_session"
 META = os.path.join(STORE, ".starsheets")
 INDEX = os.path.join(META, "index.json")
 BIN_INDEX = os.path.join(META, "bin.json")
@@ -255,6 +270,50 @@ def to_bin(relpath):
 
 # ---------------------------------------------------------------- HTTP
 
+# ---------------------------------------------------------------- login
+
+def password():
+    """The password: STARSHEETS_PASSWORD, else one made (and kept) on first start."""
+    given = os.environ.get("STARSHEETS_PASSWORD", "")
+    if given:
+        return given
+    path = os.path.join(META, "password")
+    try:
+        return open(path, encoding="utf-8").read().strip()
+    except OSError:
+        made = secrets.token_urlsafe(12)
+        os.makedirs(META, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(made + "\n")
+        os.chmod(path, 0o600)
+        return made
+
+
+SESSIONS = os.path.join(META, "sessions.json")
+
+
+def token_hash(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def new_session():
+    token = secrets.token_urlsafe(32)
+    sessions = {k: v for k, v in load_json(SESSIONS).items() if v > time.time()}
+    sessions[token_hash(token)] = time.time() + SESSION_DAYS * 86400
+    save_json(SESSIONS, sessions)
+    return token
+
+
+def signed_in(h):
+    if not AUTH:
+        return True
+    for part in (h.headers.get("Cookie") or "").split(";"):
+        name, _, value = part.strip().partition("=")
+        if name == COOKIE and value:
+            return load_json(SESSIONS).get(token_hash(value), 0) > time.time()
+    return False
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "StarSheetsFiles/2"
 
@@ -296,9 +355,78 @@ class Handler(BaseHTTPRequestHandler):
             raise Bad(404, "not found")
         return p[1:], {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
 
+    def serve_site(self):
+        """The app's own files (SITE), for a server that is the whole of StarSheets."""
+        path = unquote(urlparse(self.path).path)
+        if path == "/healthz":
+            body = b"ok"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        rel_path = os.path.normpath(path.lstrip("/")) if path not in ("", "/") else "index.html"
+        full_path = os.path.join(SITE, rel_path)
+        if rel_path.startswith("..") or not os.path.isfile(full_path):
+            full_path = os.path.join(SITE, "index.html") if "." not in os.path.basename(rel_path) else ""
+        if not full_path or not os.path.isfile(full_path):
+            return self.send_json({"error": "not found"}, 404)
+        kind = "application/wasm" if full_path.endswith(".wasm") else (mimetypes.guess_type(full_path)[0] or "application/octet-stream")
+        send = full_path
+        gz = full_path + ".gz"
+        zipped = "gzip" in (self.headers.get("Accept-Encoding") or "") and os.path.isfile(gz)
+        if zipped:
+            send = gz
+        data = open(send, "rb").read()
+        self.send_response(200)
+        self.send_header("Content-Type", kind)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if zipped:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        name = os.path.basename(full_path)
+        if name in ("index.html", "build.json"):
+            self.send_header("Cache-Control", "no-cache")
+        elif re.search(r"-[0-9a-f]{16}[._]", name):
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+        self.end_headers()
+        self.wfile.write(data)
+
     def handle_any(self, method):
         try:
+            if SITE and not urlparse(self.path).path.startswith("/api/") and method == "GET":
+                return self.serve_site()
             p, q = self.parts()
+            if p == ["info"] and method == "GET":
+                return self.send_json({"location": LOCATION, "auth": AUTH, "signed_in": signed_in(self)})
+            if p == ["login"] and method == "POST":
+                try:
+                    given = json.loads(self.body() or b"{}").get("password", "")
+                except ValueError:
+                    given = ""
+                if not hmac.compare_digest(str(given).encode(), password().encode()):
+                    time.sleep(1.5)  # slows down guessing
+                    return self.send_json({"error": "wrong password"}, 401)
+                with lock:
+                    token = new_session()
+                body = json.dumps({"ok": True}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Set-Cookie", f"{COOKIE}={token}; Path=/; Max-Age={SESSION_DAYS * 86400}; HttpOnly; SameSite=Strict")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if p == ["logout"] and method == "POST":
+                self.send_response(200)
+                self.send_header("Set-Cookie", f"{COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if not signed_in(self):
+                return self.send_json({"error": "please sign in"}, 401)
             with lock:
                 os.makedirs(META, exist_ok=True)
                 out = route(self, method, p, q)
@@ -333,8 +461,6 @@ def file_of(index, fid):
 
 def route(h, method, p, q):
     """Returns a JSON reply (or (reply, status)); None when the handler already answered."""
-    if p == ["info"] and method == "GET":
-        return {"location": LOCATION}
     index = synced_index()
     # ---- files
     if p[:1] == ["files"]:
@@ -509,4 +635,10 @@ def route(h, method, p, q):
 if __name__ == "__main__":
     os.makedirs(META, exist_ok=True)
     print(f"StarSheets files: {STORE} on :{PORT}, keeping {KEEP} versions", flush=True)
+    if not AUTH:
+        print("Login is OFF (STARSHEETS_AUTH=off): anyone who can reach this port can read and change every file.", flush=True)
+    elif os.environ.get("STARSHEETS_PASSWORD"):
+        print("Login is on, with the password from STARSHEETS_PASSWORD.", flush=True)
+    else:
+        print(f"Login is on. Password (set STARSHEETS_PASSWORD to choose your own): {password()}", flush=True)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
