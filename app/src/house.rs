@@ -47,6 +47,12 @@ pub const ROW_HEIGHT: f32 = 32.0;
 /// Extra width a side panel keeps for its scroll bar (10 px bar and a gap), so content never
 /// shifts or is cut when the panel starts to scroll.
 pub const SCROLL_ROOM: f32 = 14.0;
+/// How tall a side panel's scrolling part may be: down to the sheet-tab bar (40 px) and the
+/// panel's own padding, so a long panel scrolls instead of being cut off.
+pub fn panel_scroll_height(ui: &Ui) -> f32 {
+    (ui.ctx().content_rect().bottom() - 40.0 - L - ui.cursor().top()).max(120.0)
+}
+
 /// The space between a menu's edge and anything in it that isn't a row (palettes, headings).
 pub const MENU_INSET: i8 = 16;
 

@@ -252,7 +252,7 @@ impl ChartPanel {
                     }
                 });
                 ui.add_space(house::S);
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(crate::house::panel_scroll_height(ui)).show(ui, |ui| {
                     ui.set_width(PANEL_W);
                     match tab {
                         Tab::Setup => self.setup(app, ui, &chart),
