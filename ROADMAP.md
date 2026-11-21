@@ -43,6 +43,9 @@
 - [x] Named ranges suggested while typing formulas (patch 0016); sheet tabs: ▾ opens the menu, drag to reorder
 - [x] Conditional formatting side panel: single colour (19 Sheets conditions, style, presets) and colour scales with configurable points (docs/sheets-cf.md, patch 0017); tab colour bar inside the tab
 - [x] Data validation side panel: Sheets' 25 criteria, drop-down items with colours, help text, warning or reject, arrow or plain (docs/sheets-dv.md, patch 0018)
+- [x] Date picker when editing a cell with a date rule
+- [x] Drop-down colours as in Sheets: light and dark chips, text in the partner colour
+- [x] Phase 2 start: files on a server folder (server/files.py): autosave a moment after each change (new sheets once they have data), File › Open list, Make a copy, Move to bin, version history (last 6), free names with " (2)", a save over a newer copy becomes a "conflicted copy"
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
 

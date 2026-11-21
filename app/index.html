@@ -23,6 +23,9 @@
     // event (Ctrl+C / Ctrl+X), and eframe runs the app inside that event, so the app hands its
     // text to window.__ssCopy, which puts it in the event. Outside a copy event (a menu click) it
     // tries document.execCommand('copy'), which browsers allow only shortly after a click or key.
+    // Leaving while a change isn't saved yet: the browser asks first (files.rs sets the flag).
+    window.__ssUnsaved = false;
+    window.addEventListener('beforeunload', (e) => { if (window.__ssUnsaved) { e.preventDefault(); e.returnValue = ''; } });
     window.__ssCopyEvent = null;
     for (const t of ['copy', 'cut']) {
       window.addEventListener(t, (e) => {

@@ -4,6 +4,7 @@ One line per decision: what, why, what we rejected. Newest first.
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-11-21 | Files are plain .xlsx in one server folder with readable names; a tiny standard-library Python server (server/files.py) behind the same nginx | Files can be opened straight from the share; nothing to build or update but one script; same origin, so no CORS | A database or ids as file names (unreadable on the share); a Rust server (more to build and deploy) |
 | 2026-11-21 | Sheets-only validation criteria are stored as Excel custom formulas, and drop-down item colours as conditional-formatting rules | Both survive saving to .xlsx and stay visible in the panels; no hidden StarSheets-only data | Extra fields in GridCraft's model (lost when saving .xlsx) |
 | 2026-11-21 | Draw the grid 1:1 like Sheets (GridCraft draws it at 0.8) | Owner compared both side by side: cells and text looked too small | Starting at 125% zoom (the zoom box would read 125%, not 100%) |
 | 2026-11-21 | Roboto is the default font (bundled, OFL) and leads the interface and sans-serif cell fonts | Owner's choice; web builds have no system fonts, so it must be bundled | Arial (Sheets' default, not openly licensed) |

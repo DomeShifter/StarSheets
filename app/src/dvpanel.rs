@@ -89,8 +89,22 @@ const DATE_REL: &[(&str, &str)] = &[
 /// The last valid spreadsheet date (31/12/9999).
 const LAST_DATE: &str = "2958465";
 
-/// Sheets' light chip colours for drop-down items (first = its default grey).
-const CHIP_COLOURS: &[u32] = &[0xE8EAED, 0xC9DAF8, 0xD9EAD3, 0xFFF2CC, 0xFCE5CD, 0xF4CCCC, 0xD9D2E9, 0xEAD1DC, 0xC6E7E8, 0xB7B7B7];
+/// Sheets' chip colours for drop-down items: a light row and a dark row. Each fill's text is its
+/// partner in the other row (dark green text on light green, light red text on dark red), as in
+/// Sheets. The first light one is the default grey (no colour rule).
+const CHIP_LIGHT: [u32; 8] = [0xE8EAED, 0xBFE1F6, 0xFFCFC9, 0xFFE5A0, 0xD4EDBC, 0xE6CFF2, 0xC6DBE1, 0xFFC8AA];
+const CHIP_DARK: [u32; 8] = [0x3D3D3D, 0x0A53A8, 0xB10202, 0x473822, 0x11734B, 0x5A3286, 0x215A6C, 0x753800];
+
+/// The text colour that goes with a chip fill.
+fn chip_text(fill: u32) -> u32 {
+    if let Some(i) = CHIP_LIGHT.iter().position(|c| *c == fill) {
+        return CHIP_DARK[i];
+    }
+    if let Some(i) = CHIP_DARK.iter().position(|c| *c == fill) {
+        return CHIP_LIGHT[i];
+    }
+    0x202124
+}
 
 #[derive(Clone, Default, PartialEq)]
 struct Item {
@@ -433,25 +447,32 @@ fn criterion_inputs(ui: &mut Ui, d: &mut Draft) {
     }
 }
 
-/// A drop-down item's colour: a small chip that opens Sheets' light colours.
+/// A drop-down item's colour, as in Sheets: a box with the colour dot and ▾, opening the light
+/// and dark rows of chip colours.
 fn chip_colour(ui: &mut Ui, i: usize, colour: &mut Option<u32>) {
-    let fill = c32(colour.unwrap_or(CHIP_COLOURS[0]));
-    let resp = ui.add(egui::Button::new("").fill(fill).corner_radius(10.0).min_size(vec2(22.0, 22.0)).stroke(Stroke::new(1.0, theme::BOX))).on_hover_text("Colour");
+    let (r, resp) = ui.allocate_exact_size(vec2(44.0, 30.0), Sense::click());
+    let p = ui.painter();
+    p.rect(r, 4.0, if resp.hovered() { theme::MENU_HOVER } else { Color32::WHITE }, Stroke::new(1.0, theme::BOX), egui::StrokeKind::Inside);
+    let dot = r.left_center() + vec2(14.0, 0.0);
+    p.circle(dot, 9.0, c32(colour.unwrap_or(CHIP_LIGHT[0])), Stroke::new(1.0, theme::BOX));
+    let a = r.right_center() + vec2(-11.0, 0.0);
+    p.add(egui::Shape::convex_polygon(vec![a + vec2(-4.0, -2.0), a + vec2(4.0, -2.0), a + vec2(0.0, 3.0)], theme::TEXT, Stroke::NONE));
+    let resp = resp.on_hover_text("Colour");
     egui::Popup::menu(&resp).id(egui::Id::new(("dv_chip", i))).show(|ui| {
-        ui.horizontal_wrapped(|ui| {
-            ui.set_max_width(140.0);
-            for (k, c) in CHIP_COLOURS.iter().enumerate() {
-                let pick = if k == 0 { None } else { Some(*c) };
-                let mut b = egui::Button::new("").fill(c32(*c)).corner_radius(10.0).min_size(vec2(22.0, 22.0));
-                if *colour == pick {
-                    b = b.stroke(Stroke::new(2.0, GREEN));
+        for row in [&CHIP_LIGHT, &CHIP_DARK] {
+            ui.horizontal(|ui| {
+                for c in row.iter() {
+                    let pick = if *c == CHIP_LIGHT[0] { None } else { Some(*c) };
+                    let (r, b) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
+                    let ring = if *colour == pick { Stroke::new(2.0, GREEN) } else if b.hovered() { Stroke::new(1.0, theme::TEXT_DIM) } else { Stroke::new(1.0, theme::BOX) };
+                    ui.painter().circle(r.center(), 10.0, c32(*c), ring);
+                    if b.clicked() {
+                        *colour = pick;
+                        ui.close();
+                    }
                 }
-                if ui.add(b).clicked() {
-                    *colour = pick;
-                    ui.close();
-                }
-            }
-        });
+            });
+        }
     });
 }
 
@@ -540,7 +561,7 @@ fn commands(d: &Draft) -> Result<Vec<(&'static str, Json)>, String> {
             }
             for it in &items {
                 if let Some(c) = it.colour {
-                    let style = json!({ "fill": hex(c), "font": {} });
+                    let style = json!({ "fill": hex(c), "font": { "color": hex(chip_text(c)) } });
                     extra.push(("home.conditionalFormat", json!({ "range": range, "rule": { "type": "cellIs", "operator": "equal", "value": quoted(it.text.trim()), "style": style } })));
                 }
             }

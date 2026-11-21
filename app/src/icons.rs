@@ -91,6 +91,7 @@ const ICONS: &[(&str, &[u8])] = &[
     ("text_rotation_down", include_bytes!("../icons/text_rotation_down.svg")),
     ("text_rotation_none", include_bytes!("../icons/text_rotation_none.svg")),
     ("undo", include_bytes!("../icons/undo.svg")),
+    ("upload", include_bytes!("../icons/upload.svg")),
     ("vertical_align_bottom", include_bytes!("../icons/vertical_align_bottom.svg")),
     ("vertical_align_center", include_bytes!("../icons/vertical_align_center.svg")),
     ("vertical_align_top", include_bytes!("../icons/vertical_align_top.svg")),

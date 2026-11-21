@@ -26,8 +26,10 @@ pub const MENUS: &[(&str, &[Item])] = &[
     (
         "File",
         &[
-            Cmd("New spreadsheet", "file.new", ""),
-            Cmd("Open", "file.open", "Ctrl+O"),
+            Cmd("New spreadsheet", "panel:new", ""),
+            Cmd("Open", "panel:open", "Ctrl+O"),
+            Cmd("Import", "file.open", ""),
+            Cmd("Make a copy", "panel:copy", ""),
             Sep,
             Sub(
                 "Download",
@@ -38,6 +40,10 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     Cmd("Comma-separated values (.csv)", "file.exportCsv", ""),
                 ],
             ),
+            Sep,
+            Cmd("Move to bin", "panel:bin", ""),
+            Sep,
+            Cmd("Version history", "panel:versions", ""),
             Sep,
             Cmd("Details", "file.properties", ""),
             Cmd("Settings", "file.options", ""),
@@ -696,7 +702,7 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {
                 rename_box(app, ui, &name, title_draft);
-                ui.label(RichText::new(if dirty { "Not saved" } else { "Saved" }).size(12.0).color(theme::TEXT_DIM));
+                ui.label(RichText::new(ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new("starsheets_save_status"))).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string())).size(12.0).color(theme::TEXT_DIM));
             });
             ui.horizontal(|ui| {
                 flat(ui);
@@ -718,6 +724,10 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
 pub const MENU_ICONS: &[(&str, &str)] = &[
     ("New spreadsheet", "note_add"),
     ("Open", "folder_open"),
+    ("Import", "upload"),
+    ("Make a copy", "content_copy"),
+    ("Move to bin", "delete"),
+    ("Version history", "history"),
     ("Download", "download"),
     ("Details", "info"),
     ("Settings", "settings"),
@@ -931,6 +941,9 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                     // "panel:dropdown" opens the data-validation panel on a new drop-down.
                     if *id == "panel:dropdown" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
+                    } else if let Some(what) = id.strip_prefix("panel:") {
+                        // File actions (files.rs reads this from egui memory).
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), what.to_string()));
                     } else {
                         match id.strip_prefix("ui:") {
                             Some(dialog) => app.open_dialog(dialog, json!({})),
