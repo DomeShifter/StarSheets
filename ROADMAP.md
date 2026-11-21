@@ -54,6 +54,8 @@
 - [x] Saving on close: closing or hiding the tab saves at once; the status line says where and when it saved (hover) and opens version history (click)
 - [x] A file opens in this tab only if the sheet here is blank; otherwise a new tab
 - [x] Google Sheets formulas: `{…}` array literals with formulas and ranges, ARRAYFORMULA, Ctrl+Shift+Enter wraps in ARRAYFORMULA (patch 0022)
+- [x] QUERY stage 1–3 (crates/sheets-functions): select, where (comparisons, contains, starts/ends with, matches, like, is null, and/or/not), group by with sum/avg/count/min/max, pivot, order by, limit, offset, label, format, date literals and functions; headers guessed
+- [ ] QUERY: check every case against answers recorded from Google Sheets; dates shown as dates in results
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
 

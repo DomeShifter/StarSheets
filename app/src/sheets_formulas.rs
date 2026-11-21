@@ -46,4 +46,19 @@ mod tests {
         s.execute("cell.set", json!({"cell": "E1", "input": "=ARRAYFORMULA(IF(A1:A2=1,\"one\",\"other\"))"})).unwrap();
         assert_eq!(at(&s, "E2"), Value::Text("other".into()));
     }
+
+    #[test]
+    fn query_uses_the_sheet_s_column_letters() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        for (cell, v) in [("B1", "Name"), ("C1", "Score"), ("B2", "Ann"), ("C2", "5"), ("B3", "Bob"), ("C3", "9"), ("B4", "Cat"), ("C4", "7")] {
+            s.execute("cell.set", json!({"cell": cell, "input": v})).unwrap();
+        }
+        s.execute("cell.set", json!({"cell": "E1", "input": "=QUERY(B1:C4, \"select B, C where C > 6 order by C desc\")"})).unwrap();
+        assert_eq!((at(&s, "E1"), at(&s, "E2"), at(&s, "F2"), at(&s, "E3")), (Value::Text("Name".into()), Value::Text("Bob".into()), Value::number(9.0), Value::Text("Cat".into())));
+        s.execute("cell.set", json!({"cell": "H1", "input": "=QUERY({B2:C4}, \"select Col1 where Col2 < 6\", 0)"})).unwrap();
+        assert_eq!(at(&s, "H1"), Value::Text("Ann".into()));
+        s.execute("cell.set", json!({"cell": "J1", "input": "=QUERY(B1:C4, \"select nonsense\")"})).unwrap();
+        assert!(matches!(at(&s, "J1"), Value::Error(_)));
+    }
 }

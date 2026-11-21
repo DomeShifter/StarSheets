@@ -1,0 +1,79 @@
+diff --git a/crates/calc/src/eval/call.rs b/crates/calc/src/eval/call.rs
+index eb42639..6c154e0 100644
+--- a/crates/calc/src/eval/call.rs
++++ b/crates/calc/src/eval/call.rs
+@@ -314,8 +314,17 @@ impl<'h> Evaluator<'h> {
+             "PIVOTBY" => Some(3),
+             _ => None,
+         };
++        // QUERY: the sheet column its data range starts in (StarSheets), given as a 4th argument.
++        let mut query_first_col: Option<u32> = None;
+         for (i, a) in args.iter().enumerate() {
+             let mut ev = self.eval(a);
++            if spec.name == "QUERY"
++                && i == 0
++                && let Ev::R(areas) = &ev
++                && let [area] = areas.as_slice()
++            {
++                query_first_col = Some(area.range.start.col);
++            }
+             if lambda_at == Some(i)
+                 && let Ev::L(l) = &ev
+             {
+@@ -358,6 +367,12 @@ impl<'h> Evaluator<'h> {
+             let blank_value = !from_ref && value == Value::Empty && lambda_at != Some(i) && !matches!(a, Expr::Missing);
+             evaluated.push(Arg { value, from_ref, blank_value });
+         }
++        if spec.name == "QUERY" {
++            while evaluated.len() < 3 {
++                evaluated.push(Arg { value: Value::Empty, from_ref: false, blank_value: false });
++            }
++            evaluated.push(Arg::val(Value::number(query_first_col.map_or(-1.0, f64::from))));
++        }
+         // The function may go through every value it is given (a SUM inside each call of a
+         // LAMBDA over a large array): the values count against the cell's work.
+         let values = evaluated.iter().fold(0u64, |n, a| n.saturating_add(if let Value::Array(x) = &a.value { x.data.len() as u64 } else { 1 }));
+diff --git a/crates/functions/Cargo.toml b/crates/functions/Cargo.toml
+index 97f51c2..a182ccb 100644
+--- a/crates/functions/Cargo.toml
++++ b/crates/functions/Cargo.toml
+@@ -10,4 +10,6 @@ workspace = true
+ 
+ [dependencies]
+ gridcraft-core = { workspace = true }
++# StarSheets: Google Sheets functions (QUERY), kept in the StarSheets repo.
++sheets-functions = { path = "../../../../crates/sheets-functions" }
+ regex = { workspace = true }
+diff --git a/crates/functions/src/dynamic.rs b/crates/functions/src/dynamic.rs
+index 484862d..6a5aa95 100644
+--- a/crates/functions/src/dynamic.rs
++++ b/crates/functions/src/dynamic.rs
+@@ -314,6 +314,18 @@ fn randarray(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
+ // ---------------------------------------------------------------------------------------------
+ // VSTACK / HSTACK / TOROW / TOCOL / WRAPROWS / WRAPCOLS
+ 
++fn query(args: &[Arg], c: &mut dyn Ctx) -> R<Value> {
++    let data = arr_arg(args, 0)?;
++    let Value::Text(q) = &arg(args, 1)?.value else { return Err(CellError::Value) };
++    let headers = args.get(2).and_then(|a| a.value.as_f64()).map(|h| h as i64);
++    let first_col = args.get(3).and_then(|a| a.value.as_f64()).filter(|c| *c >= 0.0).map(|c| c as u32);
++    let out = sheets_functions::query(&data, q, headers, first_col, c.now_serial()).map_err(|_| CellError::Value)?;
++    if out.rows == 1 && out.cols == 1 {
++        return Ok(out.data.first().cloned().unwrap_or(Value::Empty));
++    }
++    Ok(Value::from(out))
++}
++
+ /// Google Sheets' ARRAYFORMULA: its formula already works over ranges (dynamic arrays), so it
+ /// returns the result as it is, and an array spills.
+ fn arrayformula(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+@@ -1110,6 +1122,9 @@ pub(crate) fn specs() -> Vec<FnSpec> {
+             randarray
+         ),
+         f!("VSTACK", 1, VAR, Lookup, A, "VSTACK(array1, [array2], ...)", "Stacks arrays on top of each other.", vstack),
++        // Google Sheets' QUERY (StarSheets crates/sheets-functions). The 4th argument is added by
++        // the calculator: the sheet column the data starts in, so `select C` means column C.
++        f!("QUERY", 2, 4, Lookup, A, "QUERY(data, query, [headers])", "Runs a Google Visualization API query (select, where, group by, pivot, order by, limit, label, format) over a range.", query),
+         f!("ARRAYFORMULA", 1, 1, Lookup, A, "ARRAYFORMULA(array_formula)", "Shows the values of a formula over ranges in the cells below and to the right (Google Sheets).", arrayformula),
+         f!("ARRAY_ROW", 1, VAR, Lookup, A, "ARRAY_ROW(value1, [value2], ...)", "One row of a {…} array literal: its parts side by side (Google Sheets).", array_row),
+         f!("ARRAY_LITERAL", 1, VAR, Lookup, A, "ARRAY_LITERAL(row1, [row2], ...)", "A {…} array literal: its rows one under another (Google Sheets).", array_literal),

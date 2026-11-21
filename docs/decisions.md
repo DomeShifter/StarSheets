@@ -4,6 +4,7 @@ One line per decision: what, why, what we rejected. Newest first.
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-11-21 | Google-only functions live in our own crate (crates/sheets-functions), registered by a small patch | Large patches break on every upstream change; a plain values-in, values-out crate is tested on its own | Writing QUERY inside GridCraft's functions crate as a big patch |
 | 2026-11-21 | Google Sheets behaviour wins over Excel where they differ; keep Excel compatibility where it costs nothing (owner's rule) | Users come from Google Sheets; .xlsx import should stay as complete as possible | Excel-first behaviour |
 | 2026-11-21 | Files are plain .xlsx in one server folder with readable names; a tiny standard-library Python server (server/files.py) behind the same nginx | Files can be opened straight from the share; nothing to build or update but one script; same origin, so no CORS | A database or ids as file names (unreadable on the share); a Rust server (more to build and deploy) |
 | 2026-11-21 | Sheets-only validation criteria are stored as Excel custom formulas, and drop-down item colours as conditional-formatting rules | Both survive saving to .xlsx and stay visible in the panels; no hidden StarSheets-only data | Extra fields in GridCraft's model (lost when saving .xlsx) |

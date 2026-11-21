@@ -67,4 +67,4 @@ jobs:
         with:
           key: test
       - name: Test
-        run: cargo test -p starsheets
+        run: cargo test -p starsheets -p sheets-functions
