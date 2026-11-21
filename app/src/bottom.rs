@@ -175,7 +175,8 @@ impl Bottom {
         r.context_menu(|ui| self.tab_menu(app, ui, tab, count));
         // Sheets: clicking the current tab (its ▾) opens the same menu.
         let toggle = (r.clicked() && active).then_some(egui::SetOpenCommand::Toggle);
-        egui::Popup::menu(&r).open_memory(toggle).show(|ui| self.tab_menu(app, ui, tab, count));
+        // Its own id: sharing the right-click menu's showed both at once.
+        egui::Popup::menu(&r).id(r.id.with("tab_arrow")).open_memory(toggle).show(|ui| self.tab_menu(app, ui, tab, count));
     }
 
     fn tab_menu(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, count: usize) {

@@ -412,6 +412,8 @@ pub struct Shell {
     pub compact: bool,
     /// The font size box while it's being typed in.
     size_draft: Option<String>,
+    /// The spreadsheet's name while it's being renamed (click the title).
+    title_draft: Option<String>,
 }
 
 /// What the toolbar shows for the active cell.
@@ -473,7 +475,7 @@ impl Shell {
             egui::Panel::top("starsheets_title")
                 .exact_size(64.0)
                 .frame(Frame::NONE.fill(theme::PAGE).inner_margin(Margin { left: 12, right: 16, top: 6, bottom: 0 }))
-                .show(ui, |ui| title_and_menus(app, ui));
+                .show(ui, |ui| title_and_menus(app, ui, &mut self.title_draft));
         }
         egui::Panel::top("starsheets_toolbar")
             .exact_size(48.0)
@@ -681,16 +683,19 @@ pub fn palette_grid(ui: &mut Ui, mut pick: impl FnMut(String)) {
     }
 }
 
-fn title_and_menus(app: &mut SheetApp, ui: &mut Ui) {
+fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<String>) {
     let name = app.session.active().map(|d| d.display_title().to_string()).unwrap_or_else(|| "Untitled spreadsheet".into());
     let dirty = app.session.active().is_some_and(|d| d.is_dirty());
     ui.horizontal(|ui| {
-        // App mark: a green-ish tile would copy Google's icon; ours is a star on blue.
-        ui.label(RichText::new("★").size(26.0).color(theme::BLUE));
+        // Our own mark (a white star on a green tile; same file as the favicon).
+        match icons::logo(36.0) {
+            Some(img) => ui.add(img),
+            None => ui.label(RichText::new("★").size(26.0).color(theme::BLUE)),
+        };
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {
-                ui.label(RichText::new(name).size(18.0).color(theme::TEXT));
+                rename_box(app, ui, &name, title_draft);
                 ui.label(RichText::new(if dirty { "Not saved" } else { "Saved" }).size(12.0).color(theme::TEXT_DIM));
             });
             ui.horizontal(|ui| {
@@ -811,7 +816,7 @@ const MENU_GREY: egui::Color32 = egui::Color32::from_rgb(0x80, 0x86, 0x8B);
 /// shortcut in grey on the right. Rows are 32 px tall and fill the menu's width.
 pub fn menu_row(label: &str, keys: &str, with_icons: bool) -> Button<'static> {
     let text = RichText::new(label.to_string()).size(14.0).color(theme::TEXT);
-    let b = match (menu_icon(label), with_icons) {
+    let b = match (menu_icon(label).filter(|_| with_icons), with_icons) {
         (Some(img), _) => Button::image_and_text(img, text),
         // Keeps the label lined up with its iconed neighbours.
         (None, true) => match icons::icon("add") {
@@ -861,6 +866,44 @@ pub const MENU_LOOK: gridcraft_ui_egui::MenuLook = gridcraft_ui_egui::MenuLook {
     row: |label, keys| menu_row(label, keys, true),
     sep: |ui| menu_sep_width(ui, 320.0),
 };
+
+/// The spreadsheet's name: click it to rename, like Sheets (Enter keeps, Esc cancels).
+fn rename_box(app: &mut SheetApp, ui: &mut Ui, name: &str, draft: &mut Option<String>) {
+    let Some(text) = draft.as_mut() else {
+        let r = ui.add(Button::new(RichText::new(name).size(18.0).color(theme::TEXT)).frame_when_inactive(false)).on_hover_text("Rename");
+        if r.clicked() {
+            *draft = Some(name.to_string());
+        }
+        return;
+    };
+    let r = ui.add(egui::TextEdit::singleline(text).font(egui::FontId::proportional(18.0)).desired_width(260.0));
+    if !r.has_focus() && !r.lost_focus() {
+        r.request_focus();
+    }
+    if r.lost_focus() {
+        let new = text.trim().to_string();
+        if !ui.input(|i| i.key_pressed(egui::Key::Escape)) && !new.is_empty() && new != name {
+            rename_doc(app, &new);
+        }
+        *draft = None;
+    }
+}
+
+/// Renames the active spreadsheet: a file keeps its extension (the download uses the new name).
+fn rename_doc(app: &mut SheetApp, new: &str) {
+    let Some(d) = app.session.active_mut() else { return };
+    match d.path.as_deref() {
+        Some(p) => {
+            let ext = std::path::Path::new(p).extension().map(|e| e.to_string_lossy().to_string());
+            let has_ext = std::path::Path::new(new).extension().is_some();
+            d.path = Some(match ext {
+                Some(e) if !has_ext => format!("{new}.{e}"),
+                _ => new.to_string(),
+            });
+        }
+        None => d.title = new.to_string(),
+    }
+}
 
 fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
     let with_icons = items.iter().any(|i| match i {
