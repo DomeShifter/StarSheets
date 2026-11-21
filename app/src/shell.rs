@@ -556,7 +556,17 @@ impl Shell {
                                 ui.spacing_mut().button_padding.x = 44.0;
                                 egui::ScrollArea::vertical().max_height(520.0).show(ui, |ui| {
                                     for f in fonts() {
-                                        let font = crate::fonts::preview_font(ui.ctx(), f, crate::house::BODY + 1.0).unwrap_or_else(|| egui::FontId::proportional(crate::house::BODY + 1.0));
+                                        let base = egui::FontId::proportional(crate::house::BODY + 1.0);
+                                        let font = match crate::fonts::preview_font(ui.ctx(), f, base.size) {
+                                            // Capitals already match Roboto's height; also meet Roboto's width halfway,
+                                            // so narrow fonts (Impact) and wide ones (Verdana) look about as big.
+                                            Some(p) => {
+                                                let width = |id: egui::FontId| ui.painter().layout_no_wrap(f.to_string(), id, theme::TEXT).size().x.max(1.0);
+                                                let k = (width(base.clone()) / width(p.clone())).sqrt().clamp(0.85, 1.25);
+                                                egui::FontId::new(p.size * k, p.family)
+                                            }
+                                            None => base,
+                                        };
                                         let r = ui.add(Button::new(RichText::new(f).font(font).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(220.0, crate::house::ROW_HEIGHT)));
                                         if f == cur.font {
                                             ui.painter().text(r.rect.left_center() + vec2(16.0, 0.0), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), theme::TEXT);
