@@ -84,6 +84,7 @@ pub struct Files {
     need_login: bool,
     password: String,
     login_error: Option<String>,
+    login_focused: bool,
     /// The folder a new spreadsheet is saved in (`?folder=` from "New spreadsheet" in a folder).
     new_folder: String,
     versions: Option<Vec<(String, i64)>>,
@@ -489,9 +490,14 @@ impl Files {
             ui.label(RichText::new("This server keeps its spreadsheets behind a password.").color(theme::TEXT_DIM));
             ui.add_space(10.0);
             let r = ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("Password").desired_width(f32::INFINITY).margin(vec2(8.0, 8.0)));
-            r.request_focus();
-            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+            // Focus the box once (grabbing it every frame swallowed the Enter that signs in).
+            if !self.login_focused {
+                r.request_focus();
+                self.login_focused = true;
+            }
+            if (r.lost_focus() || r.has_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                 go = true;
+                r.request_focus();
             }
             if let Some(e) = &self.login_error {
                 ui.label(RichText::new(e).color(Color32::from_rgb(0xC5, 0x39, 0x29)));
