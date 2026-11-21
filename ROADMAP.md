@@ -53,6 +53,7 @@
 - [x] File window: folders, path bar, search, sort, new folder/spreadsheet here, rename, copy/cut/paste, drag to move, bin with restore, download
 - [x] Saving on close: closing or hiding the tab saves at once; the status line says where and when it saved (hover) and opens version history (click)
 - [x] A file opens in this tab only if the sheet here is blank; otherwise a new tab
+- [x] Google Sheets formulas: `{…}` array literals with formulas and ranges, ARRAYFORMULA, Ctrl+Shift+Enter wraps in ARRAYFORMULA (patch 0022)
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
 

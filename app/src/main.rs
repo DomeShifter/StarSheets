@@ -17,6 +17,7 @@ mod files;
 mod fonts;
 mod icons;
 mod linkcard;
+mod sheets_formulas;
 mod shell;
 mod theme;
 #[cfg(target_arch = "wasm32")]

@@ -1,0 +1,230 @@
+diff --git a/crates/formula/src/parser.rs b/crates/formula/src/parser.rs
+index 2b6f6d4..a356c04 100644
+--- a/crates/formula/src/parser.rs
++++ b/crates/formula/src/parser.rs
+@@ -423,7 +423,41 @@ impl Parser {
+         Ok(Expr::Name(w.to_string()))
+     }
+ 
++    /// `{…}`: an array constant (`{1,2;3,4}`), or else, as in Google Sheets, an array literal of
++    /// formulas and ranges (`{A1:A3, B1:B3}` side by side, `{A1:A3; B1:B3}` one under another),
++    /// kept as `ARRAY_LITERAL(ARRAY_ROW(…), …)` and printed back in braces.
+     fn array(&mut self) -> Result<Expr, ParseError> {
++        let start = self.i;
++        match self.array_constant() {
++            Ok(e) => Ok(e),
++            // Only a non-constant inside makes it a Sheets array literal; a constant mistake
++            // (`{1,2;3}`, rows of different lengths) stays the constant's error.
++            Err(constant_error) if constant_error.msg.contains("may only contain constants") => {
++                self.i = start;
++                self.array_literal().map_err(|_| constant_error)
++            }
++            Err(e) => Err(e),
++        }
++    }
++
++    fn array_literal(&mut self) -> Result<Expr, ParseError> {
++        let mut rows: Vec<Vec<Expr>> = vec![Vec::new()];
++        loop {
++            let el = self.expr(0, false)?;
++            if let Some(r) = rows.last_mut() {
++                r.push(el);
++            }
++            match self.next() {
++                Tok::Comma => {}
++                Tok::Semicolon => rows.push(Vec::new()),
++                Tok::RBrace => break,
++                t => return Err(self.err(format!("expected `,`, `;` or `}}`, found {}", describe(&t)))),
++            }
++        }
++        Ok(Expr::Call("ARRAY_LITERAL".into(), rows.into_iter().map(|r| Expr::Call("ARRAY_ROW".into(), r)).collect()))
++    }
++
++    fn array_constant(&mut self) -> Result<Expr, ParseError> {
+         let mut rows = vec![Vec::new()];
+         loop {
+             let el = match self.next() {
+diff --git a/crates/formula/src/printer.rs b/crates/formula/src/printer.rs
+index bddbfeb..59ae33d 100644
+--- a/crates/formula/src/printer.rs
++++ b/crates/formula/src/printer.rs
+@@ -327,6 +327,24 @@ fn write_expr(s: &mut String, e: &Expr, r1c1: Option<CellRef>) {
+                 write_expr(s, right, r1c1);
+             }
+         }
++        // A Google Sheets array literal prints back as typed: `{A1:A3, B1:B3; C1:C3, D1:D3}`.
++        Expr::Call(name, rows) if name == "ARRAY_LITERAL" && rows.iter().all(|r| matches!(r, Expr::Call(n, _) if n == "ARRAY_ROW")) => {
++            s.push('{');
++            for (ri, row) in rows.iter().enumerate() {
++                if ri > 0 {
++                    s.push(';');
++                }
++                if let Expr::Call(_, els) = row {
++                    for (ci, el) in els.iter().enumerate() {
++                        if ci > 0 {
++                            s.push(',');
++                        }
++                        write_expr(s, el, r1c1);
++                    }
++                }
++            }
++            s.push('}');
++        }
+         Expr::Call(name, args) => {
+             s.push_str(name);
+             s.push('(');
+diff --git a/crates/formula/src/tests.rs b/crates/formula/src/tests.rs
+index 6e38299..efc23a3 100644
+--- a/crates/formula/src/tests.rs
++++ b/crates/formula/src/tests.rs
+@@ -144,7 +144,8 @@ fn precedence() -> Result<(), Box<dyn std::error::Error>> {
+ 
+ #[test]
+ fn errors() {
+-    for bad in ["1+", "SUM(1,2", "(1", "{1,2;3}", "\"abc", "A1:", "1 2", "{A1}", ")", "Sheet1!", "#FOO!"] {
++    // `{A1}` is a Google Sheets array literal (StarSheets patch 0022), so it parses.
++    for bad in ["1+", "SUM(1,2", "(1", "{1,2;3}", "\"abc", "A1:", "1 2", ")", "Sheet1!", "#FOO!"] {
+         assert!(parse(bad).is_err(), "{bad} should fail");
+     }
+ }
+diff --git a/crates/formula/tests/it/spanish_input.rs b/crates/formula/tests/it/spanish_input.rs
+index d8a9def..9d4a4fa 100644
+--- a/crates/formula/tests/it/spanish_input.rs
++++ b/crates/formula/tests/it/spanish_input.rs
+@@ -44,12 +44,12 @@ fn spanish_input_preserves_reference_and_array_syntax() {
+     ] {
+         assert_eq!(input(src), expected, "{src}");
+     }
+-    for bad in [r"SUMA({1;2\3})", "{SUMA(A1)}", "{FALSO;}"] {
++    // `{SUMA(A1)}` and `{VERDADERO}` are Google Sheets array literals (StarSheets patch 0022).
++    for bad in [r"SUMA({1;2\3})", "{FALSO;}"] {
+         assert!(parse_input(bad, FormulaLocale::Es, |_| false).is_err(), "{bad}");
+     }
+     assert_eq!(print(&parse("SUMA(1,2)+FALSO").unwrap()), "SUMA(1,2)+FALSO");
+     assert!(parse("SUM(1;2)").is_err());
+-    assert!(parse("{VERDADERO}").is_err());
+     // Real nesting past the parser's limit is still refused.
+     let nested = "(".repeat(300) + "1" + &")".repeat(300);
+     assert!(parse_input(&nested, FormulaLocale::Es, |_| false).is_err());
+diff --git a/crates/functions/src/dynamic.rs b/crates/functions/src/dynamic.rs
+index 15e9ff7..484862d 100644
+--- a/crates/functions/src/dynamic.rs
++++ b/crates/functions/src/dynamic.rs
+@@ -314,6 +314,46 @@ fn randarray(args: &[Arg], ctx: &mut dyn Ctx) -> R<Value> {
+ // ---------------------------------------------------------------------------------------------
+ // VSTACK / HSTACK / TOROW / TOCOL / WRAPROWS / WRAPCOLS
+ 
++/// Google Sheets' ARRAYFORMULA: its formula already works over ranges (dynamic arrays), so it
++/// returns the result as it is, and an array spills.
++fn arrayformula(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
++    let a = arr_arg(args, 0)?;
++    if a.rows == 1 && a.cols == 1 {
++        return Ok(a.data.first().cloned().unwrap_or(Value::Empty));
++    }
++    Ok(Value::from(a))
++}
++
++/// `{a, b}` in Google Sheets: parts side by side; they must have the same number of rows.
++fn array_row(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
++    let parts = (0..args.len()).map(|i| arr_arg(args, i)).collect::<R<Vec<_>>>()?;
++    let h = parts.first().map_or(0, |a| a.rows);
++    if parts.iter().any(|a| a.rows != h) {
++        return Err(CellError::Value);
++    }
++    let w: usize = parts.iter().map(|a| a.cols).sum();
++    check_output_size(h, w)?;
++    let rows = (0..h).map(|r| parts.iter().flat_map(|a| (0..a.cols).map(move |c| a.get(r, c).cloned().unwrap_or(Value::Empty))).collect()).collect();
++    from_rows(rows, &Value::Error(CellError::NA))
++}
++
++/// `{a; b}` in Google Sheets: rows one under another; they must have the same number of columns.
++fn array_literal(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
++    let parts = (0..args.len()).map(|i| arr_arg(args, i)).collect::<R<Vec<_>>>()?;
++    let w = parts.first().map_or(0, |a| a.cols);
++    if parts.iter().any(|a| a.cols != w) {
++        return Err(CellError::Value);
++    }
++    let mut rows = Vec::new();
++    for a in &parts {
++        rows.extend(rows_of(a));
++    }
++    if rows.len() == 1 && w == 1 {
++        return Ok(rows[0][0].clone());
++    }
++    from_rows(rows, &Value::Error(CellError::NA))
++}
++
+ fn vstack(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     let mut rows = Vec::new();
+     let mut total = 0usize;
+@@ -1070,6 +1110,9 @@ pub(crate) fn specs() -> Vec<FnSpec> {
+             randarray
+         ),
+         f!("VSTACK", 1, VAR, Lookup, A, "VSTACK(array1, [array2], ...)", "Stacks arrays on top of each other.", vstack),
++        f!("ARRAYFORMULA", 1, 1, Lookup, A, "ARRAYFORMULA(array_formula)", "Shows the values of a formula over ranges in the cells below and to the right (Google Sheets).", arrayformula),
++        f!("ARRAY_ROW", 1, VAR, Lookup, A, "ARRAY_ROW(value1, [value2], ...)", "One row of a {…} array literal: its parts side by side (Google Sheets).", array_row),
++        f!("ARRAY_LITERAL", 1, VAR, Lookup, A, "ARRAY_LITERAL(row1, [row2], ...)", "A {…} array literal: its rows one under another (Google Sheets).", array_literal),
+         f!("HSTACK", 1, VAR, Lookup, A, "HSTACK(array1, [array2], ...)", "Places arrays side by side.", hstack),
+         f!(
+             "TOROW",
+diff --git a/crates/ui-egui/src/app/editing.rs b/crates/ui-egui/src/app/editing.rs
+index a5ac8a1..3a8541d 100644
+--- a/crates/ui-egui/src/app/editing.rs
++++ b/crates/ui-egui/src/app/editing.rs
+@@ -60,7 +60,11 @@ impl SheetApp {
+             String::new()
+         } else {
+             match sh.cell(at) {
+-                Some(c) if c.formula.is_some() => formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet()),
++                Some(c) if c.formula.is_some() => {
++                    let shown = formula_locale::display(&c.input_text(), locale, &d.wb, d.wb.active_sheet());
++                    // A legacy (Excel) array formula edits as ARRAYFORMULA(…) in Sheets mode.
++                    if self.ui.sheets_keys && c.formula.as_ref().is_some_and(|f| f.array.is_some()) { crate::formula_bar::sheets_array_wrap(&shown) } else { shown }
++                }
+                 _ => gridcraft_engine::display::edit_text(&d.wb, sh, at),
+             }
+         };
+@@ -142,6 +146,8 @@ impl SheetApp {
+             Some(full) if !ed.python && full.to_lowercase().starts_with(&ed.text.to_lowercase()) => full.clone(),
+             _ => ed.text.clone(),
+         };
++        // Google Sheets: Ctrl+Shift+Enter wraps the formula in ARRAYFORMULA(…), not braces.
++        let (text, array) = if array && self.ui.sheets_keys { (crate::formula_bar::sheets_array_wrap(&text), false) } else { (text, array) };
+         // F2 then Enter (or a file command) on an untouched draft: nothing to write.
+         if !fill_selection && !array && ed.original.as_ref() == Some(&text) {
+             if dr != 0 || dc != 0 {
+diff --git a/crates/ui-egui/src/formula_bar.rs b/crates/ui-egui/src/formula_bar.rs
+index 42feae6..e91ff14 100644
+--- a/crates/ui-egui/src/formula_bar.rs
++++ b/crates/ui-egui/src/formula_bar.rs
+@@ -331,7 +331,14 @@ fn active_input(app: &SheetApp) -> String {
+         return if let Some(f) = &c.formula {
+             let shown = crate::formula_locale::display(&c.input_text(), app.ui.language.formula_locale(), &d.wb, d.wb.active_sheet());
+             // A legacy array formula shows in braces (`{=A1:A2*2}`), as `Cell::bar_text` does.
+-            if f.array.is_some() { format!("{{{shown}}}") } else { shown }
++            // In Sheets mode it shows as ARRAYFORMULA(…), the way Google Sheets writes it.
++            if f.array.is_some() && app.ui.sheets_keys {
++                sheets_array_wrap(&shown)
++            } else if f.array.is_some() {
++                format!("{{{shown}}}")
++            } else {
++                shown
++            }
+         } else {
+             gridcraft_engine::display::edit_text(&d.wb, sh, a)
+         };
+@@ -339,6 +346,14 @@ fn active_input(app: &SheetApp) -> String {
+     String::new()
+ }
+ 
++/// `=X` as Google Sheets' `=ARRAYFORMULA(X)` (left as it is when it already is one, or isn't a formula).
++pub fn sheets_array_wrap(text: &str) -> String {
++    match text.strip_prefix('=') {
++        Some(body) if !body.trim_start().to_ascii_uppercase().starts_with("ARRAYFORMULA(") => format!("=ARRAYFORMULA({body})"),
++        _ => text.to_string(),
++    }
++}
++
+ /// Ctrl+Alt+Shift+P, and Cmd+Option+Shift+P on macOS: Python mode on or off.
+ pub fn is_python_shortcut(ev: &egui::Event) -> bool {
+     matches!(ev, egui::Event::Key { key: Key::P, pressed: true, modifiers: m, .. } if m.shift && m.alt && (m.ctrl || m.command || m.mac_cmd))
