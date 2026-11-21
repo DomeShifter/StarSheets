@@ -36,15 +36,15 @@ const CONDITIONS: &[(&str, &str, &str, u8)] = &[
     ("Custom formula is", "expression", "", 1),
 ];
 
-/// Sheets' preset styles for a single-colour rule: (text colour, fill).
-const STYLE_PRESETS: &[(u32, u32)] = &[
-    (0x000000, 0xB7E1CD),
-    (0x000000, 0xFCE8B2),
-    (0x000000, 0xF4C7C3),
-    (0xFFFFFF, 0x0B8043),
-    (0xFFFFFF, 0xF09300),
-    (0xFFFFFF, 0xC53929),
-    (0x000000, 0xC6DAFC),
+/// Sheets' preset styles (the menu under "Formatting style"): (text colour, fill). Top row:
+/// green, yellow, red fills; bottom row: the same colours as text only.
+const STYLE_PRESETS: &[(Option<u32>, Option<u32>)] = &[
+    (None, Some(0xB7E1CD)),
+    (None, Some(0xFCE8B2)),
+    (None, Some(0xF4C7C3)),
+    (Some(0x0B8043), None),
+    (Some(0xF09300), None),
+    (Some(0xC5221F), None),
 ];
 
 /// Colour-scale presets (min, max; Sheets' first row is two-colour, the rest add a midpoint).
@@ -103,7 +103,7 @@ impl Draft {
             underline: false,
             strike: false,
             text: None,
-            fill: Some(STYLE_PRESETS[0].1),
+            fill: STYLE_PRESETS[0].1,
             points: [
                 Point { kind: 1, value: String::new(), colour: 0xFFFFFF },
                 Point { kind: 0, value: String::new(), colour: 0xFFD666 },
@@ -118,6 +118,9 @@ pub struct CfPanel {
     pub open: bool,
     draft: Option<Draft>,
     error: Option<String>,
+    /// Live preview while editing, as in Sheets: the draft is applied to the sheet for real and
+    /// undone again on every change, Cancel or close. (what was applied, commands to undo)
+    preview: Option<(String, usize)>,
 }
 
 impl CfPanel {
@@ -152,6 +155,8 @@ impl CfPanel {
                     ui.label(RichText::new("Conditional format rules").size(16.0).color(theme::TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add(egui::Button::new(RichText::new("✕").size(16.0)).frame(false)).on_hover_text("Close").clicked() {
+                            self.revert_preview(app);
+                            self.draft = None;
                             self.open = false;
                         }
                     });
@@ -162,6 +167,7 @@ impl CfPanel {
                     if let Some(mut d) = self.draft.take() {
                         match self.editor(app, ui, &mut d) {
                             Some(true) => {
+                                self.revert_preview(app);
                                 if self.save(app, &d) {
                                     self.draft = None;
                                 } else {
@@ -169,13 +175,17 @@ impl CfPanel {
                                 }
                             }
                             Some(false) => {
+                                self.revert_preview(app);
                                 self.error = None;
                                 let none_left = app.session.active().and_then(|d| d.wb.active()).is_none_or(|sh| sh.cond_formats.is_empty());
                                 if none_left {
                                     self.open = false;
                                 }
                             }
-                            None => self.draft = Some(d),
+                            None => {
+                                self.update_preview(app, &d);
+                                self.draft = Some(d);
+                            }
                         }
                     } else {
                         self.list(app, ui);
@@ -276,6 +286,38 @@ impl CfPanel {
         out
     }
 
+    /// Undoes the live preview, if one is applied.
+    fn revert_preview(&mut self, app: &mut SheetApp) {
+        if let Some((_, n)) = self.preview.take() {
+            for _ in 0..n {
+                let _ = app.run("edit.undo", json!({}));
+            }
+        }
+    }
+
+    /// Applies the draft as it stands, replacing the previous preview, when it changed. A draft
+    /// that isn't complete yet (e.g. no value typed) shows nothing.
+    fn update_preview(&mut self, app: &mut SheetApp, d: &Draft) {
+        let rule = rule_json(d);
+        let key = format!("{:?}|{}|{}", d.index, d.range.trim(), rule.as_ref().map(ToString::to_string).unwrap_or_default());
+        if self.preview.as_ref().is_some_and(|(k, _)| *k == key) {
+            return;
+        }
+        self.revert_preview(app);
+        let mut applied = 0;
+        if let Ok(rule) = rule {
+            if let Some(i) = d.index
+                && app.run("home.manageRules", json!({ "delete": i })).is_ok()
+            {
+                applied += 1;
+            }
+            if app.run("home.conditionalFormat", json!({ "range": d.range.trim(), "rule": rule })).is_ok() {
+                applied += 1;
+            }
+        }
+        self.preview = Some((key, applied));
+    }
+
     /// Stores the draft through GridCraft's commands; an edited rule replaces the old one in the
     /// same place. On failure the panel stays open with the reason.
     fn save(&mut self, app: &mut SheetApp, d: &Draft) -> bool {
@@ -373,7 +415,8 @@ fn single_editor(ui: &mut Ui, d: &mut Draft) {
     ui.add_space(10.0);
     ui.label(RichText::new("Formatting style").size(12.0).color(theme::TEXT_DIM));
     // Preview, as in Sheets: "Default" in the chosen style.
-    let (r, _) = ui.allocate_exact_size(vec2(PANEL_W, 36.0), Sense::hover());
+    // The style preview; click it for Sheets' preset styles.
+    let (r, preview) = ui.allocate_exact_size(vec2(PANEL_W, 36.0), Sense::click());
     ui.painter().rect_filled(r, CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, d.fill.map_or(Color32::WHITE, c32));
     let colour = d.text.map_or(theme::TEXT, c32);
     let style_text = egui::text::LayoutJob::simple_format(
@@ -419,22 +462,46 @@ fn single_editor(ui: &mut Ui, d: &mut Draft) {
         });
     });
     ui.add_space(6.0);
-    // Sheets' preset styles.
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-        for (text, fill) in STYLE_PRESETS {
-            let (r, resp) = ui.allocate_exact_size(vec2(36.0, 24.0), Sense::click());
-            ui.painter().rect_filled(r, 3.0, c32(*fill));
-            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "123", egui::FontId::proportional(11.0), c32(*text));
-            if resp.hovered() {
-                ui.painter().rect_stroke(r, 3.0, Stroke::new(1.5, theme::BLUE), egui::StrokeKind::Outside);
+    let menu_id = ui.id().with("cf_style_presets");
+    if preview.on_hover_text("Preset styles").clicked() {
+        egui::Popup::toggle_id(ui.ctx(), menu_id);
+    }
+    egui::Popup::new(menu_id, ui.ctx().clone(), egui::PopupAnchor::Position(r.left_bottom() + vec2(0.0, 4.0)), ui.layer_id())
+        .open_memory(None)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            egui::Grid::new("cf_style_grid").spacing(vec2(12.0, 12.0)).show(ui, |ui| {
+                for (i, (text, fill)) in STYLE_PRESETS.iter().enumerate() {
+                    let (cell, resp) = ui.allocate_exact_size(vec2(70.0, 32.0), Sense::click());
+                    let p = ui.painter();
+                    p.rect_filled(cell, 2.0, fill.map_or(Color32::WHITE, c32));
+                    p.rect_stroke(cell, 2.0, Stroke::new(1.0, fill.map_or(theme::DIVIDER, c32)), egui::StrokeKind::Inside);
+                    let current = d.text == *text && d.fill == *fill;
+                    let label = if current { "✔123" } else { "123" };
+                    p.text(cell.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(13.0), text.map_or(theme::TEXT, c32));
+                    if resp.hovered() {
+                        p.rect_stroke(cell, 2.0, Stroke::new(1.5, theme::BLUE), egui::StrokeKind::Outside);
+                    }
+                    if resp.clicked() {
+                        d.text = *text;
+                        d.fill = *fill;
+                        d.bold = false;
+                        d.italic = false;
+                        d.underline = false;
+                        d.strike = false;
+                        egui::Popup::close_id(ui.ctx(), menu_id);
+                    }
+                    if i % 3 == 2 {
+                        ui.end_row();
+                    }
+                }
+            });
+            ui.separator();
+            // Custom format: the bar under the preview (B, I, U, S, colours) does the rest.
+            if ui.add(egui::Button::new("Custom format").min_size(vec2(234.0, 28.0))).on_hover_text("Use the buttons under the preview").clicked() {
+                egui::Popup::close_id(ui.ctx(), menu_id);
             }
-            if resp.on_hover_text("Preset style").clicked() {
-                d.text = (*text != 0).then_some(*text);
-                d.fill = Some(*fill);
-            }
-        }
-    });
+        });
 }
 
 fn scale_editor(ui: &mut Ui, d: &mut Draft) {
