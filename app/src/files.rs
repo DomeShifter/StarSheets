@@ -100,13 +100,13 @@ impl Files {
         }
         self.autosave(app, ctx);
         self.rename_if_needed(app, ctx);
-        let unsaved = self.busy || app.session.active().is_some_and(|d| d.is_dirty() && has_data(&d.wb));
+        let unsaved = self.busy || app.session.active().is_some_and(|d| self.needs_save(d));
         set_unsaved_flag(unsaved);
         let status = if let Some(e) = &self.error {
             format!("Not saved: {e}")
         } else if unsaved {
             "Saving…".to_string()
-        } else if self.link.is_some() {
+        } else if self.link.as_ref().is_some_and(|l| app.session.active().is_some_and(|d| d.uid == l.doc)) {
             "Saved".to_string()
         } else {
             self.status.clone()
@@ -161,6 +161,8 @@ impl Files {
                 if let Some(d) = app.session.active_mut().filter(|d| d.uid == doc) {
                     d.saved = sent;
                     d.title = stem(&link.name);
+                    // An imported file keeps its own name only until it is on the server.
+                    d.path = None;
                 }
                 set_query_file(&link.id);
                 self.link = Some(link);
@@ -227,7 +229,7 @@ impl Files {
             self.seen = Some(key);
             self.changed_at = now;
         }
-        if self.busy || self.renaming || !d.is_dirty() || !has_data(&d.wb) || app.editor.is_some() {
+        if self.busy || self.renaming || !self.needs_save(d) || app.editor.is_some() {
             return;
         }
         if now - self.changed_at < SAVE_AFTER {
@@ -236,7 +238,7 @@ impl Files {
         }
         let sent = d.wb.clone();
         let doc = d.uid;
-        let title = d.title.clone();
+        let title = display_name(d);
         let bytes = match gridcraft_engine::io::save_bytes(&sent, "book.xlsx") {
             Ok(b) => b,
             Err(e) => {
@@ -269,11 +271,12 @@ impl Files {
         }
         let Some(l) = self.link.clone() else { return };
         let Some(d) = app.session.active().filter(|d| d.uid == l.doc) else { return };
-        if d.title == stem(&l.name) || d.title.trim().is_empty() {
+        let want = display_name(d);
+        if want == stem(&l.name) || want.trim().is_empty() {
             return;
         }
         self.renaming = true;
-        send(Method::Post, format!("{API}/{}/rename?name={}", l.id, enc(&d.title)), None, None, self.inbox.clone(), ctx.clone(), |_, _, body| {
+        send(Method::Post, format!("{API}/{}/rename?name={}", l.id, enc(&want)), None, None, self.inbox.clone(), ctx.clone(), |_, _, body| {
             let v: Json = serde_json::from_slice(&body).unwrap_or_default();
             match v["name"].as_str() {
                 Some(n) => Reply::Renamed(n.to_string()),
@@ -317,7 +320,7 @@ impl Files {
             if let Some(id) = pick {
                 open = false;
                 // This tab if what's here is saved (or empty), else a new tab.
-                let keep = app.session.active().is_some_and(|d| d.is_dirty() && has_data(&d.wb)) || self.busy;
+                let keep = app.session.active().is_some_and(|d| self.needs_save(d)) || self.busy;
                 if keep { open_tab(&id) } else { go_to(&id) }
             }
             if !open {
@@ -353,6 +356,24 @@ impl Files {
                 self.versions = None;
             }
         }
+    }
+}
+
+impl Files {
+    /// Whether the workbook should be (re)saved: it has data and either changed or isn't on the
+    /// server yet (an imported file opens unchanged but still needs its first upload).
+    fn needs_save(&self, d: &gridcraft_engine::DocState) -> bool {
+        let linked = self.link.as_ref().is_some_and(|l| l.doc == d.uid);
+        has_data(&d.wb) && (d.is_dirty() || !linked)
+    }
+}
+
+/// The name a workbook is saved under: an imported file's own name (renaming it in the title
+/// changes that), else its title.
+fn display_name(d: &gridcraft_engine::DocState) -> String {
+    match d.path.as_deref() {
+        Some(p) => stem(p.rsplit(['/', '\\']).next().unwrap_or(p)),
+        None => d.title.clone(),
     }
 }
 
