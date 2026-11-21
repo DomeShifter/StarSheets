@@ -49,6 +49,8 @@ enum Reply {
     Opened { id: String, name: String, version: String, bytes: Vec<u8> },
     Renamed(String),
     Navigate(String),
+    /// An import saved to the server, to open in a new tab.
+    OpenTab(String),
 }
 
 #[derive(Default)]
@@ -121,7 +123,9 @@ impl Files {
                 self.list = Some(vec![]);
                 list_files(self.inbox.clone(), ctx.clone());
             }
-            "new" => open_tab(""),
+            "new" => {
+                open_tab("");
+            }
             "versions" => {
                 if let Some(l) = &self.link {
                     self.versions = Some(vec![]);
@@ -213,9 +217,37 @@ impl Files {
                     d.title = stem(&name);
                 }
             }
+            Reply::OpenTab(id) => {
+                if !open_tab(&id) {
+                    app.message = Some((
+                        "Opened in File › Open".into(),
+                        "The browser blocked the new tab. The imported file is saved: open it from File › Open, or allow pop-ups for this site.".into(),
+                    ));
+                }
+            }
             Reply::Navigate(id) => {
                 set_unsaved_flag(false);
                 go_to(&id);
+            }
+        }
+    }
+
+    /// Imported or dropped files: when the open spreadsheet already has something in it, each one
+    /// is converted to .xlsx, saved to the server and opened in a new tab (as Sheets does)
+    /// instead of in this tab. Call before GridCraft takes its inbox.
+    pub fn take_imports(&mut self, app: &mut SheetApp, inbox: &gridcraft_ui_egui::Inbox, ctx: &egui::Context) {
+        if !app.session.active().is_some_and(|d| has_data(&d.wb)) {
+            return;
+        }
+        let arrived: Vec<(String, Vec<u8>)> = std::mem::take(&mut *inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        for (name, bytes) in arrived {
+            match gridcraft_engine::io::open_bytes(&name, &bytes).and_then(|(wb, _)| gridcraft_engine::io::save_bytes(&wb, "import.xlsx")) {
+                Ok(xlsx) => send(Method::Post, format!("{API}?name={}", enc(&stem(&name))), Some(xlsx), None, self.inbox.clone(), ctx.clone(), |_, _, body| {
+                    let v: Json = serde_json::from_slice(&body).unwrap_or_default();
+                    Reply::OpenTab(v["id"].as_str().unwrap_or("").to_string())
+                }),
+                // A file that needs a password (or can't be read here): GridCraft's own open asks.
+                Err(_) => inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((name, bytes)),
             }
         }
     }
@@ -321,7 +353,11 @@ impl Files {
                 open = false;
                 // This tab if what's here is saved (or empty), else a new tab.
                 let keep = app.session.active().is_some_and(|d| self.needs_save(d)) || self.busy;
-                if keep { open_tab(&id) } else { go_to(&id) }
+                if keep {
+                    open_tab(&id);
+                } else {
+                    go_to(&id)
+                }
             }
             if !open {
                 self.list = None;
@@ -373,7 +409,8 @@ impl Files {
 fn display_name(d: &gridcraft_engine::DocState) -> String {
     match d.path.as_deref() {
         Some(p) => stem(p.rsplit(['/', '\\']).next().unwrap_or(p)),
-        None => d.title.clone(),
+        // An imported file's title can carry its extension ("Data.csv"): the server file is .xlsx.
+        None => stem(&d.title),
     }
 }
 
@@ -382,9 +419,10 @@ fn has_data(wb: &Workbook) -> bool {
     wb.sheets.iter().any(|s| s.used_range().is_some())
 }
 
+/// A name without its spreadsheet extension (only known ones: "Budget v1.2" keeps its ".2").
 fn stem(name: &str) -> String {
     match name.rsplit_once('.') {
-        Some((s, ext)) if ext.len() <= 4 => s.to_string(),
+        Some((s, ext)) if ["xlsx", "xlsm", "xls", "csv", "tsv", "ods", "txt"].contains(&ext.to_ascii_lowercase().as_str()) => s.to_string(),
         _ => name.to_string(),
     }
 }
@@ -431,10 +469,9 @@ fn go_to(id: &str) {
     }
 }
 
-fn open_tab(id: &str) {
-    if let Some(w) = web_sys::window() {
-        let _ = w.open_with_url_and_target(&page_url(id), "_blank");
-    }
+/// Opens a new tab; false when the browser blocked it.
+fn open_tab(id: &str) -> bool {
+    web_sys::window().and_then(|w| w.open_with_url_and_target(&page_url(id), "_blank").ok().flatten()).is_some()
 }
 
 /// Tells the page (index.html) whether leaving now would lose changes.

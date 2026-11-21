@@ -159,6 +159,7 @@ impl eframe::App for WebShell {
         }
         // Files first: it takes Ctrl+O for its Open dialog before GridCraft's keymap sees it.
         self.files.logic(&mut self.app, ctx);
+        self.files.take_imports(&mut self.app, &self.inbox, ctx);
         self.app.logic(ctx);
         // Store changed preferences straight away: a reload or closed tab runs no exit code (#1562).
         let changed = self.prefs.changed(&self.app);

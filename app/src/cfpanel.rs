@@ -77,6 +77,8 @@ struct Draft {
     scale: bool,
     range: String,
     condition: usize,
+    /// For the date conditions: which of Sheets' choices (0 = exact date; see date_choices).
+    when: usize,
     value1: String,
     value2: String,
     bold: bool,
@@ -96,6 +98,7 @@ impl Draft {
             scale: false,
             range,
             condition: 1,
+            when: 0,
             value1: String::new(),
             value2: String::new(),
             bold: false,
@@ -235,6 +238,7 @@ impl CfPanel {
                 let mut d = draft_from(&cf.rule, &theme_colours).unwrap_or_else(|| Draft::new(String::new()));
                 d.range = cf.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",");
                 d.index = Some(i);
+                read_date_choice(&mut d);
                 self.draft = Some(d);
             }
             ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, theme::DIVIDER));
@@ -417,7 +421,17 @@ fn single_editor(ui: &mut Ui, d: &mut Draft) {
         "expression" => "Formula, e.g. =A1>10",
         _ => "Value or formula",
     };
-    if boxes >= 1 {
+    let (_, _, op, _) = CONDITIONS[d.condition];
+    if kind == "date" {
+        let choices = date_choices(op);
+        d.when = d.when.min(choices.len() - 1);
+        egui::ComboBox::from_id_salt("cf_when").width(PANEL_W - 8.0).selected_text(choices[d.when].0).show_ui(ui, |ui| {
+            for (i, (label, _)) in choices.iter().enumerate() {
+                ui.selectable_value(&mut d.when, i, *label);
+            }
+        });
+    }
+    if boxes >= 1 && !(kind == "date" && d.when > 0) {
         ui.add(egui::TextEdit::singleline(&mut d.value1).hint_text(hint).desired_width(PANEL_W).margin(vec2(8.0, 8.0)));
     }
     if boxes >= 2 {
@@ -599,6 +613,70 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 /// Days since 1899-12-30 (the spreadsheet date number) for "dd/mm/yyyy".
+/// Sheets' choices under "Date is" (op equal) or "Date is before / after": label and the formula
+/// for the date (k = days from today) ; index 0 is a typed exact date.
+fn date_choices(op: &str) -> &'static [(&'static str, &'static str)] {
+    if op == "equal" {
+        &[
+            ("exact date", ""),
+            ("today", "0"),
+            ("tomorrow", "1"),
+            ("yesterday", "-1"),
+            ("in the past week", "TODAY()-7"),
+            ("in the past month", "EDATE(TODAY(),-1)"),
+            ("in the past year", "EDATE(TODAY(),-12)"),
+        ]
+    } else {
+        &[
+            ("exact date", ""),
+            ("today", "TODAY()"),
+            ("tomorrow", "TODAY()+1"),
+            ("yesterday", "TODAY()-1"),
+            ("one week ago", "TODAY()-7"),
+            ("one month ago", "EDATE(TODAY(),-1)"),
+            ("one year ago", "EDATE(TODAY(),-12)"),
+        ]
+    }
+}
+
+/// The custom formula for a date choice, written for the range's top-left cell `tl`. Blank and
+/// text cells never match.
+fn date_formula(op: &str, when: usize, tl: &str) -> Option<String> {
+    let (_, f) = *date_choices(op).get(when)?;
+    if f.is_empty() {
+        return None;
+    }
+    Some(match (op, when) {
+        ("equal", 1..=3) => format!("=AND(ISNUMBER({tl}),INT({tl})=TODAY(){})", if f == "0" { String::new() } else if f.starts_with('-') { f.to_string() } else { format!("+{f}") }),
+        ("equal", _) => format!("=AND(ISNUMBER({tl}),{tl}>={f},{tl}<=TODAY())"),
+        ("less", _) => format!("=AND(ISNUMBER({tl}),{tl}<{f})"),
+        _ => format!("=AND(ISNUMBER({tl}),{tl}>={f}+1)"),
+    })
+}
+
+/// A rule made from a date choice comes back as a custom formula: recognise it again.
+fn read_date_choice(d: &mut Draft) {
+    let Some(tl) = top_left(&d.range) else { return };
+    let formula = d.value1.trim().to_string();
+    for (ci, (_, kind, op, _)) in CONDITIONS.iter().enumerate() {
+        if *kind != "date" {
+            continue;
+        }
+        for w in 1..date_choices(op).len() {
+            if date_formula(op, w, &tl).is_some_and(|f| f.eq_ignore_ascii_case(&formula)) {
+                d.condition = ci;
+                d.when = w;
+                d.value1.clear();
+                return;
+            }
+        }
+    }
+}
+
+fn top_left(range: &str) -> Option<String> {
+    Some(gridcraft_engine::core::RangeRef::parse(range.split(',').next()?.trim())?.start.a1())
+}
+
 pub(crate) fn date_number(s: &str) -> Option<i64> {
     let parts: Vec<i64> = s.trim().split(['/', '-', '.']).map(|x| x.trim().parse().ok()).collect::<Option<_>>()?;
     let [d, m, y] = parts[..] else { return None };
@@ -636,7 +714,7 @@ fn rule_json(d: &Draft) -> Result<Json, String> {
         return Ok(json!({ "type": "colorScale", "stops": stops }));
     }
     let (_, kind, op, boxes) = CONDITIONS[d.condition];
-    if boxes >= 1 && d.value1.trim().is_empty() {
+    if boxes >= 1 && d.value1.trim().is_empty() && !(kind == "date" && d.when > 0) {
         return Err("Enter a value for the rule.".into());
     }
     if boxes >= 2 && d.value2.trim().is_empty() {
@@ -664,6 +742,10 @@ fn rule_json(d: &Draft) -> Result<Json, String> {
     }
     let v1 = d.value1.trim().to_string();
     let rule = match kind {
+        "date" if d.when > 0 => {
+            let tl = top_left(&d.range).ok_or("Choose the cells the rule applies to.")?;
+            json!({ "type": "expression", "formula": date_formula(op, d.when, &tl).unwrap_or_default(), "style": style })
+        }
         "date" => {
             let n = date_number(&v1).ok_or("Enter the date as dd/mm/yyyy.")?;
             json!({ "type": "cellIs", "operator": op, "value": n.to_string(), "style": style })
@@ -818,6 +900,23 @@ mod tests {
         assert_eq!(date_number("01/01/1900"), Some(2));
         assert_eq!(date_number("25/12/2026"), Some(46381));
         assert_eq!(date_number("31/13/2026"), None);
+    }
+
+    #[test]
+    fn date_choices_round_trip() {
+        for (op, ci) in [("equal", 7), ("less", 8), ("greater", 9)] {
+            for w in 1..date_choices(op).len() {
+                let mut d = Draft::new("B2:B9".into());
+                d.condition = ci;
+                d.when = w;
+                let rule = rule_json(&d).unwrap();
+                let mut back = Draft::new("B2:B9".into());
+                back.condition = 18;
+                back.value1 = format!("={}", rule["formula"].as_str().unwrap().trim_start_matches('='));
+                read_date_choice(&mut back);
+                assert_eq!((back.condition, back.when), (ci, w), "{op} {w}");
+            }
+        }
     }
 
     #[test]
