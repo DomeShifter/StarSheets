@@ -417,6 +417,10 @@ fn mime_for(name: &str) -> &'static str {
 }
 
 /// Trigger a browser save dialog or download of `bytes` named after `name`.
+pub(crate) fn download_file(name: &str, bytes: &[u8]) -> Result<(), String> {
+    download(name, bytes)
+}
+
 fn download(name: &str, bytes: &[u8]) -> Result<(), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;

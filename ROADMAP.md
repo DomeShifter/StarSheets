@@ -50,6 +50,9 @@
 - [x] Conditional formatting date choices (today, tomorrow, yesterday, past week/month/year; before/after one week/month/year ago)
 - [x] Importing into a sheet that has data opens the file in a new tab
 - [x] Fonts: 28 free fonts (look-alikes for Arial, Calibri, Cambria, Comic Sans, Courier New, Georgia, Impact, Times New Roman, Trebuchet, Verdana, plus Sheets' Google fonts), fetched on first use (patch 0021, app/webfonts.txt)
+- [x] File window: folders, path bar, search, sort, new folder/spreadsheet here, rename, copy/cut/paste, drag to move, bin with restore, download
+- [x] Saving on close: closing or hiding the tab saves at once; the status line says where and when it saved (hover) and opens version history (click)
+- [x] A file opens in this tab only if the sheet here is blank; otherwise a new tab
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
 

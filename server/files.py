@@ -1,25 +1,41 @@
 #!/usr/bin/env python3
-"""StarSheets file store: keeps spreadsheets as ordinary .xlsx files in one folder (STORE).
+"""StarSheets file store: spreadsheets as ordinary .xlsx files in a folder tree (STORE).
 
-A small JSON API for the web app, served behind the same nginx as the app (under /api/):
+A small JSON API for the web app, served behind the same nginx as the app (under /api/).
+Folders are paths relative to STORE with "/" ("" = the top). Files:
 
-  GET    /api/files                    list: [{id, name, modified, size, version}]
-  POST   /api/files?name=N             new file (body = xlsx bytes) -> {id, name, version}
-  GET    /api/files/ID                 the file's bytes (header ETag = version)
-  PUT    /api/files/ID                 save (header If-Match = the version it was based on)
-                                       -> {version}; 409 if the file changed since
-  POST   /api/files/ID/rename?name=N   -> {name}
-  DELETE /api/files/ID                 move to the bin (STORE/.bin)
-  GET    /api/files/ID/versions        older copies: [{v, modified, size}]
-  GET    /api/files/ID/versions/V      an older copy's bytes
+  GET    /api/files                         {files: [{id, name, folder, modified, size, version}], folders: [path]}
+  POST   /api/files?name=N&folder=F         new file (body = xlsx bytes) -> {id, name, version}
+  GET    /api/files/ID                      the file's bytes (header ETag = version, X-File-Name)
+  PUT    /api/files/ID                      save (header If-Match = the version it was based on)
+                                            -> {version}; 409 if the file changed since
+  POST   /api/files/ID/rename?name=N        -> {name}
+  POST   /api/files/ID/move?folder=F        -> {name}
+  POST   /api/files/ID/copy?folder=F        -> {id, name}  (same folder: "Copy of N")
+  DELETE /api/files/ID                      move to the bin
+  GET    /api/files/ID/versions             older copies: [{v, modified, size}]
+  GET    /api/files/ID/versions/V           an older copy's bytes
+Folders:
+  POST   /api/folders?path=P&name=N         new folder in P -> {path}
+  POST   /api/folders/rename?path=P&name=N  -> {path}
+  POST   /api/folders/move?path=P&to=F      -> {path}
+  POST   /api/folders/copy?path=P&to=F      -> {path}
+  DELETE /api/folders?path=P                move to the bin (with everything in it)
+Bin (STORE/.bin):
+  GET    /api/bin                           [{name, original, deleted, folder}]
+  POST   /api/bin/restore?name=B            back where it was (a free name if that's taken)
+  DELETE /api/bin?name=B                    delete forever; without name: empty the bin
 
-File names stay readable ("Budget.xlsx"). A name that is taken gets " (2)", " (3)"…; the free name
-is claimed with an exclusive create, so two saves at once can't take the same one. Each file
-has a hidden id (STORE/.starsheets/index.json) so the app follows a file across renames; a file
-added to the folder by hand gets an id when it is first listed. The last KEEP versions of each
-file are kept in STORE/.starsheets/versions/ID/.
+Names stay readable ("Budget.xlsx"). A name that is taken gets " (2)", " (3)"…; the free name is
+claimed with an exclusive create, so two saves at once can't take the same one. Each file has a
+hidden id (STORE/.starsheets/index.json) so the app follows a file across renames and moves; a
+file added by hand gets an id when it is first listed. The last KEEP versions of each file are
+kept in STORE/.starsheets/versions/ID/. Folders and files starting with "." are not shown.
 
-Standard library only. Settings: STORE (folder), KEEP (versions, default 6), PORT (8080).
+Also GET /api/info -> {location}: how the store is described to people (LOCATION).
+
+Standard library only. Settings: STORE (folder), KEEP (versions, default 6), PORT (8080),
+LOCATION (e.g. "the NAS, James › StarSheets"; default "the server").
 """
 
 import json
@@ -35,8 +51,10 @@ from urllib.parse import parse_qs, unquote, urlparse
 STORE = os.environ.get("STORE", "/data")
 KEEP = int(os.environ.get("KEEP", "6"))
 PORT = int(os.environ.get("PORT", "8080"))
+LOCATION = os.environ.get("LOCATION", "the server")
 META = os.path.join(STORE, ".starsheets")
 INDEX = os.path.join(META, "index.json")
+BIN_INDEX = os.path.join(META, "bin.json")
 VERSIONS = os.path.join(META, "versions")
 BIN = os.path.join(STORE, ".bin")
 MAX_BYTES = 200 * 1024 * 1024
@@ -45,64 +63,45 @@ EXTS = (".xlsx", ".xlsm", ".xls", ".csv", ".ods")
 lock = threading.Lock()
 
 
-def load_index():
-    try:
-        with open(INDEX, encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+class Bad(Exception):
+    """A request that can't be done: (http status, message)."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
 
 
-def save_index(index):
-    os.makedirs(META, exist_ok=True)
-    tmp = INDEX + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(index, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, INDEX)
+# ---------------------------------------------------------------- paths and names
+
+def rel(path):
+    """A safe folder path relative to STORE ("" = the top), or Bad."""
+    parts = [p for p in (path or "").replace("\\", "/").split("/") if p]
+    for p in parts:
+        if p in (".", "..") or p.startswith("."):
+            raise Bad(400, "bad folder name")
+    return "/".join(parts)
 
 
-def synced_index():
-    """The index, brought in line with the folder: new files get ids, vanished ones are dropped."""
-    index = load_index()
-    names = {n for n in os.listdir(STORE) if n.lower().endswith(EXTS) and not n.startswith(".")}
-    known = set(index.values())
-    changed = False
-    for fid, name in list(index.items()):
-        if name not in names:
-            del index[fid]
-            changed = True
-    for name in sorted(names - known):
-        index[secrets.token_hex(8)] = name
-        changed = True
-    if changed:
-        save_index(index)
-    return index
+def full(relpath):
+    return os.path.join(STORE, *relpath.split("/")) if relpath else STORE
 
 
-def version_of(path):
-    st = os.stat(path)
-    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+def join(folder, name):
+    return f"{folder}/{name}" if folder else name
+
+
+def parent_of(relpath):
+    return relpath.rsplit("/", 1)[0] if "/" in relpath else ""
+
+
+def base_of(relpath):
+    return relpath.rsplit("/", 1)[-1]
 
 
 def clean_name(name):
     """A safe display name: no folders, no characters Windows/SMB refuse, not empty."""
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "-", (name or "").strip()).strip(". ")
     return name[:150] or "Untitled spreadsheet"
-
-
-def claim_name(stem, ext, own=None):
-    """Reserves a free file name (stem.ext, stem (2).ext, …) by creating it exclusively."""
-    for n in range(1, 10000):
-        name = f"{stem}{'' if n == 1 else f' ({n})'}{ext}"
-        if name == own:
-            return name
-        try:
-            fd = os.open(os.path.join(STORE, name), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o664)
-            os.close(fd)
-            return name
-        except FileExistsError:
-            continue
-    raise RuntimeError("no free name")
 
 
 def split_name(name):
@@ -112,9 +111,114 @@ def split_name(name):
     return stem, ext
 
 
-def write_file(path, data):
-    tmp = os.path.join(META, f".{secrets.token_hex(6)}.tmp")
+def claim_name(folder, stem, ext, own=None):
+    """Reserves a free file name in `folder` (stem.ext, stem (2).ext, …) by creating it exclusively."""
+    for n in range(1, 10000):
+        name = f"{stem}{'' if n == 1 else f' ({n})'}{ext}"
+        if own is not None and join(folder, name) == own:
+            return name
+        try:
+            fd = os.open(os.path.join(full(folder), name), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o664)
+            os.close(fd)
+            return name
+        except FileExistsError:
+            continue
+    raise Bad(409, "no free name")
+
+
+def claim_folder(parent, name):
+    """Creates a free folder name in `parent` ("Name", "Name (2)", …)."""
+    name = clean_name(name) if name else "New folder"
+    for n in range(1, 10000):
+        candidate = f"{name}{'' if n == 1 else f' ({n})'}"
+        try:
+            os.mkdir(os.path.join(full(parent), candidate))
+            return join(parent, candidate)
+        except FileExistsError:
+            continue
+    raise Bad(409, "no free name")
+
+
+def free_folder_name(parent, name):
+    for n in range(1, 10000):
+        candidate = f"{name}{'' if n == 1 else f' ({n})'}"
+        if not os.path.exists(os.path.join(full(parent), candidate)):
+            return candidate
+    raise Bad(409, "no free name")
+
+
+def need_folder(folder):
+    if not os.path.isdir(full(folder)):
+        raise Bad(404, "no such folder")
+
+
+# ---------------------------------------------------------------- index
+
+def load_json(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_json(path, data):
     os.makedirs(META, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def walk():
+    """(spreadsheet files, folders) as paths relative to STORE, skipping hidden ones."""
+    files, folders = [], []
+    for root, dirs, names in os.walk(STORE):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        here = os.path.relpath(root, STORE).replace(os.sep, "/")
+        here = "" if here == "." else here
+        for d in dirs:
+            folders.append(join(here, d))
+        for n in names:
+            if n.lower().endswith(EXTS) and not n.startswith("."):
+                files.append(join(here, n))
+    return files, folders
+
+
+def synced_index():
+    """The index ({id: path}), in line with the folder tree: new files get ids, gone ones drop."""
+    index = load_json(INDEX)
+    files, _ = walk()
+    present = set(files)
+    changed = False
+    for fid, path in list(index.items()):
+        if path not in present:
+            del index[fid]
+            changed = True
+    known = set(index.values())
+    for path in sorted(present - known):
+        index[secrets.token_hex(8)] = path
+        changed = True
+    if changed:
+        save_json(INDEX, index)
+    return index
+
+
+def move_prefix(index, old, new):
+    """Rewrites index paths under folder `old` to `new` (a folder renamed or moved)."""
+    for fid, path in index.items():
+        if path.startswith(old + "/"):
+            index[fid] = new + path[len(old):]
+
+
+def version_of(path):
+    st = os.stat(path)
+    return f"{st.st_mtime_ns:x}-{st.st_size:x}"
+
+
+def write_file(path, data):
+    os.makedirs(META, exist_ok=True)
+    tmp = os.path.join(META, f".{secrets.token_hex(6)}.tmp")
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, path)
@@ -132,157 +236,271 @@ def keep_version(fid, path):
         os.remove(os.path.join(folder, v))
 
 
+def to_bin(relpath):
+    """Moves a file or folder into the bin, remembering where it was."""
+    os.makedirs(BIN, exist_ok=True)
+    name = base_of(relpath)
+    stem, ext = os.path.splitext(name) if os.path.isfile(full(relpath)) else (name, "")
+    target = f"{stem} ({time.strftime('%Y-%m-%d %H%M%S')}){ext}"
+    while os.path.exists(os.path.join(BIN, target)):
+        target = f"{stem} ({time.strftime('%Y-%m-%d %H%M%S')}-{secrets.token_hex(2)}){ext}"
+    shutil.move(full(relpath), os.path.join(BIN, target))
+    bins = load_json(BIN_INDEX)
+    bins[target] = {"original": relpath, "deleted": int(time.time())}
+    save_json(BIN_INDEX, bins)
+
+
+# ---------------------------------------------------------------- HTTP
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "StarSheetsFiles/1"
+    server_version = "StarSheetsFiles/2"
 
     def log_message(self, fmt, *args):
         pass
 
-    def send_json(self, obj, code=200, headers=None):
+    def send_json(self, obj, code=200):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        for k, v in (headers or {}).items():
-            self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
-    def fail(self, code, message):
-        self.send_json({"error": message}, code)
-
-    def body(self):
-        n = int(self.headers.get("Content-Length") or 0)
-        if n > MAX_BYTES:
-            raise ValueError("file too large")
-        return self.rfile.read(n)
-
-    def route(self):
-        u = urlparse(self.path)
-        parts = [unquote(p) for p in u.path.split("/") if p]
-        if parts[:2] != ["api", "files"]:
-            return None, [], {}
-        return parts[2:], parts, {k: v[0] for k, v in parse_qs(u.query).items()}
-
-    def lookup(self, index, fid):
-        name = index.get(fid)
-        if not name:
-            self.fail(404, "no such file")
-            return None
-        return name
-
-    def do_GET(self):
-        rest, _, _ = self.route()
-        if rest is None:
-            return self.fail(404, "not found")
-        with lock:
-            index = synced_index()
-            if not rest:
-                out = []
-                for fid, name in index.items():
-                    p = os.path.join(STORE, name)
-                    st = os.stat(p)
-                    out.append({"id": fid, "name": name, "modified": int(st.st_mtime), "size": st.st_size, "version": version_of(p)})
-                out.sort(key=lambda f: -f["modified"])
-                return self.send_json(out)
-            name = self.lookup(index, rest[0])
-            if not name:
-                return
-            path = os.path.join(STORE, name)
-            if len(rest) == 1:
-                data, version = open(path, "rb").read(), version_of(path)
-            elif rest[1:2] == ["versions"]:
-                folder = os.path.join(VERSIONS, rest[0])
-                vs = sorted(os.listdir(folder), reverse=True) if os.path.isdir(folder) else []
-                if len(rest) == 2:
-                    return self.send_json([{"v": v, "modified": int(os.path.getmtime(os.path.join(folder, v))), "size": os.path.getsize(os.path.join(folder, v))} for v in vs])
-                if rest[2] not in vs:
-                    return self.fail(404, "no such version")
-                data, version = open(os.path.join(folder, rest[2]), "rb").read(), ""
-            else:
-                return self.fail(404, "not found")
+    def send_bytes(self, data, name, version="", folder="", modified=0):
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-File-Name", json.dumps(name))
+        self.send_header("X-Folder", json.dumps(folder))
+        self.send_header("X-Modified", str(int(modified)))
         if version:
             self.send_header("ETag", version)
         self.end_headers()
         self.wfile.write(data)
 
-    def do_POST(self):
-        rest, _, q = self.route()
-        if rest is None:
-            return self.fail(404, "not found")
+    def body(self):
+        n = int(self.headers.get("Content-Length") or 0)
+        if n > MAX_BYTES:
+            raise Bad(413, "file too large")
+        return self.rfile.read(n)
+
+    def parts(self):
+        u = urlparse(self.path)
+        p = [unquote(x) for x in u.path.split("/") if x]
+        if p[:1] != ["api"]:
+            raise Bad(404, "not found")
+        return p[1:], {k: v[0] for k, v in parse_qs(u.query, keep_blank_values=True).items()}
+
+    def handle_any(self, method):
         try:
-            data = self.body()
-        except ValueError as e:
-            return self.fail(413, str(e))
-        with lock:
-            index = synced_index()
-            if not rest:
-                stem, ext = split_name(clean_name(q.get("name")))
-                name = claim_name(stem, ext)
-                path = os.path.join(STORE, name)
-                write_file(path, data)
-                fid = secrets.token_hex(8)
-                index[fid] = name
-                save_index(index)
-                return self.send_json({"id": fid, "name": name, "version": version_of(path)}, 201)
-            if rest[1:] == ["rename"]:
-                old = self.lookup(index, rest[0])
-                if not old:
-                    return
-                stem, ext = split_name(clean_name(q.get("name")))
-                _, old_ext = split_name(old)
-                ext = old_ext or ext
-                name = claim_name(stem, ext, own=old)
-                if name != old:
-                    os.replace(os.path.join(STORE, old), os.path.join(STORE, name))
-                    index[rest[0]] = name
-                    save_index(index)
-                return self.send_json({"name": name})
-        self.fail(404, "not found")
+            p, q = self.parts()
+            with lock:
+                os.makedirs(META, exist_ok=True)
+                out = route(self, method, p, q)
+            if out is not None:
+                self.send_json(*out) if isinstance(out, tuple) else self.send_json(out)
+        except Bad as e:
+            self.send_json({"error": str(e)}, e.code)
+        except FileNotFoundError:
+            self.send_json({"error": "not found"}, 404)
+        except OSError as e:
+            self.send_json({"error": f"storage error: {e.strerror or e}"}, 500)
+
+    def do_GET(self):
+        self.handle_any("GET")
+
+    def do_POST(self):
+        self.handle_any("POST")
 
     def do_PUT(self):
-        rest, _, _ = self.route()
-        if not rest or len(rest) != 1:
-            return self.fail(404, "not found")
-        try:
-            data = self.body()
-        except ValueError as e:
-            return self.fail(413, str(e))
-        with lock:
-            index = synced_index()
-            name = self.lookup(index, rest[0])
-            if not name:
-                return
-            path = os.path.join(STORE, name)
-            want = self.headers.get("If-Match")
-            if want and want != version_of(path):
-                return self.send_json({"error": "changed elsewhere", "name": name}, 409)
-            keep_version(rest[0], path)
-            write_file(path, data)
-            return self.send_json({"version": version_of(path), "name": name})
+        self.handle_any("PUT")
 
     def do_DELETE(self):
-        rest, _, _ = self.route()
-        if not rest or len(rest) != 1:
-            return self.fail(404, "not found")
-        with lock:
-            index = synced_index()
-            name = self.lookup(index, rest[0])
-            if not name:
-                return
-            os.makedirs(BIN, exist_ok=True)
-            stem, ext = split_name(name)
-            target = os.path.join(BIN, f"{stem} ({time.strftime('%Y-%m-%d %H%M%S')}){ext}")
-            shutil.move(os.path.join(STORE, name), target)
-            del index[rest[0]]
-            save_index(index)
-            return self.send_json({"ok": True})
+        self.handle_any("DELETE")
+
+
+def file_of(index, fid):
+    path = index.get(fid)
+    if not path:
+        raise Bad(404, "no such file")
+    return path
+
+
+def route(h, method, p, q):
+    """Returns a JSON reply (or (reply, status)); None when the handler already answered."""
+    if p == ["info"] and method == "GET":
+        return {"location": LOCATION}
+    index = synced_index()
+    # ---- files
+    if p[:1] == ["files"]:
+        if len(p) == 1 and method == "GET":
+            files, folders = walk()
+            by_path = {v: k for k, v in index.items()}
+            out = []
+            for path in files:
+                st = os.stat(full(path))
+                out.append({"id": by_path.get(path, ""), "name": base_of(path), "folder": parent_of(path), "modified": int(st.st_mtime), "size": st.st_size, "version": f"{st.st_mtime_ns:x}-{st.st_size:x}"})
+            return {"files": out, "folders": folders}
+        if len(p) == 1 and method == "POST":
+            folder = rel(q.get("folder"))
+            need_folder(folder)
+            data = h.body()
+            stem, ext = split_name(clean_name(q.get("name")))
+            name = claim_name(folder, stem, ext)
+            path = join(folder, name)
+            write_file(full(path), data)
+            fid = secrets.token_hex(8)
+            index[fid] = path
+            save_json(INDEX, index)
+            return {"id": fid, "name": name, "folder": folder, "version": version_of(full(path))}, 201
+        fid = p[1]
+        path = file_of(index, fid)
+        rest = p[2:]
+        if not rest and method == "GET":
+            data = open(full(path), "rb").read()
+            h.send_bytes(data, base_of(path), version_of(full(path)), parent_of(path), os.path.getmtime(full(path)))
+            return None
+        if not rest and method == "PUT":
+            data = h.body()
+            want = h.headers.get("If-Match")
+            if want and want != version_of(full(path)):
+                return {"error": "changed elsewhere", "name": base_of(path)}, 409
+            keep_version(fid, full(path))
+            write_file(full(path), data)
+            return {"version": version_of(full(path)), "name": base_of(path), "folder": parent_of(path)}
+        if not rest and method == "DELETE":
+            to_bin(path)
+            del index[fid]
+            save_json(INDEX, index)
+            return {"ok": True}
+        if rest == ["rename"] and method == "POST":
+            folder = parent_of(path)
+            stem, ext = split_name(clean_name(q.get("name")))
+            _, old_ext = split_name(base_of(path))
+            name = claim_name(folder, stem, old_ext or ext, own=path)
+            new = join(folder, name)
+            if new != path:
+                os.replace(full(path), full(new))
+                index[fid] = new
+                save_json(INDEX, index)
+            return {"name": name}
+        if rest == ["move"] and method == "POST":
+            folder = rel(q.get("folder"))
+            need_folder(folder)
+            if folder == parent_of(path):
+                return {"name": base_of(path)}
+            stem, ext = split_name(base_of(path))
+            name = claim_name(folder, stem, ext)
+            os.replace(full(path), os.path.join(full(folder), name))
+            index[fid] = join(folder, name)
+            save_json(INDEX, index)
+            return {"name": name}
+        if rest == ["copy"] and method == "POST":
+            folder = rel(q.get("folder", parent_of(path)))
+            need_folder(folder)
+            stem, ext = split_name(base_of(path))
+            if folder == parent_of(path):
+                stem = f"Copy of {stem}"
+            name = claim_name(folder, stem, ext)
+            shutil.copyfile(full(path), os.path.join(full(folder), name))
+            new_id = secrets.token_hex(8)
+            index[new_id] = join(folder, name)
+            save_json(INDEX, index)
+            return {"id": new_id, "name": name}
+        if rest[:1] == ["versions"] and method == "GET":
+            vdir = os.path.join(VERSIONS, fid)
+            vs = sorted(os.listdir(vdir), reverse=True) if os.path.isdir(vdir) else []
+            if len(rest) == 1:
+                return [{"v": v, "modified": int(os.path.getmtime(os.path.join(vdir, v))), "size": os.path.getsize(os.path.join(vdir, v))} for v in vs]
+            if rest[1] not in vs:
+                raise Bad(404, "no such version")
+            h.send_bytes(open(os.path.join(vdir, rest[1]), "rb").read(), base_of(path))
+            return None
+        raise Bad(404, "not found")
+    # ---- folders
+    if p[:1] == ["folders"]:
+        action = p[1] if len(p) > 1 else ""
+        if not action and method == "POST":
+            parent = rel(q.get("path"))
+            need_folder(parent)
+            return {"path": claim_folder(parent, q.get("name"))}, 201
+        path = rel(q.get("path"))
+        if not path:
+            raise Bad(400, "the top folder can't be changed")
+        need_folder(path)
+        if not action and method == "DELETE":
+            to_bin(path)
+            return {"ok": True}
+        if action == "rename" and method == "POST":
+            want = clean_name(q.get("name"))
+            if want == base_of(path):
+                return {"path": path}
+            new = join(parent_of(path), free_folder_name(parent_of(path), want))
+            os.rename(full(path), full(new))
+            move_prefix(index, path, new)
+            save_json(INDEX, index)
+            return {"path": new}
+        if action in ("move", "copy") and method == "POST":
+            to = rel(q.get("to"))
+            need_folder(to)
+            if to == path or to.startswith(path + "/"):
+                raise Bad(400, "a folder can't go inside itself")
+            if action == "move" and to == parent_of(path):
+                return {"path": path}
+            name = free_folder_name(to, base_of(path))
+            new = join(to, name)
+            if action == "move":
+                shutil.move(full(path), full(new))
+                move_prefix(index, path, new)
+                save_json(INDEX, index)
+            else:
+                shutil.copytree(full(path), full(new))
+            return {"path": new}
+        raise Bad(404, "not found")
+    # ---- bin
+    if p[:1] == ["bin"]:
+        bins = load_json(BIN_INDEX)
+        present = set(os.listdir(BIN)) if os.path.isdir(BIN) else set()
+        if len(p) == 1 and method == "GET":
+            out = []
+            for name in sorted(present):
+                info = bins.get(name, {})
+                st = os.stat(os.path.join(BIN, name))
+                out.append({"name": name, "original": info.get("original", name), "deleted": info.get("deleted", int(st.st_mtime)), "folder": os.path.isdir(os.path.join(BIN, name))})
+            out.sort(key=lambda x: -x["deleted"])
+            return out
+        if p[1:] == ["restore"] and method == "POST":
+            name = q.get("name", "")
+            if name not in present or "/" in name:
+                raise Bad(404, "not in the bin")
+            original = bins.get(name, {}).get("original", name)
+            folder = parent_of(original)
+            if not os.path.isdir(full(folder)):
+                folder = ""
+            src = os.path.join(BIN, name)
+            if os.path.isdir(src):
+                target = join(folder, free_folder_name(folder, base_of(original)))
+                shutil.move(src, full(target))
+            else:
+                stem, ext = split_name(base_of(original))
+                target = join(folder, claim_name(folder, stem, ext))
+                os.replace(src, full(target))
+            bins.pop(name, None)
+            save_json(BIN_INDEX, bins)
+            return {"path": target}
+        if len(p) == 1 and method == "DELETE":
+            names = [q["name"]] if "name" in q else sorted(present)
+            for name in names:
+                if name not in present or "/" in name:
+                    continue
+                src = os.path.join(BIN, name)
+                shutil.rmtree(src) if os.path.isdir(src) else os.remove(src)
+                bins.pop(name, None)
+            save_json(BIN_INDEX, bins)
+            return {"ok": True}
+    raise Bad(404, "not found")
 
 
 if __name__ == "__main__":

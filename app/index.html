@@ -26,7 +26,11 @@
     // tries document.execCommand('copy'), which browsers allow only shortly after a click or key.
     // Leaving while a change isn't saved yet: the browser asks first (files.rs sets the flag).
     window.__ssUnsaved = false;
-    window.addEventListener('beforeunload', (e) => { if (window.__ssUnsaved) { e.preventDefault(); e.returnValue = ''; } });
+    // Closing the tab with a change not yet saved: ask the app to save now (and keep the browser's
+    // "Leave page?" question so there is time). Hiding the tab saves at once too.
+    window.__ssFlushNow = false;
+    window.addEventListener('beforeunload', (e) => { if (window.__ssUnsaved) { window.__ssFlushNow = true; e.preventDefault(); e.returnValue = ''; } });
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && window.__ssUnsaved) window.__ssFlushNow = true; });
     window.__ssCopyEvent = null;
     for (const t of ['copy', 'cut']) {
       window.addEventListener(t, (e) => {

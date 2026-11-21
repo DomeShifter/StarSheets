@@ -21,6 +21,8 @@ use crate::theme;
 pub const REQUEST: &str = "starsheets_files_request";
 /// The title-bar status line ("Saving…", "Saved to the server", …), in egui memory.
 pub const STATUS: &str = "starsheets_save_status";
+/// The hover text for the status line: where and when the file was saved.
+pub const STATUS_TIP: &str = "starsheets_save_status_tip";
 const API: &str = "api/files";
 /// Quiet time after the last change before saving (ms).
 const SAVE_AFTER: f64 = 1500.0;
@@ -31,22 +33,28 @@ struct Link {
     id: String,
     name: String,
     version: String,
-}
-
-#[derive(Clone)]
-pub struct Info {
-    id: String,
-    name: String,
-    modified: i64,
+    /// Its folder on the server ("" = the top) and when it was last saved (Unix seconds).
+    folder: String,
+    saved: i64,
 }
 
 enum Reply {
     Saved { doc: u64, sent: Arc<Workbook>, link: Link },
     Conflict { doc: u64, sent: Arc<Workbook>, bytes: Vec<u8> },
     Failed(String),
-    Listed(Vec<Info>),
+    Listed(Vec<crate::filebrowser::FileInfo>, Vec<String>),
+    Bin(Vec<crate::filebrowser::BinInfo>),
+    /// A file or folder changed: list again.
+    Refresh,
+    /// A folder was made: list again and start renaming it.
+    NewFolder(String),
+    /// A file was renamed from the file window.
+    RenamedId(String, String),
+    Download(String, Vec<u8>),
     Versions(Vec<(String, i64)>),
-    Opened { id: String, name: String, version: String, bytes: Vec<u8> },
+    Opened { id: String, name: String, version: String, bytes: Vec<u8>, folder: String, modified: i64 },
+    /// How the server describes where files are kept.
+    Info(String),
     Renamed(String),
     Navigate(String),
     /// An import saved to the server, to open in a new tab.
@@ -63,9 +71,15 @@ pub struct Files {
     changed_at: f64,
     status: String,
     error: Option<String>,
-    /// The Open dialog's list (None = closed) and its search text.
-    list: Option<Vec<Info>>,
-    search: String,
+    /// File › Open, and the keys it took from the grid this frame.
+    browser: crate::filebrowser::Browser,
+    browser_keys: Vec<egui::Event>,
+    /// Open the file window in the open file's folder once the list arrives.
+    browser_to_file: bool,
+    /// Where the server keeps files, for the status line's hover text (GET /api/info).
+    location: String,
+    /// The folder a new spreadsheet is saved in (`?folder=` from "New spreadsheet" in a folder).
+    new_folder: String,
     versions: Option<Vec<(String, i64)>>,
     /// A rename sent to the server and not answered yet.
     renaming: bool,
@@ -84,6 +98,11 @@ impl Files {
         }
         if !self.booted {
             self.booted = true;
+            self.new_folder = query_param("folder").unwrap_or_default();
+            send(Method::Get, "api/info".into(), None, None, self.inbox.clone(), ctx.clone(), |_, _, body| {
+                let v: Json = serde_json::from_slice(&body).unwrap_or_default();
+                Reply::Info(v["location"].as_str().unwrap_or("the server").to_string())
+            });
             if let Some(id) = query_file() {
                 self.status = "Opening…".into();
                 self.busy = true;
@@ -93,6 +112,18 @@ impl Files {
         let replies: Vec<Reply> = std::mem::take(&mut *self.inbox.borrow_mut());
         for r in replies {
             self.handle(app, ctx, r);
+        }
+        // While the file window is open it takes its keys before the grid sees them.
+        if self.browser.open && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::new("starsheets_files_search")) {
+            ctx.input_mut(|i| {
+                let mut keep = Vec::new();
+                for ev in std::mem::take(&mut i.events) {
+                    let ours = matches!(&ev, egui::Event::Copy | egui::Event::Cut | egui::Event::Paste(_))
+                        || matches!(&ev, egui::Event::Key { key, modifiers, .. } if matches!(key, egui::Key::Enter | egui::Key::F2 | egui::Key::Delete | egui::Key::Backspace) || (*key == egui::Key::A && modifiers.command));
+                    if ours { self.browser_keys.push(ev) } else { keep.push(ev) }
+                }
+                i.events = keep;
+            });
         }
         if let Some(req) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::new(REQUEST))) {
             self.request(app, ctx, &req);
@@ -113,14 +144,18 @@ impl Files {
         } else {
             self.status.clone()
         };
-        ctx.data_mut(|m| m.insert_temp(egui::Id::new(STATUS), status));
+        let tip = self.status_tip(app, unsaved);
+        ctx.data_mut(|m| {
+            m.insert_temp(egui::Id::new(STATUS), status);
+            m.insert_temp(egui::Id::new(STATUS_TIP), tip);
+        });
     }
 
     fn request(&mut self, app: &mut SheetApp, ctx: &egui::Context, req: &str) {
         match req {
             "open" => {
-                self.search.clear();
-                self.list = Some(vec![]);
+                self.browser.show_in("");
+                self.browser_to_file = true;
                 list_files(self.inbox.clone(), ctx.clone());
             }
             "new" => {
@@ -176,18 +211,55 @@ impl Files {
                 let name = format!("{} (conflicted copy {})", self.link.as_ref().map_or("Untitled spreadsheet".into(), |l| stem(&l.name)), now_text());
                 app.message = Some(("Saved as a copy".into(), format!("This file was changed in another tab or by someone else, so your changes were saved as \"{name}\".")));
                 self.link = None;
-                post_new(doc, sent, bytes, name, self.inbox.clone(), ctx.clone());
+                post_new(doc, sent, bytes, name, &self.new_folder, self.inbox.clone(), ctx.clone());
             }
             Reply::Failed(e) => {
                 self.busy = false;
                 self.renaming = false;
-                if !e.is_empty() {
+                if self.browser.open && !e.is_empty() {
+                    self.browser.error = Some(e);
+                    self.refresh(ctx);
+                } else if !e.is_empty() {
                     self.error = Some(e);
                 }
             }
-            Reply::Listed(files) => self.list = Some(files),
+            Reply::Listed(files, folders) => {
+                if self.browser_to_file {
+                    self.browser_to_file = false;
+                    if let Some(f) = self.link.as_ref().and_then(|l| files.iter().find(|f| f.id == l.id)) {
+                        self.browser.show_in(&f.folder.clone());
+                    }
+                }
+                self.browser.files = files;
+                self.browser.folders = folders;
+                self.browser.loading = false;
+            }
+            Reply::Bin(items) => {
+                self.browser.bin = items;
+                self.browser.loading = false;
+            }
+            Reply::Refresh => self.refresh(ctx),
+            Reply::Info(location) => self.location = location,
+            Reply::NewFolder(path) => {
+                self.refresh(ctx);
+                self.browser.rename_new_folder(&path);
+            }
+            Reply::RenamedId(id, name) => {
+                if let Some(l) = self.link.as_mut().filter(|l| l.id == id) {
+                    l.name = name.clone();
+                    if let Some(d) = app.session.active_mut() {
+                        d.title = stem(&name);
+                    }
+                }
+                self.refresh(ctx);
+            }
+            Reply::Download(name, bytes) => {
+                if let Err(e) = crate::web::download_file(&name, &bytes) {
+                    self.browser.error = Some(e);
+                }
+            }
             Reply::Versions(v) => self.versions = Some(v),
-            Reply::Opened { id, name, version, bytes } => {
+            Reply::Opened { id, name, version, bytes, folder, modified } => {
                 self.busy = false;
                 let old = app.session.active().filter(|d| !d.is_dirty()).map(|d| d.uid);
                 let b64 = gridcraft_engine::io::base64_encode(&bytes);
@@ -202,7 +274,7 @@ impl Files {
                             d.path = None;
                             d.saved = d.wb.clone();
                         }
-                        self.link = Some(Link { doc, id, name, version });
+                        self.link = Some(Link { doc, id, name, version, folder, saved: modified });
                         app.after_engine();
                     }
                     Err(e) => self.error = Some(gridcraft_ui_egui::clean_error(&e)),
@@ -264,7 +336,9 @@ impl Files {
         if self.busy || self.renaming || !self.needs_save(d) || app.editor.is_some() {
             return;
         }
-        if now - self.changed_at < SAVE_AFTER {
+        // The tab is closing or being hidden (index.html sets the flag): save now, don't wait.
+        let flush = take_flush_flag();
+        if now - self.changed_at < SAVE_AFTER && !flush {
             ctx.request_repaint_after(std::time::Duration::from_millis(400));
             return;
         }
@@ -289,10 +363,11 @@ impl Files {
                     }
                     let v: Json = serde_json::from_slice(&body).unwrap_or_default();
                     let name = v["name"].as_str().map_or(l.name.clone(), str::to_string);
-                    Reply::Saved { doc, sent: sent2, link: Link { version: v["version"].as_str().unwrap_or("").to_string(), name, ..l } }
+                    let folder = v["folder"].as_str().map_or(l.folder.clone(), str::to_string);
+                    Reply::Saved { doc, sent: sent2, link: Link { version: v["version"].as_str().unwrap_or("").to_string(), name, folder, saved: now_unix(), ..l } }
                 });
             }
-            None => post_new(doc, sent, bytes, title, self.inbox.clone(), ctx.clone()),
+            None => post_new(doc, sent, bytes, title, &self.new_folder, self.inbox.clone(), ctx.clone()),
         }
     }
 
@@ -317,51 +392,11 @@ impl Files {
         });
     }
 
-    /// The Open dialog and the version list.
+    /// The file window and the version list.
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
-        if let Some(files) = self.list.clone() {
-            let mut open = true;
-            let mut pick = None;
-            egui::Window::new("Open a file").open(&mut open).collapsible(false).resizable(false).default_width(560.0).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 90.0)).show(ui.ctx(), |ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.search).hint_text("Search").desired_width(f32::INFINITY).margin(vec2(8.0, 8.0)));
-                ui.add_space(8.0);
-                let q = self.search.to_lowercase();
-                egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
-                    ui.set_width(540.0);
-                    let shown: Vec<&Info> = files.iter().filter(|f| q.is_empty() || f.name.to_lowercase().contains(&q)).collect();
-                    if shown.is_empty() {
-                        ui.label(RichText::new(if files.is_empty() { "No files yet. A new spreadsheet saves itself as soon as you type in it." } else { "No file matches." }).color(theme::TEXT_DIM));
-                    }
-                    for f in shown {
-                        let row = ui.add(egui::Button::new("").frame(false).min_size(vec2(540.0, 40.0)));
-                        let p = ui.painter();
-                        if row.hovered() {
-                            p.rect_filled(row.rect, 4.0, theme::MENU_HOVER);
-                        }
-                        if let Some(img) = crate::icons::icon("starsheets") {
-                            img.paint_at(ui, egui::Rect::from_center_size(row.rect.left_center() + vec2(18.0, 0.0), vec2(22.0, 22.0)));
-                        }
-                        p.text(row.rect.left_center() + vec2(40.0, 0.0), egui::Align2::LEFT_CENTER, &f.name, egui::FontId::proportional(14.0), theme::TEXT);
-                        p.text(row.rect.right_center() - vec2(8.0, 0.0), egui::Align2::RIGHT_CENTER, date_text(f.modified), egui::FontId::proportional(12.0), theme::TEXT_DIM);
-                        if row.clicked() {
-                            pick = Some(f.id.clone());
-                        }
-                    }
-                });
-            });
-            if let Some(id) = pick {
-                open = false;
-                // This tab if what's here is saved (or empty), else a new tab.
-                let keep = app.session.active().is_some_and(|d| self.needs_save(d)) || self.busy;
-                if keep {
-                    open_tab(&id);
-                } else {
-                    go_to(&id)
-                }
-            }
-            if !open {
-                self.list = None;
-            }
+        let keys = std::mem::take(&mut self.browser_keys);
+        for action in self.browser.ui(ui.ctx(), &keys) {
+            self.act(app, ui.ctx(), action);
         }
         if let Some(vs) = self.versions.clone() {
             let mut open = true;
@@ -414,6 +449,115 @@ fn display_name(d: &gridcraft_engine::DocState) -> String {
     }
 }
 
+impl Files {
+    /// "Saved to the NAS › Work › Budget.xlsx · 2 minutes ago (14:05)".
+    fn status_tip(&self, app: &SheetApp, unsaved: bool) -> String {
+        let place = if self.location.is_empty() { "the server" } else { &self.location };
+        let linked = self.link.as_ref().filter(|l| app.session.active().is_some_and(|d| d.uid == l.doc));
+        let path = |l: &Link| {
+            let mut parts = vec![place.to_string()];
+            parts.extend(l.folder.split('/').filter(|p| !p.is_empty()).map(str::to_string));
+            parts.push(l.name.clone());
+            parts.join(" › ")
+        };
+        if let Some(e) = &self.error {
+            return format!("Not saved: {e}\nIt will try again with your next change.");
+        }
+        match (linked, unsaved) {
+            (Some(l), true) => format!("Saving your latest changes to {}…\nLast saved {}.", path(l), ago(l.saved)),
+            (Some(l), false) => format!("All changes saved to {}\nLast saved {}.\nClick for version history.", path(l), ago(l.saved)),
+            (None, true) => format!("Saving to {place}…"),
+            (None, false) => "Not saved yet: a new spreadsheet saves itself as soon as you type in it.".to_string(),
+        }
+    }
+
+    fn refresh(&mut self, ctx: &egui::Context) {
+        if !self.browser.open {
+            return;
+        }
+        list_files(self.inbox.clone(), ctx.clone());
+        if self.browser.in_bin {
+            list_bin(self.inbox.clone(), ctx.clone());
+        }
+    }
+
+    /// Carries out what the file window asked for, on the server; each answer lists again.
+    fn act(&mut self, app: &mut SheetApp, ctx: &egui::Context, action: crate::filebrowser::Action) {
+        use crate::filebrowser::{Action, Item};
+        self.browser.error = None;
+        let inbox = self.inbox.clone();
+        let refresh = |_: u16, _: web_sys::Headers, _: Vec<u8>| Reply::Refresh;
+        match action {
+            Action::Open(id, new_tab) => {
+                // This tab only when the sheet here is completely blank; else a new tab.
+                let keep = app.session.active().is_some_and(|d| has_data(&d.wb)) || self.busy;
+                if new_tab || keep {
+                    open_tab(&id);
+                } else {
+                    self.browser.open = false;
+                    go_to(&id);
+                }
+            }
+            Action::NewSheet(folder) => {
+                open_url(&format!("{}?folder={}", page_url(""), enc(&folder)));
+            }
+            Action::NewFolder(parent) => {
+                send(Method::Post, format!("api/folders?path={}&name=New%20folder", enc(&parent)), None, None, inbox, ctx.clone(), |_, _, body| {
+                    let v: Json = serde_json::from_slice(&body).unwrap_or_default();
+                    Reply::NewFolder(v["path"].as_str().unwrap_or("").to_string())
+                });
+            }
+            Action::Rename(Item::File(id), name) => {
+                let id2 = id.clone();
+                send(Method::Post, format!("{API}/{id}/rename?name={}", enc(&name)), None, None, inbox, ctx.clone(), move |_, _, body| {
+                    let v: Json = serde_json::from_slice(&body).unwrap_or_default();
+                    Reply::RenamedId(id2, v["name"].as_str().unwrap_or("").to_string())
+                });
+            }
+            Action::Rename(Item::Folder(path), name) => {
+                send(Method::Post, format!("api/folders/rename?path={}&name={}", enc(&path), enc(&name)), None, None, inbox, ctx.clone(), refresh);
+            }
+            Action::Paste(items, folder, cut) => {
+                for item in items {
+                    let url = match (&item, cut) {
+                        (Item::File(id), true) => format!("{API}/{id}/move?folder={}", enc(&folder)),
+                        (Item::File(id), false) => format!("{API}/{id}/copy?folder={}", enc(&folder)),
+                        (Item::Folder(p), true) => format!("api/folders/move?path={}&to={}", enc(p), enc(&folder)),
+                        (Item::Folder(p), false) => format!("api/folders/copy?path={}&to={}", enc(p), enc(&folder)),
+                    };
+                    send(Method::Post, url, None, None, inbox.clone(), ctx.clone(), refresh);
+                }
+            }
+            Action::Duplicate(id) => send(Method::Post, format!("{API}/{id}/copy"), None, None, inbox, ctx.clone(), refresh),
+            Action::Delete(items) => {
+                let open_one = self.link.as_ref().map(|l| l.id.clone());
+                for item in items {
+                    match item {
+                        // The open spreadsheet going to the bin: this tab starts a new one.
+                        Item::File(id) if Some(&id) == open_one.as_ref() => {
+                            send(Method::Delete, format!("{API}/{id}"), None, None, inbox.clone(), ctx.clone(), |_, _, _| Reply::Navigate(String::new()));
+                        }
+                        Item::File(id) => send(Method::Delete, format!("{API}/{id}"), None, None, inbox.clone(), ctx.clone(), refresh),
+                        Item::Folder(p) => send(Method::Delete, format!("api/folders?path={}", enc(&p)), None, None, inbox.clone(), ctx.clone(), refresh),
+                    }
+                }
+            }
+            Action::Download(id, name) => {
+                send(Method::Get, format!("{API}/{id}"), None, None, inbox, ctx.clone(), move |_, _, bytes| Reply::Download(name, bytes));
+            }
+            Action::Restore(name) => send(Method::Post, format!("api/bin/restore?name={}", enc(&name)), None, None, inbox, ctx.clone(), refresh),
+            Action::Purge(name) => {
+                let url = name.map_or_else(|| "api/bin".to_string(), |n| format!("api/bin?name={}", enc(&n)));
+                send(Method::Delete, url, None, None, inbox, ctx.clone(), refresh);
+            }
+            Action::ShowBin => {
+                self.browser.loading = true;
+                list_bin(inbox, ctx.clone());
+            }
+        }
+    }
+}
+
 /// Whether any sheet has anything in it.
 fn has_data(wb: &Workbook) -> bool {
     wb.sheets.iter().any(|s| s.used_range().is_some())
@@ -436,15 +580,46 @@ fn now_text() -> String {
     format!("{:04}-{:02}-{:02} {:02}:{:02}", d.get_full_year(), d.get_month() + 1, d.get_date(), d.get_hours(), d.get_minutes())
 }
 
-fn date_text(unix: i64) -> String {
+fn now_unix() -> i64 {
+    (js_sys::Date::now() / 1000.0) as i64
+}
+
+/// "just now", "5 minutes ago", "3 hours ago", then the date, with the time in brackets.
+fn ago(unix: i64) -> String {
+    if unix <= 0 {
+        return "at an unknown time".into();
+    }
+    let s = (now_unix() - unix).max(0);
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(unix as f64 * 1000.0));
+    let time = format!("{:02}:{:02}", d.get_hours(), d.get_minutes());
+    let when = match s {
+        0..=44 => "just now".to_string(),
+        45..=89 => "a minute ago".to_string(),
+        90..=3599 => format!("{} minutes ago", (s + 30) / 60),
+        3600..=5399 => "an hour ago".to_string(),
+        5400..=86_399 => format!("{} hours ago", (s + 1800) / 3600),
+        _ => return format!("on {}", date_text(unix)),
+    };
+    format!("{when} ({time})")
+}
+
+pub(crate) fn date_text(unix: i64) -> String {
     let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(unix as f64 * 1000.0));
     const M: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     format!("{} {} {}, {:02}:{:02}", d.get_date(), M[d.get_month() as usize % 12], d.get_full_year(), d.get_hours(), d.get_minutes())
 }
 
 fn query_file() -> Option<String> {
+    query_param("file")
+}
+
+fn query_param(name: &str) -> Option<String> {
     let search = web_sys::window()?.location().search().ok()?;
-    web_sys::UrlSearchParams::new_with_str(&search).ok()?.get("file").filter(|s| !s.is_empty())
+    web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name).filter(|s| !s.is_empty())
+}
+
+fn open_url(url: &str) -> bool {
+    web_sys::window().and_then(|w| w.open_with_url_and_target(url, "_blank").ok().flatten()).is_some()
 }
 
 /// Puts `?file=<id>` in the address bar without reloading.
@@ -472,6 +647,16 @@ fn go_to(id: &str) {
 /// Opens a new tab; false when the browser blocked it.
 fn open_tab(id: &str) -> bool {
     web_sys::window().and_then(|w| w.open_with_url_and_target(&page_url(id), "_blank").ok().flatten()).is_some()
+}
+
+/// Whether the page asked for an immediate save (closing or hiding the tab); clears the request.
+fn take_flush_flag() -> bool {
+    let Some(w) = web_sys::window() else { return false };
+    let on = js_sys::Reflect::get(&w, &"__ssFlushNow".into()).is_ok_and(|v| v.is_truthy());
+    if on {
+        let _ = js_sys::Reflect::set(&w, &"__ssFlushNow".into(), &false.into());
+    }
+    on
 }
 
 /// Tells the page (index.html) whether leaving now would lose changes.
@@ -528,6 +713,10 @@ async fn fetch(method: Method, url: &str, body: Option<Vec<u8>>, if_match: Optio
         Method::Delete => "DELETE",
     });
     if let Some(b) = body {
+        // A small save survives the tab closing straight after (the browser's keepalive limit is 64 KB).
+        if b.len() < 60_000 {
+            let _ = js_sys::Reflect::set(&init, &"keepalive".into(), &true.into());
+        }
         init.set_body(&js_sys::Uint8Array::from(b.as_slice()));
     }
     let headers = web_sys::Headers::new().map_err(js)?;
@@ -546,11 +735,11 @@ async fn fetch(method: Method, url: &str, body: Option<Vec<u8>>, if_match: Optio
     Ok((resp.status(), resp.headers(), js_sys::Uint8Array::new(&buf).to_vec()))
 }
 
-fn post_new(doc: u64, sent: Arc<Workbook>, bytes: Vec<u8>, name: String, inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
-    send(Method::Post, format!("{API}?name={}", enc(&name)), Some(bytes), None, inbox, ctx, move |_, _, body| {
+fn post_new(doc: u64, sent: Arc<Workbook>, bytes: Vec<u8>, name: String, folder: &str, inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
+    send(Method::Post, format!("{API}?name={}&folder={}", enc(&name), enc(folder)), Some(bytes), None, inbox, ctx, move |_, _, body| {
         let v: Json = serde_json::from_slice(&body).unwrap_or_default();
         let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
-        Reply::Saved { doc, sent, link: Link { doc, id: s("id"), name: s("name"), version: s("version") } }
+        Reply::Saved { doc, sent, link: Link { doc, id: s("id"), name: s("name"), version: s("version"), folder: s("folder"), saved: now_unix() } }
     });
 }
 
@@ -561,18 +750,36 @@ fn get_file(id: String, inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
         }
         let name = headers.get("X-File-Name").ok().flatten().and_then(|n| serde_json::from_str::<String>(&n).ok()).unwrap_or_else(|| "file.xlsx".into());
         let version = headers.get("ETag").ok().flatten().unwrap_or_default();
-        Reply::Opened { id, name, version, bytes }
+        let folder = headers.get("X-Folder").ok().flatten().and_then(|n| serde_json::from_str::<String>(&n).ok()).unwrap_or_default();
+        let modified = headers.get("X-Modified").ok().flatten().and_then(|n| n.parse().ok()).unwrap_or(0);
+        Reply::Opened { id, name, version, bytes, folder, modified }
     });
 }
 
 fn list_files(inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
     send(Method::Get, API.to_string(), None, None, inbox, ctx, |_, _, body| {
         let v: Json = serde_json::from_slice(&body).unwrap_or_default();
-        Reply::Listed(
+        let s = |x: &Json, k: &str| x[k].as_str().unwrap_or("").to_string();
+        let files = v["files"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|f| crate::filebrowser::FileInfo { id: s(f, "id"), name: s(f, "name"), folder: s(f, "folder"), modified: f["modified"].as_i64().unwrap_or(0), size: f["size"].as_u64().unwrap_or(0) })
+            .collect();
+        let folders = v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect();
+        Reply::Listed(files, folders)
+    });
+}
+
+fn list_bin(inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
+    send(Method::Get, "api/bin".to_string(), None, None, inbox, ctx, |_, _, body| {
+        let v: Json = serde_json::from_slice(&body).unwrap_or_default();
+        let s = |x: &Json, k: &str| x[k].as_str().unwrap_or("").to_string();
+        Reply::Bin(
             v.as_array()
                 .into_iter()
                 .flatten()
-                .map(|f| Info { id: f["id"].as_str().unwrap_or("").into(), name: f["name"].as_str().unwrap_or("").into(), modified: f["modified"].as_i64().unwrap_or(0) })
+                .map(|b| crate::filebrowser::BinInfo { name: s(b, "name"), original: s(b, "original"), deleted: b["deleted"].as_i64().unwrap_or(0), folder: b["folder"].as_bool().unwrap_or(false) })
                 .collect(),
         )
     });

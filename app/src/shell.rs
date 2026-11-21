@@ -710,7 +710,14 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {
                 rename_box(app, ui, &name, title_draft);
-                ui.label(RichText::new(ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new("starsheets_save_status"))).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string())).size(12.0).color(theme::TEXT_DIM));
+                let status = ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new("starsheets_save_status"))).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string());
+                let tip = ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new("starsheets_save_status_tip"))).unwrap_or_default();
+                // As in Sheets: hover says where and when; a click opens version history.
+                let r = ui.add(egui::Label::new(RichText::new(status).size(12.0).color(theme::TEXT_DIM)).sense(egui::Sense::click()));
+                let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
+                if r.clicked() {
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "versions".to_string()));
+                }
             });
             ui.horizontal(|ui| {
                 flat(ui);
