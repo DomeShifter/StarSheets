@@ -221,7 +221,7 @@ impl ChartPanel {
         let Some(id) = self.chart else { return };
         let Some(chart) = charts(app).into_iter().find(|c| c.id == id) else { return };
         egui::Panel::right("starsheets_chart_editor")
-            .exact_size(PANEL_W + 32.0)
+            .exact_size(PANEL_W + 32.0 + crate::house::SCROLL_ROOM)
             .resizable(false)
             .frame(house::panel_frame())
             .show(ui, |ui| {

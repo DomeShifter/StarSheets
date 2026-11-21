@@ -159,7 +159,7 @@ impl CfPanel {
             return;
         }
         egui::Panel::right("starsheets_cf")
-            .exact_size(PANEL_W + 32.0)
+            .exact_size(PANEL_W + 32.0 + crate::house::SCROLL_ROOM)
             .resizable(false)
             .frame(crate::house::panel_frame())
             .show(ui, |ui| {

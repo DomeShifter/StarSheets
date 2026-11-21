@@ -44,6 +44,9 @@ pub const BUTTON_HEIGHT: f32 = 36.0;
 pub const FIELD_HEIGHT: f32 = 36.0;
 /// Menu rows and list rows.
 pub const ROW_HEIGHT: f32 = 32.0;
+/// Extra width a side panel keeps for its scroll bar (10 px bar and a gap), so content never
+/// shifts or is cut when the panel starts to scroll.
+pub const SCROLL_ROOM: f32 = 14.0;
 /// The space between a menu's edge and anything in it that isn't a row (palettes, headings).
 pub const MENU_INSET: i8 = 16;
 
