@@ -3,8 +3,8 @@
 use egui::{Image, ImageSource, vec2};
 
 const ICONS: &[(&str, &[u8])] = &[
-    ("add_comment", include_bytes!("../icons/add_comment.svg")),
     ("add", include_bytes!("../icons/add.svg")),
+    ("add_comment", include_bytes!("../icons/add_comment.svg")),
     ("arrow_drop_down", include_bytes!("../icons/arrow_drop_down.svg")),
     ("border_all", include_bytes!("../icons/border_all.svg")),
     ("border_bottom", include_bytes!("../icons/border_bottom.svg")),
@@ -17,8 +17,10 @@ const ICONS: &[(&str, &[u8])] = &[
     ("border_top", include_bytes!("../icons/border_top.svg")),
     ("border_vertical", include_bytes!("../icons/border_vertical.svg")),
     ("cell_merge", include_bytes!("../icons/cell_merge.svg")),
+    ("content_copy", include_bytes!("../icons/content_copy.svg")),
     ("decimal_decrease", include_bytes!("../icons/decimal_decrease.svg")),
     ("decimal_increase", include_bytes!("../icons/decimal_increase.svg")),
+    ("edit", include_bytes!("../icons/edit.svg")),
     ("filter_alt", include_bytes!("../icons/filter_alt.svg")),
     ("format_align_center", include_bytes!("../icons/format_align_center.svg")),
     ("format_align_left", include_bytes!("../icons/format_align_left.svg")),
@@ -35,6 +37,7 @@ const ICONS: &[(&str, &[u8])] = &[
     ("keyboard_arrow_down", include_bytes!("../icons/keyboard_arrow_down.svg")),
     ("keyboard_arrow_up", include_bytes!("../icons/keyboard_arrow_up.svg")),
     ("link", include_bytes!("../icons/link.svg")),
+    ("link_off", include_bytes!("../icons/link_off.svg")),
     ("menu", include_bytes!("../icons/menu.svg")),
     ("percent", include_bytes!("../icons/percent.svg")),
     ("print", include_bytes!("../icons/print.svg")),

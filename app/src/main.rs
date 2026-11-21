@@ -8,6 +8,7 @@ mod prefs;
 mod bottom;
 mod fonts;
 mod icons;
+mod linkcard;
 mod shell;
 mod theme;
 #[cfg(target_arch = "wasm32")]

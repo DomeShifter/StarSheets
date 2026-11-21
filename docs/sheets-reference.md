@@ -104,7 +104,7 @@ GridCraft behaves like Excel. StarSheets switches each row below to the Sheets w
 | 6 | Copied range outline | Static dashed blue outline | Animated "marching ants" | **done** (patch 0004) |
 | 7 | Copy marker after pasting | Stays; you can paste again | Same for Ctrl+V; ends after Enter-paste | same already |
 | 8 | Default font / size / row height / column width | Arial 10 · 21 px rows · 100 px columns | Calibri 11 · 20 px rows · 64 px columns | font **done** (Roboto 10, patch 0006); row/column sizes **later** (must only apply to new sheets, not to opened Excel files) |
-| 9 | Single click on a link cell | Selects it and shows a link card (preview, copy, edit, remove); open from the card or Alt+Enter | Ctrl+click follows (or click follows) | **next** |
+| 9 | Single click on a link cell | Selects it and shows a link card (preview, copy, edit, remove); open from the card or Alt+Enter | Ctrl+click follows (or click follows) | **done** (patch 0009 + app/src/linkcard.rs) |
 | 10 | Formula error in a cell | Red triangle top-right; hover shows the error explanation | Green triangle top-left + warning icon menu | triangle **done** (patch 0008); hover explanation **next** |
 | 11 | Notes and comments markers | Note: small black triangle top-right; comment: orange-yellow triangle, opens in side thread | Red triangle (note), purple (comment) | colours **done** (patch 0008); comment side thread **later** |
 | 12 | Selection colours | Blue outline, light blue fill, active cell has no fill; headers of selected rows/columns turn light blue | Green outline, grey fill | **done** (palette) |
