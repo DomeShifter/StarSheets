@@ -29,10 +29,10 @@
 - [x] Enter edits, no selection animation, Backspace only clears (patch 0004)
 - [ ] Cell interactions list, remaining rows (docs/sheets-reference.md §4b)
 - [ ] Sheets keyboard shortcuts (docs/sheets-reference.md §5)
-- [ ] Right-click menu in Sheets' order
 - [ ] Side panels instead of dialogs (conditional formatting, data validation, charts)
 - [x] Default text size 10 pt
-- [ ] Default 21 px rows and 100 px columns for new sheets only (xlsx-safe)
+- [x] Default 21 px rows and 100 px columns for new sheets only (patch 0010; opened files keep their sizes)
+- [x] Right-click menu, error/note markers, link card (patches 0007-0009)
 - [ ] Dark mode palette
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).
