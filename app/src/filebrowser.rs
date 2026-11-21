@@ -106,6 +106,11 @@ impl Browser {
         self.loading = true;
     }
 
+    /// Whether a name is being typed (the rename box): then keys go to the text, not the window.
+    pub fn typing(&self) -> bool {
+        self.renaming.is_some()
+    }
+
     pub fn cwd(&self) -> &str {
         &self.cwd
     }

@@ -114,7 +114,7 @@ impl Files {
             self.handle(app, ctx, r);
         }
         // While the file window is open it takes its keys before the grid sees them.
-        if self.browser.open && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::new("starsheets_files_search")) {
+        if self.browser.open && !self.browser.typing() && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::new("starsheets_files_search")) {
             ctx.input_mut(|i| {
                 let mut keep = Vec::new();
                 for ev in std::mem::take(&mut i.events) {
