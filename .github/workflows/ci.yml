@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fetch GridCraft at the pinned tag and apply our patches
         run: scripts/fetch-upstream.sh
       - uses: dtolnay/rust-toolchain@stable
@@ -48,7 +48,7 @@ jobs:
         run: |
           printf '{"commit":"%s","upstream":"%s","built":"%s"}\n' "$GITHUB_SHA" "$(sed -n 's/^tag = "\(.*\)"/\1/p' upstream.pin)" "$(date -u +%FT%TZ)" > dist/build.json
           du -sh dist; ls -la dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: starsheets-web
           path: dist/
@@ -59,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fetch GridCraft at the pinned tag and apply our patches
         run: scripts/fetch-upstream.sh
       - name: System libraries for egui's native backends
@@ -81,13 +81,13 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: The tag must match the version in Cargo.toml
         run: |
           want="v$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
           [ "$want" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $want"; exit 1; }
           echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: starsheets-web
           path: site
@@ -95,14 +95,14 @@ jobs:
         run: |
           (cd site && zip -qr "../starsheets-web-$VERSION.zip" .)
           find site -type f \( -name '*.wasm' -o -name '*.js' -o -name '*.css' -o -name '*.html' -o -name '*.svg' -o -name '*.json' \) -exec gzip -k -9 {} \;
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/Dockerfile
