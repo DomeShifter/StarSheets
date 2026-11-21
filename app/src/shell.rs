@@ -653,7 +653,7 @@ pub const MENU_ICONS: &[(&str, &str)] = &[
     ("Comment", "add_comment"),
     ("Note", "sticky_note_2"),
     ("Table", "table"),
-    ("Number", "123"),
+    ("Number", "numbers_123"),
     ("Text", "format_bold"),
     ("Alignment", "format_align_left"),
     ("Wrapping", "wrap_text"),
@@ -697,7 +697,8 @@ fn menu_row<'a>(label: &'a str, keys: &'a str, with_icons: bool) -> Button<'a> {
         },
         (None, false) => Button::new(text),
     };
-    let b = if keys.is_empty() { b } else { b.shortcut_text(RichText::new(keys).size(13.0).color(MENU_GREY)) };
+    // Always add the (maybe empty) shortcut: its stretch keeps the label at the left.
+    let b = b.shortcut_text(RichText::new(keys).size(13.0).color(MENU_GREY));
     b.frame_when_inactive(false).min_size(vec2(0.0, 32.0))
 }
 
@@ -708,7 +709,10 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
         Cmd(l, ..) | CmdWith(l, ..) | Sub(l, _) => menu_icon(l).is_some(),
         Sep => false,
     });
-    ui.set_min_width(if with_icons { 280.0 } else { 220.0 });
+    // Sheets' widths: ~320 px with icons, narrower submenus without.
+    let width = if with_icons { 320.0 } else { 220.0 };
+    ui.set_min_width(width);
+    ui.set_max_width(width);
     {
         let st = ui.style_mut();
         st.spacing.button_padding = vec2(12.0, 7.0);
@@ -725,24 +729,24 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
     for item in items {
         match item {
             Cmd(label, id, keys) => {
-                if ui.add_sized([ui.available_width(), 32.0], menu_row(label, keys, with_icons)).clicked() {
+                if ui.add_sized([width, 32.0], menu_row(label, keys, with_icons)).clicked() {
                     app.run_or_alert(id, json!({}));
                     ui.close();
                 }
             }
             CmdWith(label, id, keys, params) => {
-                if ui.add_sized([ui.available_width(), 32.0], menu_row(label, keys, with_icons)).clicked() {
+                if ui.add_sized([width, 32.0], menu_row(label, keys, with_icons)).clicked() {
                     app.run_or_alert(id, serde_json::from_str(params).unwrap_or_else(|_| json!({})));
                     ui.close();
                 }
             }
             Sub(label, sub) => {
-                let b = menu_row(label, "", with_icons).right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(MENU_GREY)));
+                let b = menu_row(label, "", with_icons).min_size(vec2(width, 32.0)).right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(MENU_GREY)));
                 egui::containers::menu::SubMenuButton::from_button(b).ui(ui, |ui| menu_items(app, ui, sub));
             }
             Sep => {
                 ui.add_space(8.0);
-                let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+                let (r, _) = ui.allocate_exact_size(vec2(width, 1.0), Sense::hover());
                 ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, theme::DIVIDER));
                 ui.add_space(8.0);
             }

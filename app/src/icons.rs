@@ -3,7 +3,6 @@
 use egui::{Image, ImageSource, vec2};
 
 const ICONS: &[(&str, &[u8])] = &[
-    ("123", include_bytes!("../icons/123.svg")),
     ("accessibility_new", include_bytes!("../icons/accessibility_new.svg")),
     ("add", include_bytes!("../icons/add.svg")),
     ("add_box", include_bytes!("../icons/add_box.svg")),
@@ -62,6 +61,7 @@ const ICONS: &[(&str, &[u8])] = &[
     ("lock", include_bytes!("../icons/lock.svg")),
     ("menu", include_bytes!("../icons/menu.svg")),
     ("note_add", include_bytes!("../icons/note_add.svg")),
+    ("numbers_123", include_bytes!("../icons/numbers_123.svg")),
     ("percent", include_bytes!("../icons/percent.svg")),
     ("pivot_table_chart", include_bytes!("../icons/pivot_table_chart.svg")),
     ("print", include_bytes!("../icons/print.svg")),
