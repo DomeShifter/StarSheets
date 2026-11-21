@@ -1,0 +1,12 @@
+diff --git a/crates/model/src/lib.rs b/crates/model/src/lib.rs
+index b1f875b..1fe0d02 100644
+--- a/crates/model/src/lib.rs
++++ b/crates/model/src/lib.rs
+@@ -36,5 +36,6 @@ pub use workbook::{
+ 
+ /// Font used for new workbooks. Only a name: renderers substitute an available open font
+ /// (e.g. the metric-compatible Carlito) when it isn't installed.
+-pub const DEFAULT_FONT: &str = "Calibri";
++/// StarSheets: Roboto is the default font for new workbooks (patch 0006).
++pub const DEFAULT_FONT: &str = "Roboto";
+ pub const DEFAULT_FONT_SIZE: f32 = 11.0;

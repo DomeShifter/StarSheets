@@ -90,6 +90,43 @@ Sheet tab menu: Delete · Duplicate · Copy to ▸ · Rename · Change colour ·
 | Freeze | Drag the thick grey bars at the top-left corner | P1 |
 | Explore / Gemini | AI analysis panels | No (maybe Later with the local LLM) |
 
+## 4b. Cell interactions: Google Sheets vs Microsoft Excel
+
+GridCraft behaves like Excel. StarSheets switches each row below to the Sheets way. Status: **done**, **next** (planned soon), **later**. *(From memory unless the row says checked: verify each one in Sheets before building it.)*
+
+| # | Situation | Google Sheets | Excel / GridCraft | StarSheets |
+|---|---|---|---|---|
+| 1 | Press **Enter** on a selected cell | Opens the cell for editing (cursor at the end) | Moves down a row | **done** (patch 0004) |
+| 2 | Enter while editing / Shift+Enter / Tab while editing | Saves, moves down / up / right | Same | same already |
+| 3 | Selection moving between cells | Outline jumps instantly | Outline glides (animation) | **done** (animation off) |
+| 4 | **Backspace** on a selected cell | Clears the contents only | Clears and opens the cell for editing (Mac Excel) | **done** (patch 0004) |
+| 5 | Enter with a copied range still marked | Nothing special (Enter edits) | Pastes the copied range and ends copy mode | **done** (patch 0004) |
+| 6 | Copied range outline | Static dashed blue outline | Animated "marching ants" | **done** (patch 0004) |
+| 7 | Copy marker after pasting | Stays; you can paste again | Same for Ctrl+V; ends after Enter-paste | same already |
+| 8 | Default font / size / row height / column width | Arial 10 · 21 px rows · 100 px columns | Calibri 11 · 20 px rows · 64 px columns | font **done** (Roboto, patch 0006); sizes **next** |
+| 9 | Single click on a link cell | Selects it and shows a link card (preview, copy, edit, remove); open from the card or Alt+Enter | Ctrl+click follows (or click follows) | **next** |
+| 10 | Formula error in a cell | Red triangle top-right; hover shows the error explanation | Green triangle top-left + warning icon menu | **next** |
+| 11 | Notes and comments markers | Note: small black triangle top-right; comment: orange-yellow triangle, opens in side thread | Red triangle (note), purple (comment) | **later** |
+| 12 | Selection colours | Blue outline, light blue fill, active cell has no fill; headers of selected rows/columns turn light blue | Green outline, grey fill | **done** (palette) |
+| 13 | Fill handle | Small blue square at the bottom-right of the selection; drag to fill; double-click fills down | Same, green | **done** (palette) |
+| 14 | Typing a formula | Help card under the cell (syntax, example, description; F1 toggles); live result preview tooltip | Function tooltip only | **later** |
+| 15 | Function name autocomplete | Dropdown while typing `=SU…`; Tab or Enter accepts | Same | same already |
+| 16 | Ctrl+Enter when not editing | Fills the typed value into every selected cell | Same | same already |
+| 17 | Alt+Enter while editing | New line inside the cell (Ctrl+Enter too) | New line inside the cell | same already |
+| 18 | Space on a checkbox cell | Toggles it | Toggles it | same already |
+| 19 | Paste values | Ctrl+Shift+V | Ctrl+Alt+V dialog / Ctrl+Shift+V (new Excel) | check |
+| 20 | Delete key | Clears contents, keeps formatting | Same | same already |
+| 21 | Clicking the corner box | Selects everything | Same | same already |
+| 22 | Dropdown (data validation) cells | Shown as coloured chips with a ▾ arrow; click the chip to pick | Arrow only when selected | **later** |
+| 23 | Undo after typing | Undoes the whole edit | Same | same already |
+| 24 | Double-click a column border | Fits to data ("Fit to data") | Autofit | same already |
+| 25 | Right-click on a cell | Sheets' shorter menu (see §2) with "View more cell actions" | Excel's long menu | **next** |
+| 26 | Dragging a selection's border | Moves the cells (hand cursor) | Same | same already |
+| 27 | Empty selection drag past the edge | Scrolls smoothly | Same | same already |
+| 28 | Freeze panes | Drag the thick grey bars at the top-left corner | View › Freeze | **later** |
+| 29 | Status/mode indicator | None ("Ready/Enter/Edit" doesn't exist) | Status bar mode | **done** (status bar hidden) |
+| 30 | Ctrl+arrow, Ctrl+Shift+arrow, Home, Ctrl+Home | Same as Excel | — | same already |
+
 ## 5. Keyboard shortcuts (PC, Google's official list, 2026-11-21)
 
 Where GridCraft (Excel) already uses the same key, nothing to do. Rows marked **≠ Excel** need our keymap to override GridCraft's.

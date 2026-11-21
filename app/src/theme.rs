@@ -19,6 +19,8 @@ pub const SHARE: Color32 = rgb(0xC2E7FF);
 pub const TEXT: Color32 = rgb(0x1F1F1F);
 pub const TEXT_DIM: Color32 = rgb(0x444746);
 pub const HOVER: Color32 = rgb(0xDDE3EA);
+/// The active sheet tab's background.
+pub const ACTIVE_TAB: Color32 = rgb(0xE1E9F7);
 
 pub fn light() -> Tokens {
     let mut t = Tokens::light();

@@ -5,6 +5,8 @@
 
 #[cfg(target_arch = "wasm32")]
 mod prefs;
+mod bottom;
+mod fonts;
 mod icons;
 mod shell;
 mod theme;

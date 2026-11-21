@@ -309,6 +309,10 @@ const FUNCTIONS: &[(&str, &str, &str)] = &[
     ("More functions…", "formulas.insertFunction", "{}"),
 ];
 
+/// The font list, Sheets-like with Roboto first (Roboto is bundled; sans-serif names render in it
+/// until more faces are bundled, serif and monospace names use built-in faces).
+const FONTS: &[&str] = &["Roboto", "Arial", "Calibri", "Comic Sans MS", "Courier New", "Georgia", "Times New Roman", "Trebuchet MS", "Verdana"];
+
 const FONT_SIZES: &[u32] = &[6, 7, 8, 9, 10, 11, 12, 14, 18, 24, 36];
 const ZOOMS: &[u32] = &[50, 75, 90, 100, 125, 150, 200];
 
@@ -418,7 +422,7 @@ impl Shell {
                             let label = RichText::new(format!("{}  ▾", cur.font)).size(13.0).color(theme::TEXT);
                             ui.menu_button(label, |ui| {
                                 ui.set_min_width(200.0);
-                                for f in gridcraft_ui_egui::ribbon::FONTS {
+                                for f in FONTS {
                                     if ui.add(Button::new(RichText::new(*f).size(14.0)).selected(*f == cur.font)).clicked() {
                                         app.run_or_alert("home.fontName", json!({ "name": f }));
                                         ui.close();
@@ -527,6 +531,11 @@ fn colour_menu(app: &mut SheetApp, ui: &mut Ui, id: &str, reset_label: &str, res
         ui.close();
     }
     ui.add_space(4.0);
+    palette_grid(ui, |hex| app.run_or_alert(id, json!({ "color": hex })));
+}
+
+/// Sheets' colour grid; `pick` gets "#RRGGBB" and the menu closes.
+pub fn palette_grid(ui: &mut Ui, mut pick: impl FnMut(String)) {
     for (i, row) in PALETTE.iter().enumerate() {
         if i == 2 {
             ui.add_space(6.0);
@@ -544,7 +553,7 @@ fn colour_menu(app: &mut SheetApp, ui: &mut Ui, id: &str, reset_label: &str, res
                     ui.painter().circle_stroke(r.center(), 9.0, Stroke::new(1.5, theme::BLUE));
                 }
                 if resp.on_hover_text(format!("#{c:06X}")).clicked() {
-                    app.run_or_alert(id, json!({ "color": format!("#{c:06X}") }));
+                    pick(format!("#{c:06X}"));
                     ui.close();
                 }
             }

@@ -24,11 +24,14 @@
 
 ## Phase 1 checklist
 - [x] Toolbar: Material icons, font and size boxes showing the active cell, zoom, number formats, colour palette, borders, merge, alignment, wrapping, rotation, functions
-- [ ] Bottom bar: + / sheet list / tabs / quick sum (needs a patch to hide GridCraft's tabs and status bar)
+- [x] Bottom bar: + / sheet list / tabs / quick sum (patch 0003)
+- [x] Roboto as the default font (patches 0005, 0006)
+- [x] Enter edits, no selection animation, Backspace only clears (patch 0004)
+- [ ] Cell interactions list, remaining rows (docs/sheets-reference.md §4b)
 - [ ] Sheets keyboard shortcuts (docs/sheets-reference.md §5)
 - [ ] Right-click menu in Sheets' order
 - [ ] Side panels instead of dialogs (conditional formatting, data validation, charts)
-- [ ] Fonts: open look-alikes for the UI and Arial 10 cells
+- [ ] Sheets default sizes: 10 pt, 21 px rows, 100 px columns
 - [ ] Dark mode palette
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).

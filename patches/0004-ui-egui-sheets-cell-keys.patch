@@ -1,0 +1,69 @@
+diff --git a/crates/ui-egui/src/grid/keyboard.rs b/crates/ui-egui/src/grid/keyboard.rs
+index a852d04..96324d1 100644
+--- a/crates/ui-egui/src/grid/keyboard.rs
++++ b/crates/ui-egui/src/grid/keyboard.rs
+@@ -107,13 +107,13 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
+                         app.grid.ensure_visible = true;
+                     }
+                     // Excel: Enter while a copied range is marked pastes it and ends copy mode.
+-                    Key::Enter if !m.alt && !m.ctrl && !shift && !cmd && app.session.clipboard.is_some() => {
++                    Key::Enter if !m.alt && !m.ctrl && !shift && !cmd && app.session.clipboard.is_some() && !app.ui.sheets_keys => {
+                         app.run_or_alert("edit.paste", json!({}));
+                         app.session.clipboard = None;
+                         app.grid.ensure_visible = true;
+                     }
+                     Key::Enter => {
+-                        if m.alt || m.ctrl {
++                        if m.alt || m.ctrl || (app.ui.sheets_keys && !shift) {
+                             app.begin_edit(None, false);
+                         } else {
+                             app.move_after_enter(if shift { -1 } else { 1 }, 0);
+@@ -126,9 +126,9 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
+                     Key::Delete => app.run_or_alert("edit.clearContents", json!({})),
+                     Key::Backspace if app.delete_selected_object() => {}
+                     Key::Backspace => {
+-                        // Excel for Mac: Delete clears the cell and starts editing it.
++                        // Excel for Mac: Delete clears the cell and starts editing it (Sheets: only clears).
+                         app.run_or_alert("edit.clearContents", json!({}));
+-                        if app.session.active().is_some_and(|d| d.selection.is_single_cell()) {
++                        if !app.ui.sheets_keys && app.session.active().is_some_and(|d| d.selection.is_single_cell()) {
+                             app.begin_edit(Some(String::new()), false);
+                         }
+                     }
+diff --git a/crates/ui-egui/src/grid/show.rs b/crates/ui-egui/src/grid/show.rs
+index 34b76c9..b625e94 100644
+--- a/crates/ui-egui/src/grid/show.rs
++++ b/crates/ui-egui/src/grid/show.rs
+@@ -258,7 +258,7 @@ fn vertical_scroll_track(available: Rect, grid: Rect, rtl: bool) -> (f32, f32) {
+ fn update_clipboard_repaint(app: &mut SheetApp, ui: &egui::Ui, now: f64) {
+     if app.session.clipboard.is_some() {
+         // By the clock, not per frame: a gliding outline repaints more often than the ants step.
+-        app.grid.marching_phase = crate::selection_glide::ants_phase(now);
++        app.grid.marching_phase = if app.ui.sheets_keys { 0.0 } else { crate::selection_glide::ants_phase(now) };
+         ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
+     }
+ }
+diff --git a/crates/ui-egui/src/lib.rs b/crates/ui-egui/src/lib.rs
+index f2bcf3c..e86b16a 100644
+--- a/crates/ui-egui/src/lib.rs
++++ b/crates/ui-egui/src/lib.rs
+@@ -97,6 +97,11 @@ pub struct UiState {
+     pub status_bar: bool,
+     /// Motion in the UI: the selection outline glides to a new selection (View ▸ Animations).
+     pub animations: bool,
++    /// Google Sheets cell keys instead of Excel's: Enter on a selected cell starts editing,
++    /// Backspace only clears, Enter never pastes a copied range, the copy outline doesn't move.
++    /// Set by a host; not persisted.
++    #[serde(skip)]
++    pub sheets_keys: bool,
+     /// Enable AutoComplete for cell values (File ▸ Options ▸ Editing): typed text is completed
+     /// from the one matching entry in the same column.
+     pub autocomplete: bool,
+@@ -153,6 +158,7 @@ impl Default for UiState {
+             formula_bar_lines: formula_bar::MAX_LINES,
+             status_bar: true,
+             animations: true,
++            sheets_keys: false,
+             autocomplete: true,
+             highlight_active_row: false,
+             autosave: false,

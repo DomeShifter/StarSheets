@@ -13,6 +13,7 @@ const LOADING_ID: &str = "starsheets_loading";
 
 /// Starts the eframe web runner for the StarSheets canvas. It adjusts the WebGPU device limits to the adapter's, optionally selects the WebGL backend from the query string, and builds the shell with the requested sample or host bridge, browser language rules, stored preferences and the loading/error page state.
 pub fn start() {
+    crate::fonts::install();
     eframe::WebLogger::init(log::LevelFilter::Info).ok();
     wasm_bindgen_futures::spawn_local(async {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
@@ -59,7 +60,7 @@ pub fn start() {
                     // Light theme only for now: the Sheets palette is light (dark mode comes later).
                     app.ui.system_theme = false;
                     // StarSheets draws its own title row, menus and toolbar (crate::shell).
-                    app.chrome = gridcraft_ui_egui::Chrome { title_bar: false, file_tab: false, ribbon: false };
+                    app.chrome = gridcraft_ui_egui::Chrome { title_bar: false, file_tab: false, ribbon: false, sheet_tabs: false };
                     // Follow the browser's language, except a CJK one. CJK coverage comes from
                     // optional craft-fonts input, not a guaranteed web font set, so a CJK browser
                     // cannot be assumed to render localized labels without tofu. Users can still
@@ -75,11 +76,15 @@ pub fn start() {
                     // and `prefs.json`; a saved language replaces the browser's.
                     let (stored_ui, stored_prefs) = (stored(crate::prefs::UI_KEY), stored(crate::prefs::PREFS_KEY));
                     crate::prefs::restore(&mut app, stored_ui.as_deref(), stored_prefs.as_deref());
+                    // Sheets behaviour, applied after stored preferences so they can't turn it back:
+                    // no gliding selection outline, Google's cell keys (Enter edits, Backspace only clears).
+                    app.ui.animations = false;
+                    app.ui.sheets_keys = true;
                     let mut prefs = crate::prefs::PrefsSync::new(stored_ui, stored_prefs);
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default() }))
                 }),
             )
             .await;
@@ -101,6 +106,7 @@ struct WebShell {
     app: SheetApp,
     inbox: Inbox,
     shell: crate::shell::Shell,
+    bottom: crate::bottom::Bottom,
     prefs: crate::prefs::PrefsSync,
 }
 
@@ -155,6 +161,7 @@ impl eframe::App for WebShell {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // Our panels first, so they sit above GridCraft's formula bar and grid.
         self.shell.ui(&mut self.app, ui);
+        self.bottom.ui(&mut self.app, ui);
         self.app.ui(ui);
     }
 }
