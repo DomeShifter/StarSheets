@@ -133,6 +133,13 @@ impl CfPanel {
         self.draft = if has_rules { None } else { Some(Draft::new(selection_text(app))) };
     }
 
+    /// Closes the panel (another side panel opened), undoing any preview.
+    pub fn close(&mut self, app: &mut SheetApp) {
+        self.revert_preview(app);
+        self.draft = None;
+        self.open = false;
+    }
+
     /// Takes over GridCraft's own conditional-formatting dialogs (they open from its commands).
     pub fn intercept(&mut self, app: &mut SheetApp) {
         let ours = app.dialog.as_ref().is_some_and(|d| d.command == Some("home.conditionalFormat") || matches!(d.name.as_str(), "manageRules" | "cfQuick" | "newFormattingRule"));
@@ -356,15 +363,15 @@ fn selection_text(app: &SheetApp) -> String {
     app.session.active().map(|d| d.selection.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",")).unwrap_or_default()
 }
 
-fn c32(rgb: u32) -> Color32 {
+pub(crate) fn c32(rgb: u32) -> Color32 {
     Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
 }
 
-fn rgb_of(c: &Color, theme_colours: &gridcraft_engine::model::Theme) -> Option<u32> {
+pub(crate) fn rgb_of(c: &Color, theme_colours: &gridcraft_engine::model::Theme) -> Option<u32> {
     c.resolve(theme_colours).map(|[r, g, b]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b))
 }
 
-fn hex(rgb: u32) -> String {
+pub(crate) fn hex(rgb: u32) -> String {
     format!("#{rgb:06X}")
 }
 
@@ -592,7 +599,7 @@ fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 /// Days since 1899-12-30 (the spreadsheet date number) for "dd/mm/yyyy".
-fn date_number(s: &str) -> Option<i64> {
+pub(crate) fn date_number(s: &str) -> Option<i64> {
     let parts: Vec<i64> = s.trim().split(['/', '-', '.']).map(|x| x.trim().parse().ok()).collect::<Option<_>>()?;
     let [d, m, y] = parts[..] else { return None };
     if !(1..=31).contains(&d) || !(1..=12).contains(&m) || y < 1900 {

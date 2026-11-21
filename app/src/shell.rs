@@ -132,7 +132,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Link", "insert.link", "Ctrl+K"),
             Sep,
             Cmd("Tick box", "insert.checkbox", ""),
-            Cmd("Drop-down", "data.validation", ""),
+            Cmd("Drop-down", "panel:dropdown", ""),
             Sep,
             Cmd("Comment", "review.newComment", "Ctrl+Alt+M"),
             Cmd("Note", "review.newNote", "Shift+F2"),
@@ -239,7 +239,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Protect sheets and ranges", "review.protectSheet", ""),
             Cmd("Named ranges", "formulas.nameManager", ""),
             Sep,
-            Cmd("Data validation", "data.validation", ""),
+            Cmd("Data validation", "ui:dataValidation", ""),
             Sub("Data clean-up", &[Cmd("Remove duplicates", "data.removeDuplicates", "")]),
             Cmd("Split text to columns", "data.textToColumns", ""),
         ],
@@ -928,9 +928,14 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                 if ui.add_sized([width, 32.0], menu_row(label, keys, with_icons)).clicked() {
                     // "ui:<dialog>" opens one of GridCraft's dialogs (some, like conditional
                     // formatting, are then shown as our own side panel).
-                    match id.strip_prefix("ui:") {
-                        Some(dialog) => app.open_dialog(dialog, json!({})),
-                        None => app.run_or_alert(id, json!({})),
+                    // "panel:dropdown" opens the data-validation panel on a new drop-down.
+                    if *id == "panel:dropdown" {
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
+                    } else {
+                        match id.strip_prefix("ui:") {
+                            Some(dialog) => app.open_dialog(dialog, json!({})),
+                            None => app.run_or_alert(id, json!({})),
+                        }
                     }
                     ui.close();
                 }
@@ -957,8 +962,8 @@ mod tests {
     fn ids(items: &[Item], out: &mut Vec<&'static str>) {
         for item in items {
             match item {
-                // "ui:" entries open a dialog, not a command.
-                Cmd(_, id, _) | CmdWith(_, id, _, _) if !id.starts_with("ui:") => out.push(id),
+                // "ui:" and "panel:" entries open a dialog or panel, not a command.
+                Cmd(_, id, _) | CmdWith(_, id, _, _) if !id.starts_with("ui:") && !id.starts_with("panel:") => out.push(id),
                 Cmd(..) | CmdWith(..) => {}
                 Sub(_, sub) => ids(sub, out),
                 Sep => {}

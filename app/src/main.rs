@@ -8,6 +8,7 @@ mod prefs;
 mod autolink;
 mod bottom;
 mod cfpanel;
+mod dvpanel;
 mod fonts;
 mod icons;
 mod linkcard;

@@ -4,6 +4,7 @@ One line per decision: what, why, what we rejected. Newest first.
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-11-21 | Sheets-only validation criteria are stored as Excel custom formulas, and drop-down item colours as conditional-formatting rules | Both survive saving to .xlsx and stay visible in the panels; no hidden StarSheets-only data | Extra fields in GridCraft's model (lost when saving .xlsx) |
 | 2026-11-21 | Draw the grid 1:1 like Sheets (GridCraft draws it at 0.8) | Owner compared both side by side: cells and text looked too small | Starting at 125% zoom (the zoom box would read 125%, not 100%) |
 | 2026-11-21 | Roboto is the default font (bundled, OFL) and leads the interface and sans-serif cell fonts | Owner's choice; web builds have no system fonts, so it must be bundled | Arial (Sheets' default, not openly licensed) |
 | 2026-11-21 | Sheets cell behaviour is one switch (`sheets_keys`) in a GridCraft patch, not a fork of the key handling | Small diff that's easy to rebase and to offer upstream as an option | Copying GridCraft's keyboard module |

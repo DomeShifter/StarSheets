@@ -85,7 +85,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dv: crate::dvpanel::DvPanel::default() }))
                 }),
             )
             .await;
@@ -111,6 +111,7 @@ struct WebShell {
     link: crate::linkcard::LinkCard,
     autolink: crate::autolink::AutoLink,
     cf: crate::cfpanel::CfPanel,
+    dv: crate::dvpanel::DvPanel,
     prefs: crate::prefs::PrefsSync,
 }
 
@@ -121,6 +122,20 @@ fn local_storage() -> Option<web_sys::Storage> {
 /// A value stored on an earlier visit, if the browser allows storage.
 fn stored(key: &str) -> Option<String> {
     local_storage()?.get_item(key).ok()?
+}
+
+impl WebShell {
+    /// Opens our side panels in place of GridCraft's dialogs; the newest one wins.
+    fn side_panels(&mut self, ctx: &egui::Context) {
+        let cf_was = self.cf.open;
+        self.cf.intercept(&mut self.app);
+        self.dv.intercept(&mut self.app, ctx);
+        if self.dv.just_opened {
+            self.cf.close(&mut self.app);
+        } else if self.cf.open && !cf_was {
+            self.dv.close();
+        }
+    }
 }
 
 impl eframe::App for WebShell {
@@ -168,10 +183,13 @@ impl eframe::App for WebShell {
         self.shell.ui(&mut self.app, ui);
         self.bottom.ui(&mut self.app, ui);
         // Conditional formatting opens our Sheets-style side panel, not GridCraft's dialogs.
-        self.cf.intercept(&mut self.app);
+        // Data validation likewise; only one side panel shows at a time.
+        let ctx = ui.ctx().clone();
+        self.side_panels(&ctx);
         self.cf.ui(&mut self.app, ui);
+        self.dv.ui(&mut self.app, ui);
         self.app.ui(ui);
-        self.cf.intercept(&mut self.app);
+        self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
         self.link.ui(&mut self.app, ui);
     }
