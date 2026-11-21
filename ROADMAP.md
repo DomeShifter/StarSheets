@@ -34,6 +34,7 @@
 - [x] Default text size 10 pt
 - [x] Default 21 px rows and 100 px columns for new sheets only (patch 0010; opened files keep their sizes)
 - [x] Right-click menu, error/note markers, link card (patches 0007-0009)
+- [x] Grid at Sheets' 1:1 size, Sheets header sizes, plain arrow cursor, flat menus/toolbar, unboxed formula bar (patch 0012)
 - [ ] Dark mode palette
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).

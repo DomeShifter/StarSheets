@@ -19,6 +19,10 @@ pub const SHARE: Color32 = rgb(0xC2E7FF);
 pub const TEXT: Color32 = rgb(0x1F1F1F);
 pub const TEXT_DIM: Color32 = rgb(0x444746);
 pub const HOVER: Color32 = rgb(0xDDE3EA);
+/// Pressed buttons.
+pub const PRESSED: Color32 = rgb(0xC9D3DF);
+/// The thin box round the font size.
+pub const BOX: Color32 = rgb(0x747775);
 /// The active sheet tab's background.
 pub const ACTIVE_TAB: Color32 = rgb(0xE1E9F7);
 
@@ -33,10 +37,10 @@ pub fn light() -> Tokens {
     t.accent_dark = rgb(0x0B57D0);
     t.accent_soft = rgb(0xD3E3FD);
     t.hover = HOVER;
-    t.pressed = rgb(0xC9D3DF);
+    t.pressed = PRESSED;
     t.gridline = rgb(0xE2E3E3);
     t.header_bg = rgb(0xF8F9FA);
-    t.header_text = rgb(0x5F6368);
+    t.header_text = TEXT_DIM;
     t.header_line = rgb(0xC4C7C5);
     t.header_sel_bg = rgb(0xD3E3FD);
     t.header_sel_text = rgb(0x0B57D0);
@@ -51,6 +55,7 @@ pub fn light() -> Tokens {
     t.sheet_focus = BLUE;
     t.error_check_green = rgb(0x188038);
     t.sheets_marks = true;
+    t.sheets_formula_bar = true;
     t.on_accent = Color32::WHITE;
     t
 }

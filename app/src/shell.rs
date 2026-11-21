@@ -361,6 +361,23 @@ fn params(text: &str) -> serde_json::Value {
     serde_json::from_str(text).unwrap_or_else(|_| json!({}))
 }
 
+/// Sheets-style flat buttons for the menu bar and toolbar: no border or fill at rest, a soft
+/// rounded grey on hover and while a menu is open (egui's default draws a box round each one).
+fn flat(ui: &mut Ui) {
+    let w = &mut ui.style_mut().visuals.widgets;
+    for (state, fill) in [
+        (&mut w.inactive, egui::Color32::TRANSPARENT),
+        (&mut w.hovered, theme::HOVER),
+        (&mut w.active, theme::PRESSED),
+        (&mut w.open, theme::HOVER),
+    ] {
+        state.bg_stroke = Stroke::NONE;
+        state.weak_bg_fill = fill;
+        state.corner_radius = egui::CornerRadius::same(4);
+        state.expansion = 0.0;
+    }
+}
+
 fn icon_or_text(ui: &mut Ui, name: &str, tip: &str) -> egui::Response {
     match icons::icon(name) {
         Some(img) => ui.add(Button::image(img).frame(false).min_size(vec2(28.0, 28.0))),
@@ -392,6 +409,7 @@ impl Shell {
         Frame::NONE.fill(theme::TOOLBAR).corner_radius(24.0).inner_margin(Margin::symmetric(12, 4)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_centered(|ui| {
+                flat(ui);
                 ui.spacing_mut().item_spacing.x = 2.0;
                 for tool in TOOLBAR {
                     match tool {
@@ -474,7 +492,15 @@ impl Shell {
             app.run_or_alert("home.decreaseFontSize", json!({}));
         }
         let mut text = self.size_draft.clone().unwrap_or_else(|| shown.clone());
-        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(30.0).horizontal_align(Align::Center));
+        // Sheets keeps a thin grey box round the size, unlike the flat buttons beside it.
+        let r = ui
+            .scope(|ui| {
+                let w = &mut ui.style_mut().visuals.widgets;
+                w.inactive.bg_stroke = Stroke::new(1.0, theme::BOX);
+                w.hovered.bg_stroke = Stroke::new(1.0, theme::TEXT_DIM);
+                ui.add(egui::TextEdit::singleline(&mut text).desired_width(30.0).horizontal_align(Align::Center))
+            })
+            .inner;
         if r.changed() {
             self.size_draft = Some(text.clone());
         }
@@ -578,7 +604,9 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui) {
                 ui.label(RichText::new(if dirty { "Not saved" } else { "Saved" }).size(12.0).color(theme::TEXT_DIM));
             });
             ui.horizontal(|ui| {
+                flat(ui);
                 ui.spacing_mut().item_spacing.x = 0.0;
+                ui.spacing_mut().button_padding = vec2(7.0, 2.0);
                 for (title, items) in MENUS {
                     ui.menu_button(RichText::new(*title).size(14.0).color(theme::TEXT), |ui| menu_items(app, ui, items));
                 }
