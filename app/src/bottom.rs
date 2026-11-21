@@ -41,6 +41,10 @@ pub struct Bottom {
     quick: QuickSum,
     /// Tab being renamed: (index, draft name).
     renaming: Option<(usize, String)>,
+    /// The tab being dragged to a new place (its sheet index).
+    dragging: Option<usize>,
+    /// This frame's tab rectangles, for dropping a dragged tab.
+    tab_rects: Vec<(usize, egui::Rect)>,
 }
 
 struct Tab {
@@ -114,9 +118,11 @@ impl Bottom {
                     let strip = (ui.available_width() - quick_width).max(80.0);
                     egui::ScrollArea::horizontal().max_width(strip).id_salt("starsheets_tabs").show(ui, |ui| {
                         ui.horizontal(|ui| {
+                            self.tab_rects.clear();
                             for tab in list.iter().filter(|t| !t.hidden) {
                                 self.tab(app, ui, tab, tab.index == active, list.len());
                             }
+                            self.drop_tab(app, ui);
                         });
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.quick_sum(app, ui));
@@ -158,25 +164,63 @@ impl Bottom {
             }
             return;
         }
-        let text = RichText::new(format!("{}  ▾", tab.name)).size(13.5).color(if active { theme::BLUE } else { theme::TEXT_DIM });
+        let colour = if active { theme::BLUE } else { theme::TEXT_DIM };
+        let text = RichText::new(tab.name.clone()).size(13.5).color(colour);
         let text = if active { text.strong() } else { text };
         let fill = if active { theme::ACTIVE_TAB } else { egui::Color32::TRANSPARENT };
-        let r = ui.add(Button::new(text).fill(fill).corner_radius(6.0).min_size(vec2(80.0, 30.0)));
+        // Sheets' tab: the name (click to switch, drag to reorder, double-click to rename) and a
+        // small ▾ that opens the tab menu. Right-click anywhere on it opens the same menu once.
+        let shown = Frame::NONE.fill(fill).corner_radius(6.0).inner_margin(Margin { left: 6, right: 2, top: 0, bottom: 0 }).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let name = ui.add(Button::new(text).frame(false).min_size(vec2(56.0, 30.0)).sense(egui::Sense::click_and_drag()));
+            let arrow = ui.add(Button::new(RichText::new("▾").size(12.0).color(colour)).frame(false).min_size(vec2(20.0, 30.0))).on_hover_text("Sheet menu");
+            (name, arrow)
+        });
+        let (name, arrow) = shown.inner;
+        let whole = shown.response.rect;
+        self.tab_rects.push((tab.index, whole));
         if let Some(c) = tab.colour {
-            let rect = r.rect;
-            ui.painter().hline(rect.x_range().shrink(6.0), rect.bottom() - 2.0, Stroke::new(3.0, c));
+            ui.painter().hline(whole.x_range().shrink(6.0), whole.bottom() - 2.0, Stroke::new(3.0, c));
         }
-        if r.clicked() && !active {
+        if name.drag_started() {
+            self.dragging = Some(tab.index);
+        }
+        if (name.clicked() || arrow.clicked()) && !active {
             switch_to(app, tab.index);
         }
-        if r.double_clicked() {
+        if name.double_clicked() {
             self.renaming = Some((tab.index, tab.name.clone()));
         }
-        r.context_menu(|ui| self.tab_menu(app, ui, tab, count));
-        // Sheets: clicking the current tab (its ▾) opens the same menu.
-        let toggle = (r.clicked() && active).then_some(egui::SetOpenCommand::Toggle);
-        // Its own id: sharing the right-click menu's showed both at once.
-        egui::Popup::menu(&r).id(r.id.with("tab_arrow")).open_memory(toggle).show(|ui| self.tab_menu(app, ui, tab, count));
+        // One menu per right-click: the name and the arrow each own a different popup.
+        name.context_menu(|ui| self.tab_menu(app, ui, tab, count));
+        arrow.context_menu(|ui| self.tab_menu(app, ui, tab, count));
+        egui::Popup::menu(&arrow).show(|ui| self.tab_menu(app, ui, tab, count));
+    }
+
+    /// While a tab is dragged: a blue line where it would land; on release, moves the sheet.
+    fn drop_tab(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        let Some(from) = self.dragging else { return };
+        let Some(p) = ui.ctx().pointer_interact_pos().or_else(|| ui.ctx().pointer_latest_pos()) else { return };
+        // The last tab (other than the dragged one) whose middle is left of the pointer.
+        let after = self.tab_rects.iter().filter(|(i, r)| *i != from && r.center().x < p.x).max_by(|a, b| a.1.center().x.total_cmp(&b.1.center().x)).copied();
+        let line_x = match after {
+            Some((_, r)) => r.right() + 1.0,
+            None => self.tab_rects.first().map_or(p.x, |(_, r)| r.left() - 1.0),
+        };
+        if let Some((_, first)) = self.tab_rects.first() {
+            ui.painter().vline(line_x, first.y_range(), Stroke::new(2.0, theme::BLUE));
+        }
+        if ui.input(|i| i.pointer.any_released()) {
+            self.dragging = None;
+            let to = match after {
+                Some((t, _)) if t < from => t + 1,
+                Some((t, _)) => t,
+                None => self.tab_rects.iter().map(|(i, _)| *i).min().unwrap_or(0),
+            };
+            if to != from {
+                app.run_or_alert("sheet.move", json!({ "sheet": from, "to": to }));
+            }
+        }
     }
 
     fn tab_menu(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, count: usize) {
