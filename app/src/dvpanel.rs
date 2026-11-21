@@ -164,7 +164,9 @@ pub struct DvPanel {
     draft: Option<Draft>,
     error: Option<String>,
     /// Live apply: (what was applied, how many undo steps it took).
-    preview: Option<(String, usize)>,
+    /// (what was applied, how many undo steps it took, the workbook it left: an edit made since
+    /// means undo would take back the user's edit instead, so the preview is kept then).
+    preview: Option<(String, usize, usize)>,
     /// Set on the frame the panel opened, so the other side panel can close.
     pub just_opened: bool,
 }
@@ -220,6 +222,7 @@ impl DvPanel {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.set_width(PANEL_W);
                     if let Some(mut d) = self.draft.take() {
+                        self.adopt_if_edited(app, &mut d);
                         match self.editor(ui, &mut d) {
                             // Done: keep what is applied, back to the list.
                             Some(true) => {
@@ -350,8 +353,31 @@ impl DvPanel {
         out
     }
 
+    /// The sheet was edited while a preview is on (a value typed in a cell): undoing the preview
+    /// now would undo that edit, so the preview stays as the rule, and the next change replaces it.
+    fn adopt_if_edited(&mut self, app: &SheetApp, d: &mut Draft) {
+        let Some((_, applied, left)) = self.preview.as_ref().map(|(k, a, l)| (k.clone(), *a, *l)) else { return };
+        if wb_ptr(app) == left {
+            return;
+        }
+        self.preview = None;
+        if applied == 0 {
+            return;
+        }
+        let want: Vec<String> = d.range.split(',').filter_map(|r| RangeRef::parse(r.trim())).map(|r| r.a1()).collect();
+        if let Some((dv, cfs, theme_colours)) = app.session.active().and_then(|doc| {
+            let sh = doc.wb.active()?;
+            let dv = sh.validations.iter().find(|v| v.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>() == want)?.clone();
+            Some((dv, sh.cond_formats.clone(), doc.wb.theme.clone()))
+        }) {
+            d.orig = draft_from(&dv, &cfs, &theme_colours).orig;
+        }
+    }
+
     fn revert_preview(&mut self, app: &mut SheetApp) {
-        if let Some((_, n)) = self.preview.take() {
+        if let Some((_, n, left)) = self.preview.take()
+            && wb_ptr(app) == left
+        {
             for _ in 0..n {
                 let _ = app.run("edit.undo", json!({}));
             }
@@ -363,7 +389,7 @@ impl DvPanel {
     fn update_preview(&mut self, app: &mut SheetApp, d: &Draft) {
         let plan = commands(d);
         let key = format!("{:?}", plan.as_ref().map_err(|_| ()).ok());
-        if self.preview.as_ref().is_some_and(|(k, _)| *k == key) {
+        if self.preview.as_ref().is_some_and(|(k, ..)| *k == key) {
             self.error = plan.err();
             return;
         }
@@ -387,7 +413,7 @@ impl DvPanel {
             }
             Err(e) => self.error = Some(e),
         }
-        self.preview = Some((key, applied));
+        self.preview = Some((key, applied, wb_ptr(app)));
     }
 }
 
@@ -892,4 +918,9 @@ mod tests {
         assert_eq!(date_text(date_number("05/03/2026").unwrap()), "05/03/2026");
         assert_eq!(date_text(date_number("29/02/2024").unwrap()), "29/02/2024");
     }
+}
+
+/// Identifies the workbook as it is now (it is replaced on every change).
+fn wb_ptr(app: &SheetApp) -> usize {
+    app.session.active().map_or(0, |d| std::sync::Arc::as_ptr(&d.wb) as usize)
 }

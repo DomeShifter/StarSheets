@@ -123,7 +123,9 @@ pub struct CfPanel {
     error: Option<String>,
     /// Live preview while editing, as in Sheets: the draft is applied to the sheet for real and
     /// undone again on every change, Cancel or close. (what was applied, commands to undo)
-    preview: Option<(String, usize)>,
+    /// (what was applied, how many undo steps it took, the workbook it left: an edit made since
+    /// means undo would take back the user's edit instead, so the preview is kept then).
+    preview: Option<(String, usize, usize)>,
 }
 
 impl CfPanel {
@@ -175,6 +177,7 @@ impl CfPanel {
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     ui.set_width(PANEL_W);
                     if let Some(mut d) = self.draft.take() {
+                        self.adopt_if_edited(app, &mut d);
                         match self.editor(app, ui, &mut d) {
                             Some(true) => {
                                 self.revert_preview(app);
@@ -297,9 +300,25 @@ impl CfPanel {
         out
     }
 
+    /// The sheet was edited while a preview is on: undoing the preview would undo that edit, so
+    /// the preview stays as the rule (new rules go first, so it is rule 0) and the next change
+    /// replaces it.
+    fn adopt_if_edited(&mut self, app: &SheetApp, d: &mut Draft) {
+        let Some((applied, left)) = self.preview.as_ref().map(|(_, a, l)| (*a, *l)) else { return };
+        if wb_ptr(app) == left {
+            return;
+        }
+        self.preview = None;
+        if applied > 0 && rule_json(d).is_ok() {
+            d.index = Some(0);
+        }
+    }
+
     /// Undoes the live preview, if one is applied.
     fn revert_preview(&mut self, app: &mut SheetApp) {
-        if let Some((_, n)) = self.preview.take() {
+        if let Some((_, n, left)) = self.preview.take()
+            && wb_ptr(app) == left
+        {
             for _ in 0..n {
                 let _ = app.run("edit.undo", json!({}));
             }
@@ -311,7 +330,7 @@ impl CfPanel {
     fn update_preview(&mut self, app: &mut SheetApp, d: &Draft) {
         let rule = rule_json(d);
         let key = format!("{:?}|{}|{}", d.index, d.range.trim(), rule.as_ref().map(ToString::to_string).unwrap_or_default());
-        if self.preview.as_ref().is_some_and(|(k, _)| *k == key) {
+        if self.preview.as_ref().is_some_and(|(k, ..)| *k == key) {
             return;
         }
         self.revert_preview(app);
@@ -326,7 +345,7 @@ impl CfPanel {
                 applied += 1;
             }
         }
-        self.preview = Some((key, applied));
+        self.preview = Some((key, applied, wb_ptr(app)));
     }
 
     /// Stores the draft through GridCraft's commands; an edited rule replaces the old one in the
@@ -935,4 +954,9 @@ mod tests {
         assert_eq!(s["stops"].as_array().unwrap().len(), 3);
         assert_eq!(s["stops"][1]["type"], "percentile");
     }
+}
+
+/// Identifies the workbook as it is now (it is replaced on every change).
+fn wb_ptr(app: &SheetApp) -> usize {
+    app.session.active().map_or(0, |d| std::sync::Arc::as_ptr(&d.wb) as usize)
 }
