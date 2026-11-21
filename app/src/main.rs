@@ -7,6 +7,7 @@
 mod prefs;
 mod autolink;
 mod bottom;
+mod cfpanel;
 mod fonts;
 mod icons;
 mod linkcard;

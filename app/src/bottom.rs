@@ -179,8 +179,10 @@ impl Bottom {
         let (name, arrow) = shown.inner;
         let whole = shown.response.rect;
         self.tab_rects.push((tab.index, whole));
+        // The tab colour: a bar along the bottom of the tab, inside its rounded shape.
         if let Some(c) = tab.colour {
-            ui.painter().hline(whole.x_range().shrink(6.0), whole.bottom() - 2.0, Stroke::new(3.0, c));
+            let bar = egui::Rect::from_min_max(egui::pos2(whole.left(), whole.bottom() - 4.5), whole.max);
+            ui.painter().rect_filled(bar, egui::CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, c);
         }
         if name.drag_started() {
             self.dragging = Some(tab.index);

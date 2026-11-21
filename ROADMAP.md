@@ -41,6 +41,7 @@
 - [x] Right-click menus (cell, row and column headers, sheet tab + its ▾) and toolbar dropdowns (icon strips, number formats with examples) in the Sheets look (patch 0015)
 - [ ] Still missing from Sheets menus: Clip wrapping, Help › Keyboard shortcuts (Ctrl+/), Search the menus (Alt+/), Hidden sheets, Full screen, Version history (phase 2)
 - [x] Named ranges suggested while typing formulas (patch 0016); sheet tabs: ▾ opens the menu, drag to reorder
+- [x] Conditional formatting side panel: single colour (19 Sheets conditions, style, presets) and colour scales with configurable points (docs/sheets-cf.md, patch 0017); tab colour bar inside the tab
 - [ ] Dark mode palette
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).

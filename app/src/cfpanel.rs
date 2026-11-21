@@ -1,0 +1,759 @@
+//! Conditional formatting as a side panel, the way Google Sheets does it (docs/sheets-cf.md):
+//! a list of rule cards, and an editor with two tabs, "Single colour" (a condition plus a style)
+//! and "Colour scale" (min / mid / max points, each with a colour). Rules are stored and drawn
+//! by GridCraft (`home.conditionalFormat`, `home.manageRules`; colour-scale points: patch 0017).
+
+use egui::{Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui, vec2};
+use gridcraft_engine::model::{CfOperator, CfRule, CfValueKind, Color, Underline};
+use gridcraft_ui_egui::SheetApp;
+use serde_json::{Value as Json, json};
+
+use crate::theme;
+
+const GREEN: Color32 = Color32::from_rgb(0x14, 0x6C, 0x2E);
+const PANEL_W: f32 = 320.0;
+
+/// Google Sheets' conditions, in its order: label, GridCraft rule type, operator, value boxes.
+const CONDITIONS: &[(&str, &str, &str, u8)] = &[
+    ("Is empty", "blanks", "", 0),
+    ("Is not empty", "noBlanks", "", 0),
+    ("Text contains", "containsText", "", 1),
+    ("Text does not contain", "notContainsText", "", 1),
+    ("Text starts with", "beginsWith", "", 1),
+    ("Text ends with", "endsWith", "", 1),
+    ("Text is exactly", "cellIs", "equal", 1),
+    ("Date is", "date", "equal", 1),
+    ("Date is before", "date", "less", 1),
+    ("Date is after", "date", "greater", 1),
+    ("Greater than", "cellIs", "greater", 1),
+    ("Greater than or equal to", "cellIs", "greaterOrEqual", 1),
+    ("Less than", "cellIs", "less", 1),
+    ("Less than or equal to", "cellIs", "lessOrEqual", 1),
+    ("Is equal to", "cellIs", "equal", 1),
+    ("Is not equal to", "cellIs", "notEqual", 1),
+    ("Is between", "cellIs", "between", 2),
+    ("Is not between", "cellIs", "notBetween", 2),
+    ("Custom formula is", "expression", "", 1),
+];
+
+/// Sheets' preset styles for a single-colour rule: (text colour, fill).
+const STYLE_PRESETS: &[(u32, u32)] = &[
+    (0x000000, 0xB7E1CD),
+    (0x000000, 0xFCE8B2),
+    (0x000000, 0xF4C7C3),
+    (0xFFFFFF, 0x0B8043),
+    (0xFFFFFF, 0xF09300),
+    (0xFFFFFF, 0xC53929),
+    (0x000000, 0xC6DAFC),
+];
+
+/// Colour-scale presets (min, max; Sheets' first row is two-colour, the rest add a midpoint).
+const SCALE_PRESETS: &[&[u32]] = &[
+    &[0xFFFFFF, 0x57BB8A],
+    &[0x57BB8A, 0xFFFFFF],
+    &[0xFFFFFF, 0xE67C73],
+    &[0xE67C73, 0xFFFFFF],
+    &[0xFFFFFF, 0x7BAAF7],
+    &[0xFFFFFF, 0xFFD666],
+    &[0xE67C73, 0xFFD666, 0x57BB8A],
+    &[0x57BB8A, 0xFFD666, 0xE67C73],
+    &[0xFFFFFF, 0xFFD666, 0xE67C73],
+];
+
+/// Point types: label, GridCraft value type ("" = no midpoint).
+const POINT_KINDS: &[(&str, &str)] = &[("None", ""), ("Min value", "min"), ("Max value", "max"), ("Number", "num"), ("Percent", "percent"), ("Percentile", "percentile")];
+
+#[derive(Clone)]
+struct Point {
+    kind: usize,
+    value: String,
+    colour: u32,
+}
+
+#[derive(Clone)]
+struct Draft {
+    /// The rule being edited (its place in the sheet's list), or None for a new one.
+    index: Option<usize>,
+    scale: bool,
+    range: String,
+    condition: usize,
+    value1: String,
+    value2: String,
+    bold: bool,
+    italic: bool,
+    underline: bool,
+    strike: bool,
+    text: Option<u32>,
+    fill: Option<u32>,
+    /// Minpoint, midpoint, maxpoint.
+    points: [Point; 3],
+}
+
+impl Draft {
+    fn new(range: String) -> Draft {
+        Draft {
+            index: None,
+            scale: false,
+            range,
+            condition: 1,
+            value1: String::new(),
+            value2: String::new(),
+            bold: false,
+            italic: false,
+            underline: false,
+            strike: false,
+            text: None,
+            fill: Some(STYLE_PRESETS[0].1),
+            points: [
+                Point { kind: 1, value: String::new(), colour: 0xFFFFFF },
+                Point { kind: 0, value: String::new(), colour: 0xFFD666 },
+                Point { kind: 2, value: String::new(), colour: 0x57BB8A },
+            ],
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct CfPanel {
+    pub open: bool,
+    draft: Option<Draft>,
+    error: Option<String>,
+}
+
+impl CfPanel {
+    /// Opens the panel (from Format › Conditional formatting or the right-click menu): the rule
+    /// list when the sheet has rules, else a new rule for the selection, as in Sheets.
+    pub fn open(&mut self, app: &SheetApp) {
+        self.open = true;
+        self.error = None;
+        let has_rules = app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| !sh.cond_formats.is_empty());
+        self.draft = if has_rules { None } else { Some(Draft::new(selection_text(app))) };
+    }
+
+    /// Takes over GridCraft's own conditional-formatting dialogs (they open from its commands).
+    pub fn intercept(&mut self, app: &mut SheetApp) {
+        let ours = app.dialog.as_ref().is_some_and(|d| d.command == Some("home.conditionalFormat") || matches!(d.name.as_str(), "manageRules" | "cfQuick" | "newFormattingRule"));
+        if ours {
+            app.dialog = None;
+            self.open(app);
+        }
+    }
+
+    pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        if !self.open {
+            return;
+        }
+        egui::Panel::right("starsheets_cf")
+            .exact_size(PANEL_W + 32.0)
+            .resizable(false)
+            .frame(Frame::NONE.fill(Color32::WHITE).inner_margin(Margin::symmetric(16, 12)).stroke(Stroke::new(1.0, theme::DIVIDER)))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Conditional format rules").size(16.0).color(theme::TEXT));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(egui::Button::new(RichText::new("✕").size(16.0)).frame(false)).on_hover_text("Close").clicked() {
+                            self.open = false;
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    ui.set_width(PANEL_W);
+                    if let Some(mut d) = self.draft.take() {
+                        match self.editor(app, ui, &mut d) {
+                            Some(true) => {
+                                if self.save(app, &d) {
+                                    self.draft = None;
+                                } else {
+                                    self.draft = Some(d);
+                                }
+                            }
+                            Some(false) => {
+                                self.error = None;
+                                let none_left = app.session.active().and_then(|d| d.wb.active()).is_none_or(|sh| sh.cond_formats.is_empty());
+                                if none_left {
+                                    self.open = false;
+                                }
+                            }
+                            None => self.draft = Some(d),
+                        }
+                    } else {
+                        self.list(app, ui);
+                    }
+                });
+            });
+    }
+
+    /// The rule cards: a swatch, what the rule does and its range; click to edit, bin to delete.
+    fn list(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        let Some((rules, theme_colours)) = app.session.active().and_then(|d| d.wb.active().map(|sh| (sh.cond_formats.clone(), d.wb.theme.clone()))) else {
+            return;
+        };
+        let mut delete = None;
+        for (i, cf) in rules.iter().enumerate() {
+            let ranges = cf.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",");
+            let (r, resp) = ui.allocate_exact_size(vec2(PANEL_W, 60.0), Sense::click());
+            let p = ui.painter();
+            if resp.hovered() {
+                p.rect_filled(r, 0.0, theme::MENU_HOVER);
+            }
+            let sw = egui::Rect::from_min_size(r.min + vec2(4.0, 8.0), vec2(44.0, 44.0));
+            paint_swatch(p, sw, &cf.rule, &theme_colours);
+            p.text(sw.right_center() + vec2(12.0, -9.0), egui::Align2::LEFT_CENTER, describe(&cf.rule), egui::FontId::proportional(13.5), theme::TEXT);
+            p.text(sw.right_center() + vec2(12.0, 10.0), egui::Align2::LEFT_CENTER, ranges, egui::FontId::proportional(12.0), theme::TEXT_DIM);
+            if resp.hovered() {
+                let bin = egui::Rect::from_center_size(egui::pos2(r.right() - 20.0, r.center().y), vec2(28.0, 28.0));
+                let b = ui.interact(bin, ui.id().with(("cf_bin", i)), Sense::click());
+                if let Some(img) = crate::icons::icon("delete") {
+                    img.paint_at(ui, bin.shrink(5.0));
+                }
+                if b.on_hover_text("Remove rule").clicked() {
+                    delete = Some(i);
+                    continue;
+                }
+            }
+            if resp.clicked() {
+                let mut d = draft_from(&cf.rule, &theme_colours).unwrap_or_else(|| Draft::new(String::new()));
+                d.range = cf.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",");
+                d.index = Some(i);
+                self.draft = Some(d);
+            }
+            ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, theme::DIVIDER));
+        }
+        if let Some(i) = delete {
+            app.run_or_alert("home.manageRules", json!({ "delete": i }));
+        }
+        ui.add_space(12.0);
+        if ui.add(egui::Button::new(RichText::new("+  Add another rule").size(14.0).color(GREEN)).frame(false)).clicked() {
+            self.draft = Some(Draft::new(selection_text(app)));
+        }
+    }
+
+    /// The rule editor. Returns Some(true) for Done, Some(false) for Cancel.
+    fn editor(&mut self, _app: &mut SheetApp, ui: &mut Ui, d: &mut Draft) -> Option<bool> {
+        // Tabs.
+        ui.columns(2, |cols| {
+            for (i, (label, scale)) in [("Single colour", false), ("Colour scale", true)].into_iter().enumerate() {
+                let on = d.scale == scale;
+                let col = &mut cols[i];
+                let r = col.add(egui::Button::new(RichText::new(label).size(14.0).color(if on { GREEN } else { theme::TEXT })).frame(false).min_size(vec2(col.available_width(), 32.0)));
+                if on {
+                    col.painter().hline(r.rect.x_range().shrink(20.0), r.rect.bottom(), Stroke::new(3.0, GREEN));
+                }
+                if r.clicked() {
+                    d.scale = scale;
+                }
+            }
+        });
+        ui.add_space(10.0);
+        ui.label(RichText::new("Apply to range").size(14.0).strong());
+        ui.add(egui::TextEdit::singleline(&mut d.range).desired_width(PANEL_W).margin(vec2(8.0, 8.0)));
+        ui.add_space(12.0);
+        ui.label(RichText::new("Format rules").size(14.0).strong());
+        ui.add_space(4.0);
+        if d.scale {
+            scale_editor(ui, d);
+        } else {
+            single_editor(ui, d);
+        }
+        if let Some(e) = &self.error {
+            ui.add_space(6.0);
+            ui.label(RichText::new(e).color(Color32::from_rgb(0xC5, 0x39, 0x29)));
+        }
+        ui.add_space(14.0);
+        let mut out = None;
+        ui.horizontal(|ui| {
+            ui.add_space(PANEL_W - 200.0);
+            if ui.add(egui::Button::new(RichText::new("Cancel").color(GREEN)).stroke(Stroke::new(1.0, theme::BOX)).fill(Color32::WHITE).corner_radius(4.0).min_size(vec2(90.0, 36.0))).clicked() {
+                out = Some(false);
+            }
+            if ui.add(egui::Button::new(RichText::new("Done").color(Color32::WHITE)).fill(GREEN).corner_radius(4.0).min_size(vec2(90.0, 36.0))).clicked() {
+                out = Some(true);
+            }
+        });
+        out
+    }
+
+    /// Stores the draft through GridCraft's commands; an edited rule replaces the old one in the
+    /// same place. On failure the panel stays open with the reason.
+    fn save(&mut self, app: &mut SheetApp, d: &Draft) -> bool {
+        let rule = match rule_json(d) {
+            Ok(r) => r,
+            Err(e) => {
+                self.error = Some(e);
+                return false;
+            }
+        };
+        let before = app.session.active().and_then(|x| x.wb.active()).map_or(0, |sh| sh.cond_formats.len());
+        if let Some(i) = d.index {
+            let _ = app.run("home.manageRules", json!({ "delete": i }));
+        }
+        match app.run("home.conditionalFormat", json!({ "range": d.range.trim(), "rule": rule })) {
+            Ok(_) => {
+                // A new rule goes to the end; an edited one moves back to its old place.
+                if let Some(i) = d.index {
+                    let last = before.saturating_sub(1);
+                    for k in (i..last).rev() {
+                        let _ = app.run("home.manageRules", json!({ "moveUp": k + 1 }));
+                    }
+                }
+                self.error = None;
+                true
+            }
+            Err(e) => {
+                self.error = Some(gridcraft_ui_egui::clean_error(&e));
+                false
+            }
+        }
+    }
+}
+
+fn selection_text(app: &SheetApp) -> String {
+    app.session.active().map(|d| d.selection.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",")).unwrap_or_default()
+}
+
+fn c32(rgb: u32) -> Color32 {
+    Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+}
+
+fn rgb_of(c: &Color, theme_colours: &gridcraft_engine::model::Theme) -> Option<u32> {
+    c.resolve(theme_colours).map(|[r, g, b]| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b))
+}
+
+fn hex(rgb: u32) -> String {
+    format!("#{rgb:06X}")
+}
+
+/// A colour button that opens the palette.
+fn colour_pick(ui: &mut Ui, id: &str, colour: Option<u32>, icon: &str, tip: &str) -> Option<Option<u32>> {
+    let mut picked = None;
+    let r = ui
+        .menu_button(crate::icons::icon(icon).map_or_else(|| egui::Atom::from(tip.to_string()), egui::Atom::from), |ui| {
+            if ui.button("Reset").clicked() {
+                picked = Some(None);
+                ui.close();
+            }
+            crate::shell::palette_grid(ui, |h| {
+                picked = u32::from_str_radix(h.trim_start_matches('#'), 16).ok().map(Some);
+            });
+            if picked.is_some() {
+                ui.close();
+            }
+        })
+        .response;
+    // The chosen colour as a bar under the icon, like Sheets.
+    let bar = egui::Rect::from_min_size(egui::pos2(r.rect.left() + 4.0, r.rect.bottom() - 4.0), vec2(r.rect.width() - 8.0, 3.0));
+    ui.painter().rect_filled(bar, 0.0, colour.map_or(Color32::TRANSPARENT, c32));
+    let _ = id;
+    r.on_hover_text(tip);
+    picked
+}
+
+fn single_editor(ui: &mut Ui, d: &mut Draft) {
+    ui.label(RichText::new("Format cells if…").size(12.0).color(theme::TEXT_DIM));
+    egui::ComboBox::from_id_salt("cf_condition").width(PANEL_W - 8.0).selected_text(CONDITIONS[d.condition].0).show_ui(ui, |ui| {
+        for (i, (label, ..)) in CONDITIONS.iter().enumerate() {
+            ui.selectable_value(&mut d.condition, i, *label);
+        }
+    });
+    let (_, kind, _, boxes) = CONDITIONS[d.condition];
+    let hint = match kind {
+        "date" => "Date, e.g. 25/12/2026",
+        "expression" => "Formula, e.g. =A1>10",
+        _ => "Value or formula",
+    };
+    if boxes >= 1 {
+        ui.add(egui::TextEdit::singleline(&mut d.value1).hint_text(hint).desired_width(PANEL_W).margin(vec2(8.0, 8.0)));
+    }
+    if boxes >= 2 {
+        ui.add(egui::TextEdit::singleline(&mut d.value2).hint_text("and").desired_width(PANEL_W).margin(vec2(8.0, 8.0)));
+    }
+    ui.add_space(10.0);
+    ui.label(RichText::new("Formatting style").size(12.0).color(theme::TEXT_DIM));
+    // Preview, as in Sheets: "Default" in the chosen style.
+    let (r, _) = ui.allocate_exact_size(vec2(PANEL_W, 36.0), Sense::hover());
+    ui.painter().rect_filled(r, CornerRadius { nw: 4, ne: 4, sw: 0, se: 0 }, d.fill.map_or(Color32::WHITE, c32));
+    let colour = d.text.map_or(theme::TEXT, c32);
+    let style_text = egui::text::LayoutJob::simple_format(
+        "Default".into(),
+        egui::TextFormat {
+            font_id: egui::FontId::proportional(14.0),
+            color: colour,
+            italics: d.italic,
+            underline: if d.underline { Stroke::new(1.0, colour) } else { Stroke::NONE },
+            strikethrough: if d.strike { Stroke::new(1.0, colour) } else { Stroke::NONE },
+            ..Default::default()
+        },
+    );
+    let galley = ui.painter().layout_job(style_text);
+    let at = egui::pos2(r.left() + 8.0, r.center().y - galley.size().y / 2.0);
+    // Bold: drawn twice, half a pixel apart (the UI font has no bold face).
+    if d.bold {
+        ui.painter().galley(at + vec2(0.6, 0.0), galley.clone(), colour);
+    }
+    ui.painter().galley(at, galley, colour);
+    Frame::NONE.stroke(Stroke::new(1.0, theme::DIVIDER)).inner_margin(Margin::symmetric(6, 4)).show(ui, |ui| {
+        ui.set_width(PANEL_W - 14.0);
+        ui.horizontal(|ui| {
+            for (flag, label, tip) in [(&mut d.bold, "B", "Bold"), (&mut d.italic, "I", "Italic"), (&mut d.underline, "U", "Underline"), (&mut d.strike, "S", "Strikethrough")] {
+                let mut t = RichText::new(label).size(15.0);
+                t = match label {
+                    "B" => t.strong(),
+                    "I" => t.italics(),
+                    "U" => t.underline(),
+                    _ => t.strikethrough(),
+                };
+                if ui.add(egui::Button::new(t).selected(*flag).frame_when_inactive(false).min_size(vec2(28.0, 28.0))).on_hover_text(tip).clicked() {
+                    *flag = !*flag;
+                }
+            }
+            ui.add_space(4.0);
+            if let Some(c) = colour_pick(ui, "cf_text", d.text, "format_color_text", "Text colour") {
+                d.text = c;
+            }
+            if let Some(c) = colour_pick(ui, "cf_fill", d.fill, "format_color_fill", "Fill colour") {
+                d.fill = c;
+            }
+        });
+    });
+    ui.add_space(6.0);
+    // Sheets' preset styles.
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+        for (text, fill) in STYLE_PRESETS {
+            let (r, resp) = ui.allocate_exact_size(vec2(36.0, 24.0), Sense::click());
+            ui.painter().rect_filled(r, 3.0, c32(*fill));
+            ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, "123", egui::FontId::proportional(11.0), c32(*text));
+            if resp.hovered() {
+                ui.painter().rect_stroke(r, 3.0, Stroke::new(1.5, theme::BLUE), egui::StrokeKind::Outside);
+            }
+            if resp.on_hover_text("Preset style").clicked() {
+                d.text = (*text != 0).then_some(*text);
+                d.fill = Some(*fill);
+            }
+        }
+    });
+}
+
+fn scale_editor(ui: &mut Ui, d: &mut Draft) {
+    ui.label(RichText::new("Preview").size(12.0).color(theme::TEXT_DIM));
+    let (r, resp) = ui.allocate_exact_size(vec2(PANEL_W, 36.0), Sense::click());
+    paint_gradient(ui.painter(), r, &scale_colours(d));
+    ui.painter().text(r.left_center() + vec2(8.0, 0.0), egui::Align2::LEFT_CENTER, "Default", egui::FontId::proportional(14.0), theme::TEXT);
+    let presets_id = ui.id().with("cf_presets");
+    if resp.on_hover_text("Choose a preset").clicked() {
+        egui::Popup::toggle_id(ui.ctx(), presets_id);
+    }
+    egui::Popup::new(presets_id, ui.ctx().clone(), egui::PopupAnchor::Position(r.left_bottom()), ui.layer_id()).show(|ui| {
+        for p in SCALE_PRESETS {
+            let (pr, presp) = ui.allocate_exact_size(vec2(220.0, 22.0), Sense::click());
+            let cols: Vec<Color32> = p.iter().map(|c| c32(*c)).collect();
+            paint_gradient(ui.painter(), pr, &cols);
+            if presp.clicked() {
+                d.points[0].colour = p[0];
+                d.points[2].colour = p[p.len() - 1];
+                if p.len() == 3 {
+                    d.points[1].kind = 5;
+                    d.points[1].value = "50".into();
+                    d.points[1].colour = p[1];
+                } else {
+                    d.points[1].kind = 0;
+                }
+                egui::Popup::close_id(ui.ctx(), presets_id);
+            }
+            ui.add_space(4.0);
+        }
+    });
+    for (i, title) in ["Minpoint", "Midpoint", "Maxpoint"].into_iter().enumerate() {
+        ui.add_space(8.0);
+        ui.label(RichText::new(title).size(12.0).color(theme::TEXT_DIM));
+        let p = &mut d.points[i];
+        ui.horizontal(|ui| {
+            // Min only offers min / number / percent / percentile; mid adds None; max offers max.
+            let kinds: Vec<usize> = match i {
+                0 => vec![1, 3, 4, 5],
+                1 => vec![0, 3, 4, 5],
+                _ => vec![2, 3, 4, 5],
+            };
+            egui::ComboBox::from_id_salt(("cf_point", i)).width(120.0).selected_text(POINT_KINDS[p.kind].0).show_ui(ui, |ui| {
+                for k in kinds {
+                    ui.selectable_value(&mut p.kind, k, POINT_KINDS[k].0);
+                }
+            });
+            let takes_value = matches!(POINT_KINDS[p.kind].1, "num" | "percent" | "percentile");
+            ui.add_enabled(takes_value, egui::TextEdit::singleline(&mut p.value).hint_text("Value").desired_width(100.0));
+            if p.kind != 0
+                && let Some(Some(c)) = colour_pick(ui, "cf_point_colour", Some(p.colour), "format_color_fill", "Colour")
+            {
+                p.colour = c;
+            }
+        });
+    }
+}
+
+fn scale_colours(d: &Draft) -> Vec<Color32> {
+    let mut v = vec![c32(d.points[0].colour)];
+    if d.points[1].kind != 0 {
+        v.push(c32(d.points[1].colour));
+    }
+    v.push(c32(d.points[2].colour));
+    v
+}
+
+fn paint_gradient(p: &egui::Painter, r: egui::Rect, cols: &[Color32]) {
+    let n = 24;
+    for k in 0..n {
+        let t = k as f32 / (n - 1) as f32;
+        let seg = t * (cols.len() - 1) as f32;
+        let i = (seg.floor() as usize).min(cols.len() - 2);
+        let c = lerp(cols[i], cols[i + 1], seg - i as f32);
+        let x0 = r.left() + r.width() * k as f32 / n as f32;
+        let x1 = r.left() + r.width() * (k + 1) as f32 / n as f32 + 0.5;
+        p.rect_filled(egui::Rect::from_x_y_ranges(x0..=x1, r.y_range()), 0.0, c);
+    }
+}
+
+fn lerp(a: Color32, b: Color32, t: f32) -> Color32 {
+    let m = |x: u8, y: u8| (f32::from(x) + (f32::from(y) - f32::from(x)) * t).round() as u8;
+    Color32::from_rgb(m(a.r(), b.r()), m(a.g(), b.g()), m(a.b(), b.b()))
+}
+
+/// Days since 1899-12-30 (the spreadsheet date number) for "dd/mm/yyyy".
+fn date_number(s: &str) -> Option<i64> {
+    let parts: Vec<i64> = s.trim().split(['/', '-', '.']).map(|x| x.trim().parse().ok()).collect::<Option<_>>()?;
+    let [d, m, y] = parts[..] else { return None };
+    if !(1..=31).contains(&d) || !(1..=12).contains(&m) || y < 1900 {
+        return None;
+    }
+    // Days from civil (Howard Hinnant), then shift the epoch to 1899-12-30.
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468 + 25_569)
+}
+
+fn rule_json(d: &Draft) -> Result<Json, String> {
+    if d.range.trim().is_empty() {
+        return Err("Choose the cells the rule applies to.".into());
+    }
+    if d.scale {
+        let mut stops = Vec::new();
+        for (i, p) in d.points.iter().enumerate() {
+            let kind = POINT_KINDS[p.kind].1;
+            if kind.is_empty() {
+                continue;
+            }
+            let mut s = json!({ "type": kind, "color": hex(p.colour) });
+            if matches!(kind, "num" | "percent" | "percentile") {
+                let v: f64 = p.value.trim().parse().map_err(|_| format!("{} needs a number.", ["Minpoint", "Midpoint", "Maxpoint"][i]))?;
+                s["value"] = json!(v);
+            }
+            stops.push(s);
+        }
+        return Ok(json!({ "type": "colorScale", "stops": stops }));
+    }
+    let (_, kind, op, boxes) = CONDITIONS[d.condition];
+    if boxes >= 1 && d.value1.trim().is_empty() {
+        return Err("Enter a value for the rule.".into());
+    }
+    if boxes >= 2 && d.value2.trim().is_empty() {
+        return Err("Enter both values.".into());
+    }
+    let mut font = serde_json::Map::new();
+    if d.bold {
+        font.insert("bold".into(), json!(true));
+    }
+    if d.italic {
+        font.insert("italic".into(), json!(true));
+    }
+    if d.underline {
+        font.insert("underline".into(), json!("Single"));
+    }
+    if d.strike {
+        font.insert("strike".into(), json!(true));
+    }
+    if let Some(t) = d.text {
+        font.insert("color".into(), json!(hex(t)));
+    }
+    let mut style = json!({ "font": font });
+    if let Some(f) = d.fill {
+        style["fill"] = json!(hex(f));
+    }
+    let v1 = d.value1.trim().to_string();
+    let rule = match kind {
+        "date" => {
+            let n = date_number(&v1).ok_or("Enter the date as dd/mm/yyyy.")?;
+            json!({ "type": "cellIs", "operator": op, "value": n.to_string(), "style": style })
+        }
+        "cellIs" if boxes == 2 => json!({ "type": "cellIs", "operator": op, "value": v1, "value2": d.value2.trim(), "style": style }),
+        "cellIs" => json!({ "type": "cellIs", "operator": op, "value": v1, "style": style }),
+        "expression" => json!({ "type": "expression", "formula": v1, "style": style }),
+        "blanks" | "noBlanks" => json!({ "type": kind, "style": style }),
+        _ => json!({ "type": kind, "text": v1, "style": style }),
+    };
+    Ok(rule)
+}
+
+/// The words on a rule's card, as Sheets writes them.
+fn describe(rule: &CfRule) -> String {
+    let op = |o: &CfOperator| match o {
+        CfOperator::Between => "Is between",
+        CfOperator::NotBetween => "Is not between",
+        CfOperator::Equal => "Is equal to",
+        CfOperator::NotEqual => "Is not equal to",
+        CfOperator::Greater => "Greater than",
+        CfOperator::Less => "Less than",
+        CfOperator::GreaterOrEqual => "Greater than or equal to",
+        CfOperator::LessOrEqual => "Less than or equal to",
+    };
+    match rule {
+        CfRule::CellIs { op: o, a, b: Some(b), .. } => format!("{} {a} and {b}", op(o)),
+        CfRule::CellIs { op: o, a, .. } => format!("{} {a}", op(o)),
+        CfRule::Expression { formula, .. } => format!("Custom formula is ={formula}"),
+        CfRule::ContainsText { text, .. } => format!("Text contains \"{text}\""),
+        CfRule::NotContainsText { text, .. } => format!("Text does not contain \"{text}\""),
+        CfRule::BeginsWith { text, .. } => format!("Text starts with \"{text}\""),
+        CfRule::EndsWith { text, .. } => format!("Text ends with \"{text}\""),
+        CfRule::Blanks { .. } => "Cell is empty".into(),
+        CfRule::NoBlanks { .. } => "Cell is not empty".into(),
+        CfRule::ColorScale { .. } => "Colour scale".into(),
+        CfRule::Errors { .. } => "Cell has an error".into(),
+        CfRule::Duplicate { .. } => "Duplicate values".into(),
+        CfRule::Unique { .. } => "Unique values".into(),
+        CfRule::DataBar { .. } => "Data bar".into(),
+        _ => "Rule".into(),
+    }
+}
+
+fn rule_style(rule: &CfRule) -> Option<&gridcraft_engine::model::Style> {
+    match rule {
+        CfRule::CellIs { style, .. }
+        | CfRule::Expression { style, .. }
+        | CfRule::ContainsText { style, .. }
+        | CfRule::NotContainsText { style, .. }
+        | CfRule::BeginsWith { style, .. }
+        | CfRule::EndsWith { style, .. }
+        | CfRule::Blanks { style, .. }
+        | CfRule::NoBlanks { style, .. }
+        | CfRule::Errors { style, .. }
+        | CfRule::NoErrors { style, .. }
+        | CfRule::Duplicate { style, .. }
+        | CfRule::Unique { style, .. }
+        | CfRule::Top10 { style, .. }
+        | CfRule::AboveAverage { style, .. }
+        | CfRule::TimePeriod { style, .. } => Some(style),
+        _ => None,
+    }
+}
+
+fn paint_swatch(p: &egui::Painter, r: egui::Rect, rule: &CfRule, theme_colours: &gridcraft_engine::model::Theme) {
+    if let CfRule::ColorScale { stops } = rule {
+        let cols: Vec<Color32> = stops.iter().map(|(_, c)| rgb_of(c, theme_colours).map_or(Color32::WHITE, c32)).collect();
+        if cols.len() >= 2 {
+            paint_gradient(p, r, &cols);
+        }
+        return;
+    }
+    let style = rule_style(rule);
+    let fill = style.and_then(|s| rgb_of(&s.fill.fg, theme_colours).or_else(|| rgb_of(&s.fill.bg, theme_colours))).map_or(Color32::WHITE, c32);
+    let text = style.and_then(|s| rgb_of(&s.font.color, theme_colours)).map_or(theme::TEXT, c32);
+    p.rect_filled(r, 2.0, fill);
+    p.text(r.center(), egui::Align2::CENTER_CENTER, "123", egui::FontId::proportional(12.0), text);
+}
+
+/// A draft for editing an existing rule; None for kinds the panel can't edit (they can still
+/// be removed).
+fn draft_from(rule: &CfRule, theme_colours: &gridcraft_engine::model::Theme) -> Option<Draft> {
+    let mut d = Draft::new(String::new());
+    if let CfRule::ColorScale { stops } = rule {
+        d.scale = true;
+        let point = |(k, c): &(CfValueKind, Color)| {
+            let (kind, value) = match k {
+                CfValueKind::Min => (1, String::new()),
+                CfValueKind::Max => (2, String::new()),
+                CfValueKind::Number(v) => (3, v.to_string()),
+                CfValueKind::Percent(v) => (4, v.to_string()),
+                CfValueKind::Percentile(v) => (5, v.to_string()),
+                CfValueKind::Formula(f) => (3, f.clone()),
+            };
+            Point { kind, value, colour: rgb_of(c, theme_colours).unwrap_or(0xFFFFFF) }
+        };
+        d.points[0] = point(stops.first()?);
+        d.points[2] = point(stops.last()?);
+        if stops.len() == 3 {
+            d.points[1] = point(&stops[1]);
+        } else {
+            d.points[1].kind = 0;
+        }
+        return Some(d);
+    }
+    let style = rule_style(rule)?;
+    let find = |kind: &str, op: &str| CONDITIONS.iter().position(|(_, k, o, _)| *k == kind && *o == op);
+    let (cond, v1, v2) = match rule {
+        CfRule::CellIs { op, a, b, .. } => {
+            let o = match op {
+                CfOperator::Between => "between",
+                CfOperator::NotBetween => "notBetween",
+                CfOperator::Equal => "equal",
+                CfOperator::NotEqual => "notEqual",
+                CfOperator::Greater => "greater",
+                CfOperator::Less => "less",
+                CfOperator::GreaterOrEqual => "greaterOrEqual",
+                CfOperator::LessOrEqual => "lessOrEqual",
+            };
+            // "Is equal to" (14) rather than "Text is exactly" (6), the first match.
+            let i = if o == "equal" { Some(14) } else { find("cellIs", o) };
+            (i?, a.trim_matches('"').to_string(), b.clone().unwrap_or_default())
+        }
+        CfRule::Expression { formula, .. } => (find("expression", "")?, format!("={formula}"), String::new()),
+        CfRule::ContainsText { text, .. } => (find("containsText", "")?, text.clone(), String::new()),
+        CfRule::NotContainsText { text, .. } => (find("notContainsText", "")?, text.clone(), String::new()),
+        CfRule::BeginsWith { text, .. } => (find("beginsWith", "")?, text.clone(), String::new()),
+        CfRule::EndsWith { text, .. } => (find("endsWith", "")?, text.clone(), String::new()),
+        CfRule::Blanks { .. } => (0, String::new(), String::new()),
+        CfRule::NoBlanks { .. } => (1, String::new(), String::new()),
+        _ => return None,
+    };
+    d.condition = cond;
+    d.value1 = v1;
+    d.value2 = v2;
+    d.bold = style.font.bold;
+    d.italic = style.font.italic;
+    d.underline = style.font.underline != Underline::None;
+    d.strike = style.font.strike;
+    d.text = rgb_of(&style.font.color, theme_colours);
+    d.fill = rgb_of(&style.fill.fg, theme_colours).or_else(|| rgb_of(&style.fill.bg, theme_colours));
+    Some(d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dates_become_spreadsheet_numbers() {
+        assert_eq!(date_number("01/01/1900"), Some(2));
+        assert_eq!(date_number("25/12/2026"), Some(46381));
+        assert_eq!(date_number("31/13/2026"), None);
+    }
+
+    #[test]
+    fn rules_turn_into_gridcraft_json() {
+        let mut d = Draft::new("A1:A10".into());
+        d.condition = 10;
+        d.value1 = "5".into();
+        let r = rule_json(&d).unwrap();
+        assert_eq!(r["type"], "cellIs");
+        assert_eq!(r["operator"], "greater");
+        assert_eq!(r["style"]["fill"], "#B7E1CD");
+        d.scale = true;
+        d.points[1].kind = 5;
+        d.points[1].value = "50".into();
+        let s = rule_json(&d).unwrap();
+        assert_eq!(s["stops"].as_array().unwrap().len(), 3);
+        assert_eq!(s["stops"][1]["type"], "percentile");
+    }
+}

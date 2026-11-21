@@ -30,6 +30,7 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0007-ui-egui-sheets-cell-menu | With `sheets_keys`, the cell right-click menu uses Sheets' items and order | to offer as a PR (as an option) |
 | 0008-ui-egui-sheets-cell-marks | `Tokens.sheets_marks`: red corner on error cells, black note / orange comment corners (top-right) | to offer as a PR (as an option) |
 | 0009-ui-egui-sheets-link-click | With `sheets_keys`, a plain click on a link cell only selects it (StarSheets shows a link card) | to offer as a PR (as an option) |
+| 0017-engine-colour-scale-stops | `home.conditionalFormat` colour scales take `stops: [{type, value?, color}]` (2 or 3 points: min/max/num/percent/percentile) | to offer as a PR |
 | 0016-ui-egui-named-range-suggestions | Typing a formula also suggests the named ranges the sheet can see (any case), listed first with ▦ and what they refer to; accepting one adds no `(` | to offer as a PR |
 | 0015-ui-egui-host-menu-look | `UiState.menu_look`: a host can draw the cell and header menus with its own rows, style and dividers; Sheets wording with counts ("Insert 3 rows above", "Delete rows 3 - 5"); Sheets row/column header menus (insert below/right, clear, hide, resize, sort sheet) | to offer as a PR (as an option) |
 | 0014-model-sheets-link-colour | Default theme's link colours (hlink, folHlink) set to Sheets' blue #1155CC; files with their own theme keep theirs | StarSheets only |

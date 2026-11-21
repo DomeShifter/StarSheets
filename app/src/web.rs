@@ -85,7 +85,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default() }))
                 }),
             )
             .await;
@@ -110,6 +110,7 @@ struct WebShell {
     bottom: crate::bottom::Bottom,
     link: crate::linkcard::LinkCard,
     autolink: crate::autolink::AutoLink,
+    cf: crate::cfpanel::CfPanel,
     prefs: crate::prefs::PrefsSync,
 }
 
@@ -166,7 +167,11 @@ impl eframe::App for WebShell {
         // Our panels first, so they sit above GridCraft's formula bar and grid.
         self.shell.ui(&mut self.app, ui);
         self.bottom.ui(&mut self.app, ui);
+        // Conditional formatting opens our Sheets-style side panel, not GridCraft's dialogs.
+        self.cf.intercept(&mut self.app);
+        self.cf.ui(&mut self.app, ui);
         self.app.ui(ui);
+        self.cf.intercept(&mut self.app);
         self.autolink.after_frame(&mut self.app);
         self.link.ui(&mut self.app, ui);
     }
