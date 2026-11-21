@@ -9,6 +9,7 @@ const ICONS: &[(&str, &[u8])] = &[
     ("add_comment", include_bytes!("../icons/add_comment.svg")),
     ("arrow_drop_down", include_bytes!("../icons/arrow_drop_down.svg")),
     ("arrow_drop_down_circle", include_bytes!("../icons/arrow_drop_down_circle.svg")),
+    ("arrow_upward", include_bytes!("../icons/arrow_upward.svg")),
     ("aspect_ratio", include_bytes!("../icons/aspect_ratio.svg")),
     ("border_all", include_bytes!("../icons/border_all.svg")),
     ("border_bottom", include_bytes!("../icons/border_bottom.svg")),

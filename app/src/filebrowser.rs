@@ -192,6 +192,23 @@ impl Browser {
         let mut drop_target: Option<String> = None;
         let dragging = self.dragging.is_some();
         ui.horizontal(|ui| {
+            // Up one folder, as in Dolphin (Backspace does the same).
+            let at_top = self.cwd.is_empty();
+            let up_button = match crate::icons::icon("arrow_upward") {
+                Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(20.0, 20.0))),
+                None => egui::Button::new("Up"),
+            };
+            let up = ui.add_enabled(!at_top, up_button.frame(false).min_size(vec2(30.0, 30.0))).on_hover_text("Up one folder (Backspace)");
+            if up.clicked() {
+                self.cwd = parent_of(&self.cwd).to_string();
+                self.selected.clear();
+                self.search.clear();
+            }
+            if dragging && !at_top && up.contains_pointer() {
+                ui.painter().rect_stroke(up.rect, 4.0, Stroke::new(2.0, GREEN), egui::StrokeKind::Outside);
+                drop_target = Some(parent_of(&self.cwd).to_string());
+            }
+            ui.add_space(4.0);
             let mut parts: Vec<(String, String)> = vec![("My files".into(), String::new())];
             let mut acc = String::new();
             for p in self.cwd.split('/').filter(|p| !p.is_empty()) {
