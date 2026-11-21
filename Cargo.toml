@@ -15,6 +15,7 @@ repository = "https://github.com/DomeShifter/StarSheets"
 [workspace.dependencies]
 gridcraft-engine = { path = "upstream/gridcraft/crates/engine" }
 gridcraft-ui-egui = { path = "upstream/gridcraft/crates/ui-egui" }
+gridcraft-chart = { path = "upstream/gridcraft/crates/chart" }
 egui = "0.37"
 eframe = { version = "0.37", default-features = false }
 log = "0.4"

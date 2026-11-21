@@ -282,7 +282,7 @@ impl ChartPanel {
         }
         house::gap(ui);
         house::label(ui, "Data range", "");
-        let source = c.source.clone().unwrap_or_default();
+        let source = plain_range(app, c.source.as_deref().unwrap_or_default());
         let draft = self.range_draft.get_or_insert_with(|| source.clone());
         let r = ui.add(egui::TextEdit::singleline(draft).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("e.g. A1:D10"));
         if r.lost_focus() || (r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
@@ -296,7 +296,7 @@ impl ChartPanel {
         }
         house::gap(ui);
         house::label(ui, "X-axis", "The labels along the bottom (a range, or empty for none).");
-        let cats = c.series.first().and_then(|s| s.categories.clone()).unwrap_or_default();
+        let cats = plain_range(app, c.series.first().and_then(|s| s.categories.as_deref()).unwrap_or_default());
         let draft = self.x_draft.get_or_insert_with(|| cats.clone());
         let r = ui.add(egui::TextEdit::singleline(draft).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("e.g. A2:A10"));
         if r.lost_focus() || (r.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter))) {
@@ -478,11 +478,27 @@ fn charts(app: &SheetApp) -> Vec<Chart> {
     app.session.active().and_then(|d| d.wb.active()).map(|sh| sh.charts.clone()).unwrap_or_default()
 }
 
-/// The colour a series is drawn in: its own, else the chart palette's.
+/// The colour a series is drawn in: its own, else GridCraft's palette for the workbook's theme.
 fn series_colour(app: &SheetApp, c: &Chart, i: usize) -> Color32 {
-    let own = c.series.get(i).and_then(|s| s.color.as_ref()).and_then(|col| app.session.active().and_then(|d| crate::cfpanel::rgb_of(col, &d.wb.theme)));
-    let rgb = own.unwrap_or_else(|| [0x4285F4, 0xEA4335, 0xFBBC04, 0x34A853, 0xFF6D01, 0x46BDC6][i % 6]);
-    Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+    let Some(d) = app.session.active() else { return theme::BLUE };
+    let own = c.series.get(i).and_then(|s| s.color.as_ref()).and_then(|col| crate::cfpanel::rgb_of(col, &d.wb.theme));
+    match own {
+        Some(rgb) => Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8),
+        None => {
+            let [r, g, b, _] = gridcraft_chart::series_color(&d.wb.theme, i);
+            Color32::from_rgb(r, g, b)
+        }
+    }
+}
+
+/// A range as Sheets shows it: no `$`, and no sheet name when it's the active sheet.
+fn plain_range(app: &SheetApp, r: &str) -> String {
+    let r = r.replace('$', "");
+    let active = app.session.active().and_then(|d| d.wb.active()).map(|sh| sh.name.clone()).unwrap_or_default();
+    match r.rsplit_once('!') {
+        Some((sheet, rest)) if sheet.trim_matches('\'') == active => rest.to_string(),
+        _ => r,
+    }
 }
 
 fn set_type(app: &mut SheetApp, c: &Chart, k: usize) {
