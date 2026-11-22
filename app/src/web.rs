@@ -87,7 +87,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
                 }),
             )
             .await;
@@ -127,6 +127,7 @@ struct WebShell {
     calc: crate::calcpreview::CalcPreview,
     merge: crate::merge::MergeGuard,
     files: crate::files::Files,
+    live: crate::live::Live,
     webfonts: crate::fonts::WebFontLoader,
     prefs: crate::prefs::PrefsSync,
 }
@@ -202,6 +203,8 @@ impl eframe::App for WebShell {
         }
         // Files first: it takes Ctrl+O for its Open dialog before GridCraft's keymap sees it.
         self.files.logic(&mut self.app, ctx);
+        // Live editing: send this tab's changes, apply everyone else's (live.rs).
+        self.live.logic(&mut self.app, ctx, &self.files);
         self.files.take_imports(&mut self.app, &self.inbox, ctx);
         self.webfonts.logic(&self.app, ctx);
         crate::spelling::logic(&self.app, ctx);

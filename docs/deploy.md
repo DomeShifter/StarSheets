@@ -23,6 +23,8 @@ Spreadsheets are ordinary `.xlsx` files in `/data`, in folders as you make them 
   same host name as the app under `/api/`, or let it serve the app too with `SITE=path/to/dist`.
   It reads the same settings as the Docker image. A folder used by the older `server/files.py`
   works unchanged.
-- Live editing (coming) will use a WebSocket under `/api/`: a reverse proxy must pass
-  `Upgrade` and `Connection` headers through.
+- Live editing uses a WebSocket at `/api/live`: a reverse proxy must pass the `Upgrade` and
+  `Connection` headers through (nginx: `proxy_http_version 1.1; proxy_set_header Upgrade
+  $http_upgrade; proxy_set_header Connection "upgrade";`) and allow long-lived connections.
+  Without it the app still works and saves the usual way, one tab at a time.
 - Use HTTPS (or localhost): browsers only give full clipboard access to secure pages.

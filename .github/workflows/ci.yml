@@ -18,6 +18,8 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # Tabs and the server must run the same engine: both builds carry the commit (crates/sync).
+  STARSHEETS_BUILD: ${{ github.sha }}
   TRUNK_VERSION: v0.22.2
 
 jobs:
@@ -76,7 +78,7 @@ jobs:
       - name: Build
         run: |
           mkdir -p ~/cargo-home
-          docker run --rm -v "$PWD":/src -v ~/cargo-home:/cargo-home -e CARGO_HOME=/cargo-home -w /src rust:1.100.0-trixie bash -c '
+          docker run --rm -v "$PWD":/src -v ~/cargo-home:/cargo-home -e CARGO_HOME=/cargo-home -e STARSHEETS_BUILD -w /src rust:1.100.0-trixie bash -c '
             set -e
             apt-get update -qq && apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross >/dev/null
             rustup target add aarch64-unknown-linux-gnu
@@ -110,7 +112,7 @@ jobs:
         with:
           key: test
       - name: Test
-        run: cargo test -p starsheets -p sheets-functions -p starsheets-server
+        run: cargo test -p starsheets -p sheets-functions -p starsheets-server -p starsheets-sync
 
   release:
     name: Release (Docker image + draft release)

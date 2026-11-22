@@ -6,6 +6,13 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+### Added
+- **Live editing between tabs:** open the same spreadsheet in several tabs (or browsers) and every
+  change shows everywhere straight away. The server keeps the file and saves it; no more
+  "conflicted copy" files. Undo works on your own latest change for now (when someone has
+  changed the file since, StarSheets says so). Needs a proxy that passes WebSockets
+  (docs/deploy.md); without one the app saves the usual way.
+
 ### Changed
 - The server is now one Rust program (`starsheets-server`) instead of a Python script, the first
   step towards live editing ([docs/live-editing.md](docs/live-editing.md)). Same files, folders,

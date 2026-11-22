@@ -6,6 +6,7 @@
 //! LOCATION (how people are told where files are kept), STARSHEETS_AUTH (off = no login),
 //! STARSHEETS_PASSWORD, SITE (a built StarSheets site to serve).
 
+mod live;
 mod store;
 
 use std::collections::HashMap;
@@ -33,6 +34,7 @@ struct App {
     location: String,
     auth: bool,
     site: Option<PathBuf>,
+    rooms: live::Rooms,
 }
 
 type Shared = Arc<App>;
@@ -284,13 +286,21 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
         return error(401, "please sign in");
     }
     let if_match = headers.get(header::IF_MATCH).and_then(|v| v.to_str().ok()).map(str::to_string);
+    // A file replaced through the API (a version restored) is read again by its live room.
+    let replaced = (m == "PUT" && p.len() == 2 && p[0] == "files").then(|| p[1].clone());
+    let app2 = app.clone();
     let out = tokio::task::spawn_blocking(move || {
-        let _g = app.lock.lock().unwrap_or_else(|e| e.into_inner());
-        app.store.route(&m, &p, &q, if_match.as_deref(), &body)
+        let _g = app2.lock.lock().unwrap_or_else(|e| e.into_inner());
+        app2.store.route(&m, &p, &q, if_match.as_deref(), &body)
     })
     .await;
     match out {
-        Ok(r) => reply(r),
+        Ok(r) => {
+            if let (Some(id), Ok(Reply::Json(_, 200))) = (&replaced, &r) {
+                app.rooms.replaced(id);
+            }
+            reply(r)
+        }
         Err(_) => error(500, "server error"),
     }
 }
@@ -336,7 +346,7 @@ async fn main() {
     let port: u16 = env("PORT", "8080").parse().unwrap_or(8080);
     let auth = !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no");
     let site = Some(env("SITE", "")).filter(|s| !s.is_empty()).map(PathBuf::from);
-    let app = Arc::new(App { store, lock: Mutex::new(()), location: env("LOCATION", "the server"), auth, site });
+    let app = Arc::new(App { store, lock: Mutex::new(()), location: env("LOCATION", "the server"), auth, site, rooms: live::Rooms::default() });
     if let Err(e) = std::fs::create_dir_all(app.store.meta()) {
         eprintln!("Can't use the folder {}: {e}", app.store.root.display());
         std::process::exit(1);
@@ -349,7 +359,7 @@ async fn main() {
     } else {
         println!("Login is on. Password (set STARSHEETS_PASSWORD to choose your own): {}", password(&app));
     }
-    let router = Router::new().fallback(handle).with_state(app).layer(axum::extract::DefaultBodyLimit::disable());
+    let router = Router::new().route("/api/live", axum::routing::get(live::ws)).fallback(handle).with_state(app).layer(axum::extract::DefaultBodyLimit::disable());
     let listener = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
         Err(e) => {

@@ -89,11 +89,17 @@ impl Prefs {
     /// Hands the locale to GridCraft's input reader and number display.
     pub fn apply(&self, app: &mut SheetApp) {
         let (_, day_first, ..) = LOCALES[self.locale.min(LOCALES.len() - 1)];
-        let datetime = format!("{} {}", self.date, self.time);
-        let number = (!self.number.is_empty()).then_some(self.number.as_str());
-        gridcraft_engine::core::parse::set_input_locale(day_first, Some(&self.date), Some(&self.time), Some(&datetime), number);
         let (_, decimal, group) = SEPARATORS[self.separators.min(SEPARATORS.len() - 1)];
-        gridcraft_engine::core::parse::set_number_separators(decimal, group);
+        // Through the sync crate, which remembers it: live editing sends it with each change.
+        starsheets_sync::InputLocale {
+            day_first,
+            date: self.date.clone(),
+            time: self.time.clone(),
+            number: (!self.number.is_empty()).then(|| self.number.clone()),
+            decimal: Some(decimal),
+            group: Some(group),
+        }
+        .apply();
         let _ = app;
         DEFAULTS.with(|d| *d.borrow_mut() = (self.date.clone(), self.time.clone()));
     }

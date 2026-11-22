@@ -306,9 +306,18 @@ impl Store {
         }
         let folder = self.versions().join(fid);
         fs::create_dir_all(&folder)?;
-        // Milliseconds before the random part keep versions saved within one second in order.
+        // Names sort in the order the versions were made, also several within one millisecond:
+        // a name that wouldn't sort after the newest one takes the newest name plus "z".
         let ms = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.subsec_millis()).unwrap_or(0);
-        fs::copy(path, folder.join(format!("{}-{ms:03}{}.xlsx", stamp(), &random_hex(1)[..1])))?;
+        let mut existing: Vec<String> = fs::read_dir(&folder)?.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        existing.sort();
+        let mut stem = format!("{}-{ms:03}0", stamp());
+        if let Some(last) = existing.last().map(|l| l.trim_end_matches(".xlsx"))
+            && stem.as_str() <= last
+        {
+            stem = format!("{last}z");
+        }
+        fs::copy(path, folder.join(format!("{stem}.xlsx")))?;
         let mut old: Vec<_> = fs::read_dir(&folder)?.flatten().map(|e| e.file_name()).collect();
         old.sort();
         let drop = old.len().saturating_sub(self.keep);

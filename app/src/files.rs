@@ -94,6 +94,11 @@ pub struct Files {
 }
 
 impl Files {
+    /// The open file on the server: (document uid, file id).
+    pub fn linked(&self) -> Option<(u64, String)> {
+        self.link.as_ref().map(|l| (l.doc, l.id.clone()))
+    }
+
     pub fn logic(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         // A new workbook is "Untitled spreadsheet", as in Sheets (GridCraft calls it Book1). The
         // workbook appears after the first frames, so this is checked every frame.
@@ -142,9 +147,20 @@ impl Files {
         }
         self.autosave(app, ctx);
         self.rename_if_needed(app, ctx);
-        let unsaved = self.busy || app.session.active().is_some_and(|d| self.needs_save(d));
+        let live = app.session.active().and_then(|d| crate::live::status_for(d.uid));
+        let unsaved = match &live {
+            Some(l) => l.unsaved,
+            None => self.busy || app.session.active().is_some_and(|d| self.needs_save(d)),
+        };
         set_unsaved_flag(unsaved);
-        let status = if let Some(e) = &self.error {
+        if let (Some(l), Some(link)) = (&live, &mut self.link)
+            && let Some(at) = l.saved_at
+        {
+            link.saved = at;
+        }
+        let status = if let Some(l) = live {
+            l.text
+        } else if let Some(e) = &self.error {
             format!("Not saved: {e}")
         } else if unsaved {
             "Saving…".to_string()
@@ -356,6 +372,10 @@ impl Files {
     fn autosave(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         let now = gridcraft_ui_egui::monotonic_ms();
         let Some(d) = app.session.active() else { return };
+        // A file open for live editing is saved by the server.
+        if crate::live::handles(d.uid) {
+            return;
+        }
         let key = (d.uid, Arc::as_ptr(&d.wb) as usize);
         if self.seen != Some(key) {
             self.seen = Some(key);

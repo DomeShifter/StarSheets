@@ -44,6 +44,7 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0036-ui-egui-spell-check-hook | `spelling::set`: a host word check; the cell editor underlines unknown words in red while editing plain text (not formulas, not the word being typed) | could help upstream |
 | 0037-core-number-separators-exponent | Follow-up to 0033: a number typed with the host decimal mark may have an exponent ("1,5E+20") | with 0033 |
 | 0038-core-number-separators-per-thread | Follow-up to 0033: the separators are per thread (one in the web app; parallel tests stay independent) | with 0033 |
+| 0039-engine-sync-log | `Session::sync_log`: each top-level command that changed a workbook, with its sheet, selection and the workbook before and after, for live editing | yes, as an optional hook |
 | 0002-ui-egui-theme-token-override | `Tokens::install` / `Tokens::for_mode`: a host can replace the colour palettes | to offer as a PR |
 | 0003-ui-egui-chrome-sheet-tabs-switch | `Chrome.sheet_tabs: bool`: a host can hide the sheet tabs and status bar | to offer as a PR |
 | 0004-ui-egui-sheets-cell-keys | `UiState.sheets_keys`: Enter edits (and is consumed so the new editor doesn't commit at once), Backspace only clears, no Enter-paste, static copy outline | to offer as a PR (as an option) |

@@ -250,14 +250,14 @@ def version_order():
     try:
         _, _, data = s.call("POST", "/api/files?name=V", b"v1")
         fid = json.loads(data)["id"]
-        for body in (b"v2", b"v3", b"v4", b"v5"):
+        for body in (b"v2", b"v3", b"v4", b"v5", b"v6", b"v7", b"v8"):
             s.call("PUT", f"/api/files/{fid}", body)
         vs = json.loads(s.call("GET", f"/api/files/{fid}/versions")[2])
         got = [s.call("GET", f"/api/files/{fid}/versions/{v['v']}")[2] for v in vs]
     finally:
         s.stop()
         shutil.rmtree(base)
-    ok = got == [b"v4", b"v3"]
+    ok = got == [b"v7", b"v6"]
     print(f"version order: {'right' if ok else f'WRONG {got}'}")
     return 0 if ok else 1
 
