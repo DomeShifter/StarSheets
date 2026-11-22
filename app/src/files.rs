@@ -87,6 +87,11 @@ pub struct Files {
 }
 
 impl Files {
+    /// The open file's folder on the server, if it is on the server.
+    pub fn folder(&self) -> Option<String> {
+        self.link.as_ref().map(|l| l.folder.clone())
+    }
+
     /// The open file on the server: (document uid, file id).
     pub fn linked(&self) -> Option<(u64, String)> {
         self.link.as_ref().map(|l| (l.doc, l.id.clone()))
@@ -119,6 +124,10 @@ impl Files {
         let replies: Vec<Reply> = std::mem::take(&mut *self.inbox.borrow_mut());
         for r in replies {
             self.handle(app, ctx, r);
+        }
+        if let (Some((name, folder)), Some(l)) = (crate::live::take_moved(), self.link.as_mut()) {
+            l.name = name;
+            l.folder = folder;
         }
         // While the file window is open it takes its keys before the grid sees them.
         if self.browser.open && !self.browser.typing() && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::new("starsheets_files_search")) {
@@ -182,6 +191,14 @@ impl Files {
                 open_url(&format!("{}?new=1", page_url("")));
             }
             // The home screen, in this file's folder.
+            // The Files button: the home screen in a new tab, at this file's folder.
+            "home_tab" => {
+                let url = match self.link.as_ref().filter(|l| !l.folder.is_empty()) {
+                    Some(l) => format!("{}?dir={}", page_url(""), enc(&l.folder)),
+                    None => page_url(""),
+                };
+                open_url(&url);
+            }
             "home" => match self.link.as_ref().filter(|l| !l.folder.is_empty()) {
                 Some(l) => {
                     if let Some(w) = web_sys::window() {

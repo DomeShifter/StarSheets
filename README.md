@@ -35,7 +35,7 @@ comments with mentions, add-ons, and desktop apps. See the [roadmap](ROADMAP.md)
 ## Try it with Docker
 
 ```sh
-docker run -d --name starsheets -p 8080:8080 -v starsheets:/data ghcr.io/domeshifter/starsheets:latest
+docker run -d --name starsheets --restart unless-stopped -p 8080:8080 -v starsheets:/data ghcr.io/domeshifter/starsheets:latest
 docker logs starsheets   # shows the setup code
 ```
 

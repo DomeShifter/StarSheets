@@ -51,6 +51,8 @@ struct FileRow {
     starred: bool,
     shared: bool,
     opened: Option<i64>,
+    /// Who saved the last change (username), when known.
+    changed_by: String,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -98,6 +100,8 @@ enum Reply {
     NewFolder(String),
     Thumb(String, String, Option<egui::ColorImage>),
     Download(String, Vec<u8>),
+    /// Who has access to the item in Details.
+    Access(Item, Json),
     Error(String),
 }
 
@@ -145,7 +149,13 @@ pub struct Home {
     forward: Vec<View>,
     expanded: HashSet<String>,
     list: bool,
-    by_date: bool,
+    /// Sort: by (0 name, 1 date modified, 2 size), Z–A / newest / largest first, and whether
+    /// folders are mixed in with files instead of kept at the top.
+    sort_by: u8,
+    descending: bool,
+    mixed: bool,
+    /// Details: the item shown, and who has access to it (from the server) once known.
+    details: Option<(Item, Option<Json>)>,
     search: String,
     selected: Vec<Item>,
     anchor: Option<Item>,
@@ -302,6 +312,7 @@ impl Home {
                 starred: f["starred"].as_bool().unwrap_or(false),
                 shared: f["shared"].as_bool().unwrap_or(false),
                 opened: f["opened"].as_i64(),
+                changed_by: s(f, "changed_by"),
             })
             .collect();
         let info = v["folder_info"].as_object().cloned().unwrap_or_default();
@@ -460,14 +471,102 @@ impl Home {
         self.sorted(folders, files)
     }
 
-    fn sorted(&self, mut folders: Vec<FolderRow>, mut files: Vec<FileRow>) -> (Vec<FolderRow>, Vec<FileRow>) {
-        if self.by_date {
-            files.sort_by_key(|f| std::cmp::Reverse(f.modified));
-        } else {
-            files.sort_by_key(|f| f.name.to_lowercase());
+    /// Newest change and total size of everything in a folder (for sorting folders by date/size).
+    fn folder_stats(&self, path: &str) -> (i64, u64) {
+        let inside = self.files.iter().filter(|f| under(&f.folder, path));
+        inside.fold((0, 0), |(t, s), f| (t.max(f.modified), s + f.size))
+    }
+
+    /// What an item sorts by (name, date or size), as a comparable key.
+    fn sort_key(&self, item: &Item) -> (i64, u64, String) {
+        let (name, date, size) = match item {
+            Item::Folder(p) => {
+                let (d, s) = self.folder_stats(p);
+                (self.folder_label(p), d, s)
+            }
+            Item::File(id) => self.file(id).map_or((String::new(), 0, 0), |f| (f.name.clone(), f.modified, f.size)),
+        };
+        match self.sort_by {
+            1 => (date, 0, name.to_lowercase()),
+            2 => (0, size, name.to_lowercase()),
+            _ => (0, 0, name.to_lowercase()),
         }
-        folders.sort_by_key(|f| name_of(&f.path).to_lowercase());
-        (folders, files)
+    }
+
+    fn sort_items(&self, items: &mut [Item]) {
+        items.sort_by_cached_key(|i| self.sort_key(i));
+        if self.descending {
+            items.reverse();
+        }
+    }
+
+    fn sorted(&self, folders: Vec<FolderRow>, files: Vec<FileRow>) -> (Vec<FolderRow>, Vec<FileRow>) {
+        let mut fo: Vec<Item> = folders.iter().map(|f| Item::Folder(f.path.clone())).collect();
+        let mut fi: Vec<Item> = files.iter().map(|f| Item::File(f.id.clone())).collect();
+        self.sort_items(&mut fo);
+        self.sort_items(&mut fi);
+        let fo = fo.iter().filter_map(|i| if let Item::Folder(p) = i { folders.iter().find(|f| f.path == *p).cloned() } else { None }).collect();
+        let fi = fi.iter().filter_map(|i| if let Item::File(id) = i { files.iter().find(|f| f.id == *id).cloned() } else { None }).collect();
+        (fo, fi)
+    }
+
+    /// Everything shown, in the order shown: folders first (the default) or mixed in by the sort.
+    fn shown(&self, folders: &[FolderRow], files: &[FileRow]) -> Vec<Item> {
+        let mut items: Vec<Item> = folders.iter().map(|f| Item::Folder(f.path.clone())).chain(files.iter().map(|f| Item::File(f.id.clone()))).collect();
+        if self.mixed && self.view != Some(View::Recent) {
+            self.sort_items(&mut items);
+        }
+        items
+    }
+
+    fn save_sort(&self) {
+        store("starsheets_home_sort", &format!("{}{}{}", self.sort_by, u8::from(self.descending), u8::from(self.mixed)));
+    }
+
+    /// The Sort menu: Sort by, Sort direction, Folders at top.
+    fn sort_menu(&mut self, ui: &mut Ui) {
+        let label = RichText::new("Sort").size(house::BODY).color(theme::TEXT);
+        let b = match crate::icons::icon("sort") {
+            Some(img) => egui::Button::image_and_text(img.fit_to_exact_size(vec2(20.0, 20.0)), label),
+            None => egui::Button::new(label),
+        };
+        let r = ui.add(b.fill(Color32::WHITE).stroke(Stroke::new(1.0, theme::BOX)).corner_radius(16).min_size(vec2(88.0, 32.0)));
+        egui::Popup::menu(&r).show(|ui| {
+            house::menu(ui, 240.0);
+            let tick = |on: bool| Some(if on { "check" } else { "" });
+            house::menu_inset(ui, |ui| house::caps(ui, "Sort by"));
+            for (i, l) in ["Name", "Date modified", "Size"].iter().enumerate() {
+                if house::menu_row(ui, tick(self.sort_by == i as u8), l, "", true) {
+                    // Dates and sizes read best newest / largest first.
+                    if self.sort_by != i as u8 {
+                        self.descending = i != 0;
+                    }
+                    self.sort_by = i as u8;
+                    self.save_sort();
+                }
+            }
+            house::menu_sep(ui);
+            house::menu_inset(ui, |ui| house::caps(ui, "Sort direction"));
+            let (up, down) = match self.sort_by {
+                1 => ("Oldest first", "Newest first"),
+                2 => ("Smallest first", "Largest first"),
+                _ => ("A–Z", "Z–A"),
+            };
+            if house::menu_row(ui, tick(!self.descending), up, "", true) {
+                self.descending = false;
+                self.save_sort();
+            }
+            if house::menu_row(ui, tick(self.descending), down, "", true) {
+                self.descending = true;
+                self.save_sort();
+            }
+            house::menu_sep(ui);
+            let box_icon = if self.mixed { "check_box_outline_blank" } else { "check_box" };
+            if house::menu_row(ui, Some(box_icon), "Folders at top", "", true) {
+                self.mixed = !self.mixed;
+                self.save_sort();
+            }
+        });
     }
 
     fn title(&self) -> Vec<(String, Option<View>)> {
@@ -512,6 +611,12 @@ impl Home {
         if !self.booted {
             self.booted = true;
             self.list = stored("starsheets_home_list") == Some("1".into());
+            if let Some(s) = stored("starsheets_home_sort").filter(|s| s.len() == 3) {
+                let b = s.as_bytes();
+                self.sort_by = (b[0] - b'0').min(2);
+                self.descending = b[1] == b'1';
+                self.mixed = b[2] == b'1';
+            }
             self.open_dir = query("dir").filter(|d| !d.is_empty());
             self.refresh(ctx);
         }
@@ -536,6 +641,13 @@ impl Home {
                         None => Thumb::None,
                     };
                     self.thumbs.insert(id, (version, t));
+                }
+                Reply::Access(item, v) => {
+                    if let Some((i, a)) = self.details.as_mut()
+                        && *i == item
+                    {
+                        *a = Some(v);
+                    }
                 }
                 Reply::Download(name, bytes) => {
                     if let Err(e) = crate::web::download_file(&name, &bytes) {
@@ -592,6 +704,7 @@ impl Home {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::WHITE).corner_radius(egui::CornerRadius { nw: 16, ..Default::default() }).inner_margin(egui::Margin { left: 24, right: 16, top: 16, bottom: 0 })).show(ui, |ui| self.main_ui(ui));
         self.drag_ui(&ctx);
         self.move_to_ui(&ctx);
+        self.details_ui(&ctx);
         self.pending_move_ui(&ctx);
         self.keys(&ctx);
     }
@@ -604,11 +717,12 @@ impl Home {
             ui.add_space(house::S);
             ui.label(RichText::new("StarSheets").size(22.0).color(theme::TEXT));
             ui.add_space(LEFT - 190.0);
-            let search = egui::TextEdit::singleline(&mut self.search)
+            let search = house::field(&mut self.search, house::SEARCH_TEXT)
                 .id(egui::Id::new("home_search"))
-                .hint_text("Search in StarSheets")
-                .font(FontId::proportional(16.0))
+                .hint_text(RichText::new("Search in StarSheets").size(house::SEARCH_TEXT))
                 .frame(egui::Frame::NONE)
+                .margin(vec2(0.0, 0.0))
+                .min_size(vec2(0.0, 24.0))
                 .desired_width((ui.available_width() - 140.0).clamp(200.0, 700.0));
             let w = (ui.available_width() - 100.0).clamp(220.0, 740.0);
             ui.allocate_ui_with_layout(vec2(w, 48.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -874,10 +988,7 @@ impl Home {
                     store("starsheets_home_list", "1");
                 }
                 ui.add_space(house::S);
-                let mut pick = usize::from(self.by_date);
-                if house::select(ui, "home_sort", 170.0, &mut pick, &["Name", "Last modified"], &[]) {
-                    self.by_date = pick == 1;
-                }
+                self.sort_menu(ui);
             });
         });
         if let Some(e) = self.error.clone() {
@@ -913,8 +1024,28 @@ impl Home {
                 ui.add_space(house::XL);
                 ui.label(RichText::new(empty).size(house::BODY).color(theme::TEXT_DIM));
             }
+            let order = self.shown(&folders, &files);
             if self.list {
-                self.list_ui(ui, &folders, &files, &mut clicked_item);
+                self.list_ui(ui, &order, &mut clicked_item);
+            } else if self.mixed && self.view != Some(View::Recent) {
+                // Folders mixed in with files: everything as cards, in the sort's order.
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing = vec2(house::M, house::M);
+                    for item in &order {
+                        match item {
+                            Item::Folder(p) => {
+                                if let Some(f) = folders.iter().find(|f| f.path == *p).cloned() {
+                                    self.folder_card(ui, &f, &mut clicked_item);
+                                }
+                            }
+                            Item::File(id) => {
+                                if let Some(f) = files.iter().find(|f| f.id == *id).cloned() {
+                                    self.file_card(ui, &ctx, &f, &mut clicked_item);
+                                }
+                            }
+                        }
+                    }
+                });
             } else {
                 if !folders.is_empty() {
                     house::caps(ui, "Folders");
@@ -998,7 +1129,7 @@ impl Home {
 
     fn order(&self) -> Vec<Item> {
         let (folders, files) = self.contents();
-        folders.into_iter().map(|f| Item::Folder(f.path)).chain(files.into_iter().map(|f| Item::File(f.id))).collect()
+        self.shown(&folders, &files)
     }
 
     /// Common handling of a folder or file shown anywhere: select, open, drag, menu, drop.
@@ -1054,6 +1185,30 @@ impl Home {
         }
         let hover = if self.accounts && f.owner != self.space { format!("{} · {}", name_of(&f.path), self.person(&f.owner)) } else { name_of(&f.path).to_string() };
         let resp = resp.on_hover_text(hover);
+        self.interact(ui, &item, &resp, clicked_item);
+    }
+
+    /// A folder the size of a file card (when folders are mixed in with files).
+    fn folder_card(&mut self, ui: &mut Ui, f: &FolderRow, clicked_item: &mut bool) {
+        let item = Item::Folder(f.path.clone());
+        let (r, resp) = ui.allocate_exact_size(vec2(CARD_W, CARD_H), Sense::click_and_drag());
+        let sel = self.selected.contains(&item);
+        let p = ui.painter().clone();
+        p.rect_filled(r, 12, if sel { theme::SHARE } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
+        let pic = Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(CARD_W - 16.0, PIC_H - 8.0));
+        p.rect_filled(pic, 6, Color32::WHITE);
+        folder_icon(ui, f, Rect::from_center_size(pic.center(), vec2(64.0, 64.0)));
+        let line = Rect::from_min_max(egui::pos2(r.left() + 8.0, r.top() + PIC_H), r.max - vec2(8.0, 4.0));
+        folder_icon(ui, f, Rect::from_center_size(egui::pos2(line.left() + 10.0, line.top() + 16.0), vec2(18.0, 18.0)));
+        if !self.renaming_ui(ui, &item, Rect::from_min_size(egui::pos2(line.left() + 26.0, line.top() + 4.0), vec2(line.width() - 30.0, 26.0))) {
+            let name = p.layout_no_wrap(self.folder_label(&f.path), FontId::proportional(14.0), theme::TEXT);
+            let clip = Rect::from_min_size(egui::pos2(line.left() + 28.0, line.top() + 6.0), vec2(line.width() - 52.0, 20.0));
+            p.with_clip_rect(clip).galley(clip.min, name, theme::TEXT);
+        }
+        let (newest, _) = self.folder_stats(&f.path);
+        let sub = if newest > 0 { format!("Folder · {}", ago(newest)) } else { "Folder".into() };
+        p.text(egui::pos2(line.left() + 28.0, line.top() + 36.0), Align2::LEFT_CENTER, sub, FontId::proportional(12.0), theme::TEXT_DIM);
+        let resp = resp.on_hover_text(self.folder_label(&f.path));
         self.interact(ui, &item, &resp, clicked_item);
     }
 
@@ -1114,7 +1269,7 @@ impl Home {
         self.interact(ui, &item, &resp, clicked_item);
     }
 
-    fn list_ui(&mut self, ui: &mut Ui, folders: &[FolderRow], files: &[FileRow], clicked_item: &mut bool) {
+    fn list_ui(&mut self, ui: &mut Ui, order: &[Item], clicked_item: &mut bool) {
         let w = ui.available_width() - 8.0;
         let (h, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
         let cols = [(0.0, "Name"), (w * 0.52, if self.accounts { "Owner" } else { "" }), (w * 0.70, "Last modified"), (w - 90.0, "Size")];
@@ -1122,10 +1277,15 @@ impl Home {
             ui.painter().text(h.left_center() + vec2(x + if x == 0.0 { 44.0 } else { 0.0 }, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), theme::TEXT_DIM);
         }
         ui.painter().hline(h.x_range(), h.bottom(), Stroke::new(1.0, theme::DIVIDER));
-        let rows: Vec<(Item, String, String, String, i64, Option<u64>, bool, bool)> = folders
+        let rows: Vec<(Item, String, String, String, i64, Option<u64>, bool, bool)> = order
             .iter()
-            .map(|f| (Item::Folder(f.path.clone()), self.folder_label(&f.path), if f.shared { "folder_shared".into() } else { "folder".into() }, f.owner.clone(), 0, None, f.starred, f.shared))
-            .chain(files.iter().map(|f| (Item::File(f.id.clone()), f.name.clone(), "starsheets".into(), f.owner.clone(), f.modified, Some(f.size), f.starred, f.shared)))
+            .filter_map(|item| match item {
+                Item::Folder(p) => self.folder(p).map(|f| {
+                    let (newest, size) = self.folder_stats(&f.path);
+                    (item.clone(), self.folder_label(&f.path), if f.shared { "folder_shared".into() } else { "folder".into() }, f.owner.clone(), newest, Some(size), f.starred, f.shared)
+                }),
+                Item::File(id) => self.file(id).map(|f| (item.clone(), f.name.clone(), "starsheets".into(), f.owner.clone(), f.modified, Some(f.size), f.starred, f.shared)),
+            })
             .collect();
         for (item, name, icon, owner, modified, size, starred, _) in rows {
             let (r, resp) = ui.allocate_exact_size(vec2(w, ROW), Sense::click_and_drag());
@@ -1170,7 +1330,7 @@ impl Home {
         let te = ui
             .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 house::form_style(ui);
-                ui.add_sized(rect.size(), egui::TextEdit::singleline(text).font(FontId::proportional(house::BODY)).margin(vec2(house::S, house::XS)))
+                ui.add_sized(rect.size(), house::field(text, house::BODY))
             })
             .inner;
         if *focus {
@@ -1288,6 +1448,10 @@ impl Home {
                 call(&self.inbox, ui.ctx(), Method::Get, format!("api/files/{id}"), None, move |b| Reply::Download(name, b));
                 ui.close();
             }
+        }
+        if row(ui, "info", "Details", "", single) {
+            self.show_details(ui.ctx(), item.clone());
+            ui.close();
         }
         house::menu_sep(ui);
         if row(ui, "content_copy", "Copy", "Ctrl+C", !is_space) {
@@ -1535,6 +1699,141 @@ impl Home {
         }
     }
 
+    fn show_details(&mut self, ctx: &egui::Context, item: Item) {
+        self.details = Some((item.clone(), None));
+        if self.accounts && !matches!(&item, Item::Folder(p) if !p.contains('/')) {
+            let url = match &item {
+                Item::File(id) => format!("api/files/{id}/sharing"),
+                Item::Folder(p) => format!("api/folders/sharing?path={}", enc(p)),
+            };
+            call(&self.inbox, ctx, Method::Get, url, None, move |b| Reply::Access(item, serde_json::from_slice(&b).unwrap_or_default()));
+        }
+    }
+
+    /// Where a path is, in words: "My files › Budgets", "Ada's files › Team".
+    fn place(&self, folder: &str) -> String {
+        let top = space_of(folder);
+        let mut parts = vec![if !self.accounts { "All files".to_string() } else if top == self.space { "My files".into() } else { format!("{}'s files", self.person(top)) }];
+        parts.extend(folder.split('/').skip(usize::from(self.accounts)).filter(|p| !p.is_empty()).map(str::to_string));
+        parts.join(" › ")
+    }
+
+    /// Details: what it is, where, whose, how big, when it changed and by whom, who can open it.
+    fn details_ui(&mut self, ctx: &egui::Context) {
+        let Some((item, access)) = self.details.clone() else { return };
+        let mut rows: Vec<(&str, String)> = Vec::new();
+        let title;
+        match &item {
+            Item::File(id) => {
+                let Some(f) = self.file(id).cloned() else {
+                    self.details = None;
+                    return;
+                };
+                title = f.name.clone();
+                let ext = f.name.rsplit_once('.').map_or("xlsx".to_string(), |(_, e)| e.to_lowercase());
+                rows.push(("Type", format!("Spreadsheet (.{ext})")));
+                rows.push(("Location", self.place(&f.folder)));
+                if self.accounts {
+                    rows.push(("Owner", if f.owner == self.space { "You".into() } else { self.person(&f.owner) }));
+                }
+                rows.push(("Size", size_text(f.size)));
+                let by = if f.changed_by.is_empty() { String::new() } else if f.changed_by == self.space { " by you".into() } else { format!(" by {}", self.person(&f.changed_by)) };
+                rows.push(("Modified", format!("{}{by}", ago(f.modified))));
+                if let Some(t) = f.opened {
+                    rows.push(("Opened by you", ago(t)));
+                }
+                if self.accounts {
+                    rows.push(("Your access", match f.role.as_str() { "owner" => "Owner", "edit" => "Can edit", _ => "Can view" }.into()));
+                }
+            }
+            Item::Folder(p) => {
+                let Some(f) = self.folder(p).cloned() else {
+                    self.details = None;
+                    return;
+                };
+                title = self.folder_label(p);
+                rows.push(("Type", "Folder".into()));
+                if p.contains('/') || !self.accounts {
+                    rows.push(("Location", self.place(parent_of(p))));
+                }
+                if self.accounts {
+                    rows.push(("Owner", if f.owner == self.space { "You".into() } else { self.person(&f.owner) }));
+                }
+                let files = self.files.iter().filter(|x| under(&x.folder, p)).count();
+                let folders = self.folders.iter().filter(|x| x.path != *p && under(&x.path, p)).count();
+                let plural = |n: usize, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
+                rows.push(("Contains", format!("{}, {}", plural(files, "spreadsheet"), plural(folders, "folder"))));
+                let (newest, size) = self.folder_stats(p);
+                rows.push(("Size", size_text(size)));
+                if newest > 0 {
+                    rows.push(("Last change inside", ago(newest)));
+                }
+                if let Some(c) = f.colour {
+                    let name = house::FOLDER_COLOURS.iter().find(|(_, x)| *x == c).map_or("", |(n, _)| *n);
+                    rows.push(("Colour (only you see it)", name.to_string()));
+                }
+            }
+        }
+        // Who has access: the owner, the people it's shared with, and the link setting.
+        let mut access_lines: Vec<String> = Vec::new();
+        if let Some(a) = &access {
+            for person in a["people"].as_array().into_iter().flatten() {
+                let role = match person["role"].as_str().unwrap_or("") {
+                    "owner" => "owner",
+                    "edit" => "can edit",
+                    _ => "can view",
+                };
+                access_lines.push(format!("{} ({role})", person["name"].as_str().unwrap_or("")));
+            }
+            match a["link"].as_str().unwrap_or("none") {
+                "view" => access_lines.push("Anyone signed in with the link can view".into()),
+                "edit" => access_lines.push("Anyone signed in with the link can edit".into()),
+                _ => {}
+            }
+        }
+        let mut close = false;
+        let mut done = false;
+        let mut share = false;
+        house::dialog(ctx, "home_details", 480.0, &title, Some(&mut close), |ui| {
+            egui::Grid::new("home_details_grid").num_columns(2).spacing(vec2(house::L, house::S)).show(ui, |ui| {
+                for (k, v) in &rows {
+                    ui.label(RichText::new(*k).size(house::BODY).color(theme::TEXT_DIM));
+                    ui.label(RichText::new(v).size(house::BODY).color(theme::TEXT));
+                    ui.end_row();
+                }
+                if self.accounts && !matches!(&item, Item::Folder(p) if !p.contains('/')) {
+                    ui.label(RichText::new("Who has access").size(house::BODY).color(theme::TEXT_DIM));
+                    ui.vertical(|ui| {
+                        if access.is_none() {
+                            ui.label(RichText::new("Loading…").size(house::BODY).color(theme::TEXT_DIM));
+                        }
+                        for l in &access_lines {
+                            ui.label(RichText::new(l).size(house::BODY).color(theme::TEXT));
+                        }
+                    });
+                    ui.end_row();
+                }
+            });
+            let can_share = self.accounts && self.role_of(&item) == "owner" && !matches!(&item, Item::Folder(p) if !p.contains('/'));
+            let labels: &[&str] = if can_share { &["Share…", "Close"] } else { &["Close"] };
+            match house::actions(ui, labels) {
+                Some(0) if can_share => share = true,
+                Some(_) => done = true,
+                None => {}
+            }
+        });
+        if share {
+            let (folder, key) = match &item {
+                Item::Folder(p) => (true, p.clone()),
+                Item::File(id) => (false, id.clone()),
+            };
+            crate::share::share_item(ctx, folder, &key, &title);
+            self.details = None;
+        } else if close || done || ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.details = None;
+        }
+    }
+
     fn pending_move_ui(&mut self, ctx: &egui::Context) {
         let Some(pm) = &self.pending_move else { return };
         let who = self.person(&pm.owner);
@@ -1617,7 +1916,7 @@ impl Home {
     fn keys(&mut self, ctx: &egui::Context) {
         self.mouse_buttons();
         Self::keep_listening(ctx);
-        if self.renaming.is_some() || ctx.memory(|m| m.focused()).is_some() || self.pending_move.is_some() || self.move_to.is_some() {
+        if self.renaming.is_some() || ctx.memory(|m| m.focused()).is_some() || self.pending_move.is_some() || self.move_to.is_some() || self.details.is_some() {
             return;
         }
         let events = ctx.input(|i| i.events.clone());

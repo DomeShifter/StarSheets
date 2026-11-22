@@ -213,3 +213,27 @@ fn undo_is_refused_when_someone_changed_those_cells_or_the_layout() {
     step(&mut s, "cell.set", json!({"cell": "E5", "input": "later"}));
     assert!(undo_cells(&b3, &a3, &wb(&s)).is_ok());
 }
+
+#[test]
+fn a_sheet_copied_to_another_workbook_keeps_its_look() {
+    use gridcraft_engine::Session;
+    let mut a = Session::new();
+    a.execute("file.new", serde_json::json!({})).unwrap();
+    a.execute("cell.set", serde_json::json!({"cell": "A1", "input": "Bold one"})).unwrap();
+    a.execute("selection.set", serde_json::json!({"range": "A1"})).unwrap();
+    a.execute("home.bold", serde_json::json!({})).unwrap();
+    let src = a.active().unwrap().wb.clone();
+    let mut b = Session::new();
+    b.execute("file.new", serde_json::json!({})).unwrap();
+    // Give the target a few styles of its own first, so ids differ.
+    b.execute("selection.set", serde_json::json!({"range": "C3"})).unwrap();
+    b.execute("home.italic", serde_json::json!({})).unwrap();
+    let mut dst = (*b.active().unwrap().wb).clone();
+    let name = crate::copy_sheet_into(&src, 0, &mut dst).unwrap();
+    assert_eq!(name, format!("{} (2)", src.sheets[0].name), "same name gets a number");
+    let copied = dst.sheets.last().unwrap();
+    let c = gridcraft_engine::core::CellRef { row: 0, col: 0 };
+    assert!(dst.styles.get(copied.style_id(c)).font.bold, "bold survives the move");
+    assert!(!dst.styles.get(copied.style_id(c)).font.italic);
+    assert_ne!(copied.uid.get(), src.sheets[0].uid.get(), "a new identity");
+}

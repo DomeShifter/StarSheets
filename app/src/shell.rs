@@ -775,8 +775,8 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             #[cfg(target_arch = "wasm32")]
             {
                 ui.add_space(8.0);
-                if ui.add(files_button).on_hover_text("Your files and folders").clicked() {
-                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "home".to_string()));
+                if ui.add(files_button).on_hover_text("Your files and folders, in a new tab").clicked() {
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "home_tab".to_string()));
                 }
                 ui.add_space(8.0);
                 crate::account::others_ui(ui);

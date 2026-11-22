@@ -73,6 +73,9 @@ pub enum ToClient {
     Saved { at: i64 },
     /// Something to tell the person ("Can't undo: …").
     Message { text: String },
+    /// The file was renamed or moved (by anyone, here or elsewhere): its name and folder now.
+    /// `binned`: it went to the bin (changes aren't saved until it's restored).
+    Moved { name: String, folder: String, binned: bool },
     /// The tab runs a different build than the server: reload the page.
     Reload,
     /// Everyone who has the file open now (this tab included).
@@ -419,3 +422,46 @@ pub fn fingerprint(wb: &Workbook) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// Copies sheet `index` of `src` to the end of `dst` (another workbook): cell, row and column
+/// formats are added to `dst`'s own style list, the copy gets a free name ("Name (2)" when taken),
+/// a new id, and table names that don't clash. Formulas that point at other sheets keep their
+/// text (they may show #REF! where those sheets don't exist), as in Sheets. Returns its name.
+pub fn copy_sheet_into(src: &Workbook, index: usize, dst: &mut Workbook) -> Option<String> {
+    use gridcraft_engine::model::StyleId;
+    let mut sheet: Sheet = (**src.sheets.get(index)?).clone();
+    let mut map: std::collections::HashMap<StyleId, StyleId> = std::collections::HashMap::new();
+    let mut remap = |id: StyleId, dst: &mut Workbook| *map.entry(id).or_insert_with(|| if id == StyleId::DEFAULT { StyleId::DEFAULT } else { dst.styles.intern(src.styles.get(id).clone()) });
+    let styled: Vec<(gridcraft_engine::core::CellRef, StyleId)> = sheet.cells.iter().filter(|(_, c)| c.style != StyleId::DEFAULT).map(|(r, c)| (r, c.style)).collect();
+    for (r, id) in styled {
+        let new = remap(id, dst);
+        sheet.set_style(r, new);
+    }
+    for line in sheet.rows.values_mut().chain(sheet.cols.values_mut()) {
+        if let Some(id) = line.style {
+            line.style = Some(remap(id, dst));
+        }
+    }
+    let taken = |n: &str, dst: &Workbook| dst.sheets.iter().any(|s| s.name.eq_ignore_ascii_case(n));
+    let base: String = sheet.name.chars().take(26).collect();
+    let mut name = sheet.name.clone();
+    let mut k = 2;
+    while taken(&name, dst) {
+        name = format!("{base} ({k})");
+        k += 1;
+    }
+    sheet.name = name.clone();
+    sheet.uid = gridcraft_engine::model::SheetUid::fresh();
+    let tables: Vec<String> = dst.sheets.iter().flat_map(|s| s.tables.iter().map(|t| t.name.to_lowercase())).collect();
+    for t in &mut sheet.tables {
+        let mut n = t.name.clone();
+        let mut k = 2;
+        while tables.contains(&n.to_lowercase()) {
+            n = format!("{}_{k}", t.name);
+            k += 1;
+        }
+        t.name = n;
+    }
+    dst.sheets.push(Arc::new(sheet));
+    Some(name)
+}

@@ -385,6 +385,18 @@ impl Bottom {
             app.run_or_alert("sheet.move", json!({ "sheet": s, "to": s + 1, "copy": true }));
             ui.close();
         }
+        // Copy to ▸ New spreadsheet / Existing spreadsheet… (copyto.rs does the work).
+        let copy = row("Copy to").right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(theme::TEXT_DIM)));
+        egui::containers::menu::SubMenuButton::from_button(copy).ui(ui, |ui| {
+            let width = crate::shell::menu_style(ui, false);
+            let sub = |label: &str| crate::shell::menu_row(label, "", false).min_size(vec2(width, 32.0));
+            for (label, existing) in [("New spreadsheet", false), ("Existing spreadsheet…", true)] {
+                if ui.add(sub(label)).clicked() {
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_copy_to"), (s, existing)));
+                    ui.close();
+                }
+            }
+        });
         if ui.add(row("Rename")).clicked() {
             self.renaming = Some((s, tab.name.clone()));
             ui.close();

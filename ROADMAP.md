@@ -1,6 +1,6 @@
 # StarSheets roadmap
 
-> **Last updated:** 2026-11-22 · **Now:** live editing and accounts released in 0.2.0; phase 1 extras and live-editing follow-ups continue
+> **Last updated:** 2026-11-22 · **Now:** files and folders (home screen, sharing folders, previews) released in 0.3.0; next: desktop apps
 
 | Phase | Goal | Done when | Status |
 |---|---|---|---|
@@ -73,6 +73,7 @@
 - [x] Everyone's own folder; folder sharing; own bin (30 days); stars and recent
 - [x] Preview pictures, drawn on the server
 - [x] Home screen with a folder tree, cards or list, drag to move, upload
-- [ ] A "Move to…" folder picker and a Details panel (owner, who changed it last, who has access)
+- [x] A "Move to…" folder picker and a Details panel (owner, who changed it last, who has access)
+- [x] Sort menu; copy a sheet to another spreadsheet; choose where files are kept
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).

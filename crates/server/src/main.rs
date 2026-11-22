@@ -32,6 +32,9 @@ const COOKIE: &str = "starsheets_session";
 
 struct App {
     store: Store,
+    /// The folder the server was given (STORE); files are kept in a folder inside it that the
+    /// owner can choose (`.starsheets-root` in here, see storage()).
+    base: PathBuf,
     lock: Mutex<()>,
     location: String,
     auth: bool,
@@ -472,6 +475,150 @@ async fn gate(app: &Shared, m: &str, p: &[String], mut q: HashMap<String, String
     r.unwrap_or_else(|| Err(error(500, "server error")))
 }
 
+// ---------------------------------------------------------------- where files are kept
+
+/// The folder (inside the base folder) chosen to keep files in, from `<base>/.starsheets-root`;
+/// None or "" = the base folder itself.
+fn chosen_root(base: &Path) -> Option<String> {
+    let s = std::fs::read_to_string(base.join(".starsheets-root")).ok()?;
+    store::rel(Some(s.trim())).ok()
+}
+
+/// Folders inside the base folder someone could choose (not hidden ones), three levels deep.
+fn storage_folders(base: &Path) -> Vec<String> {
+    fn walk(base: &Path, here: &str, depth: usize, out: &mut Vec<String>) {
+        if depth > 3 || out.len() > 500 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(if here.is_empty() { base.to_path_buf() } else { base.join(here) }) else { return };
+        let mut dirs: Vec<String> = rd.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect();
+        dirs.sort_by_key(|d| d.to_lowercase());
+        for d in dirs {
+            let p = store::join(here, &d);
+            out.push(p.clone());
+            walk(base, &p, depth + 1, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(base, "", 1, &mut out);
+    out
+}
+
+/// Whether a folder already holds StarSheets files (people's accounts).
+fn has_starsheets(dir: &Path) -> bool {
+    dir.join(".starsheets").join("users.json").is_file()
+}
+
+/// GET/POST /api/storage: where files are kept. The server's owner (or anyone while the server is
+/// being set up, or with sign-in off) can choose another folder inside the base folder: "move"
+/// takes everything there (files, versions, bin, accounts), "use" switches to StarSheets files
+/// already there. Refused while a spreadsheet is open. The server then restarts itself (exit;
+/// Docker starts it again) so nothing still points at the old place.
+async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> Response<Body> {
+    let setting_up = app.auth && !auth::any_users(&app.store);
+    if app.auth && !setting_up && !me.as_ref().is_some_and(|u| u.owner) {
+        return error(403, "Only the owner of this server can choose where files are kept.");
+    }
+    let current = chosen_root(&app.base).unwrap_or_default();
+    if m == "GET" {
+        let base = app.base.clone();
+        let mut folders = tokio::task::spawn_blocking(move || storage_folders(&base)).await.unwrap_or_default();
+        // People's own folders (and what's in them) are StarSheets' own: never a place to choose.
+        let spaces: Vec<String> = auth::users(&app.store).into_iter().map(|u| store::join(&current, &u.username)).collect();
+        folders.retain(|f| !spaces.iter().any(|s| f == s || f.starts_with(&format!("{s}/"))));
+        let ready: Vec<String> = folders.iter().filter(|f| has_starsheets(&app.base.join(f))).cloned().collect();
+        return send_json(&json!({ "location": app.location, "current": current, "folders": folders, "has_files": ready, "top_has_files": has_starsheets(&app.base) }), 200);
+    }
+    let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let Ok(to) = store::rel(json.get("folder").and_then(Value::as_str)) else { return error(400, "That isn't a folder name.") };
+    let mode = field(&json, "mode");
+    if to == current {
+        return send_json(&json!({ "ok": true, "restarting": false }), 200);
+    }
+    let app2 = app.clone();
+    let r = blocking(app, move |_| -> Result<(), String> {
+        if app2.rooms.open_count() > 0 {
+            return Err("A spreadsheet is open right now (in some tab, maybe someone else's). Close it and try again in a minute.".into());
+        }
+        let old = app2.store.root.clone();
+        let new = if to.is_empty() { app2.base.clone() } else { app2.base.join(&to) };
+        std::fs::create_dir_all(&new).map_err(|e| e.to_string())?;
+        match mode.as_str() {
+            "use" => {
+                if !has_starsheets(&new) && auth::any_users(&app2.store) {
+                    return Err("There are no StarSheets files in that folder to switch to. Choose \"Move my files there\" instead.".into());
+                }
+            }
+            _ => {
+                // A folder inside the one in use is fine unless it is StarSheets' own (someone's
+                // folder, the bin, the hidden data).
+                if let Ok(rest) = new.strip_prefix(&old) {
+                    let first = rest.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
+                    if first.is_empty() || first.starts_with('.') || auth::users(&app2.store).iter().any(|u| u.username == first) {
+                        return Err("That folder belongs to StarSheets itself. Pick another one.".into());
+                    }
+                }
+                // Everything moves, or nothing: check for clashes first.
+                let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&old).map_err(|e| e.to_string())?.flatten().filter(|e| e.file_name() != ".starsheets-root").collect();
+                let clash: Vec<String> = entries.iter().map(|e| e.file_name()).filter(|n| new.join(n).exists() && old.join(n) != new).map(|n| n.to_string_lossy().into_owned()).collect();
+                if !clash.is_empty() {
+                    return Err(format!("That folder already has {} in it. Choose an empty folder, or tidy it first.", clash.join(", ")));
+                }
+                for e in entries {
+                    if e.path() == new || new.starts_with(e.path()) {
+                        continue;
+                    }
+                    let to_path = new.join(e.file_name());
+                    if std::fs::rename(e.path(), &to_path).is_err() {
+                        // Another file system: copy, then remove.
+                        let status = std::process::Command::new("cp").arg("-a").arg(e.path()).arg(&to_path).status().map_err(|e| e.to_string())?;
+                        if !status.success() {
+                            return Err("Copying to the new folder failed; nothing was removed.".into());
+                        }
+                        let _ = if e.path().is_dir() { std::fs::remove_dir_all(e.path()) } else { std::fs::remove_file(e.path()) };
+                    }
+                }
+            }
+        }
+        std::fs::write(app2.base.join(".starsheets-root"), format!("{to}\n")).map_err(|e| e.to_string())
+    })
+    .await
+    .unwrap_or_else(|| Err("server error".into()));
+    match r {
+        Ok(()) => {
+            println!("Files are now kept in {:?}; restarting.", if json["folder"].as_str().unwrap_or("").is_empty() { "the top folder" } else { json["folder"].as_str().unwrap_or("") });
+            tokio::spawn(async {
+                tokio::time::sleep(Duration::from_millis(600)).await;
+                std::process::exit(0);
+            });
+            send_json(&json!({ "ok": true, "restarting": true }), 200)
+        }
+        Err(why) => error(400, &why),
+    }
+}
+
+/// POST /api/files/ID/add-sheets: copies the sheets of the spreadsheet in the body (?name= gives
+/// its type) to the end of file ID, through its live room. Needs edit rights on ID.
+async fn add_sheets(app: &Shared, me: Option<auth::User>, file: String, q: &HashMap<String, String>, body: Bytes) -> Response<Body> {
+    let (app2, f2, me2) = (app.clone(), file.clone(), me.clone());
+    let (role, path) = blocking(app, move |a| (sharing::file_role(&a.store, a.auth, me2.as_ref(), &f2), a.store.synced_index().ok().and_then(|i| i.get(&f2).cloned()).unwrap_or_default())).await.unwrap_or_default();
+    // A .csv (or other one-sheet type) can't hold another tab.
+    if !matches!(path.rsplit_once('.').map(|(_, e)| e.to_lowercase()).as_deref(), Some("xlsx" | "xlsm" | "ods")) && role > sharing::Role::None {
+        return error(400, "That file can only hold one sheet (it's a .csv or similar). Pick an .xlsx spreadsheet, or copy to a new spreadsheet.");
+    }
+    if role < sharing::Role::Edit {
+        return error(403, if role == sharing::Role::None { "You don't have access to that spreadsheet." } else { "You can only view that spreadsheet." });
+    }
+    let name = q.get("name").cloned().unwrap_or_else(|| "sheet.xlsx".into());
+    let by = me.map(|u| u.username).unwrap_or_default();
+    let r = tokio::task::spawn_blocking(move || app2.rooms.add_sheets(&app2, &file, name, body.to_vec(), by)).await;
+    match r {
+        Ok(Ok(names)) => send_json(&json!({ "ok": true, "sheets": names }), 200),
+        Ok(Err(why)) => error(400, &why),
+        Err(_) => error(500, "server error"),
+    }
+}
+
 /// GET /api/files/ID/thumb: the file's preview picture (thumbs.rs), drawn if there isn't one for
 /// this version yet. Outside the store lock while drawing. 404: no picture (the app shows an icon).
 async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &HeaderMap) -> Response<Body> {
@@ -540,6 +687,7 @@ fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Repl
     let starred = spaces::starred(&app.store, me);
     let opened = spaces::opened(&app.store, me);
     let colours = spaces::colours(&app.store, me);
+    let changed = spaces::changed_by(&app.store);
     let files: Vec<Value> = v["files"]
         .as_array()
         .cloned()
@@ -555,6 +703,9 @@ fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Repl
             f["role"] = json!(a.file_role(&id).name());
             f["starred"] = json!(starred.contains(&format!("f:{id}")));
             f["shared"] = json!(a.file_shared(&id));
+            if let Some(by) = changed.get(&id) {
+                f["changed_by"] = by.clone();
+            }
             if let Some(t) = opened.get(&id) {
                 f["opened"] = t.clone();
             }
@@ -673,10 +824,17 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     if let Some(resp) = accounts(&app, &m, &p, &q, &headers, &body).await {
         return resp;
     }
+    if p.first().map(String::as_str) == Some("storage") && p.len() == 1 && (m == "GET" || m == "POST") {
+        let me = current_user(&app, &headers);
+        return storage(&app, &m, me, &body).await;
+    }
     if !signed_in(&app, &headers) {
         return error(401, "please sign in");
     }
     let me = current_user(&app, &headers);
+    if m == "POST" && p.len() == 3 && p[0] == "files" && p[2] == "add-sheets" {
+        return add_sheets(&app, me, p[1].clone(), &q, body).await;
+    }
     if m == "GET" && p.len() == 3 && p[0] == "files" && p[2] == "thumb" {
         return thumb(&app, me, p[1].clone(), &headers).await;
     }
@@ -698,6 +856,18 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
         Ok(mut r) => {
             if let (Some(id), Ok(Reply::Json(_, 200))) = (&replaced, &r) {
                 app.rooms.replaced(id);
+            }
+            // Who changed it last (Details): a save through the API, or a new file / copy.
+            if let Some(me) = &me {
+                let made = match (&r, m2.as_str(), p2.as_slice()) {
+                    (Ok(Reply::Json(_, 200)), "PUT", [_, id]) => Some(id.clone()),
+                    (Ok(Reply::Json(v, 200 | 201)), "POST", [_] | [_, _, _]) if p2[0] == "files" => v.get("id").and_then(Value::as_str).map(str::to_string),
+                    _ => None,
+                };
+                if let Some(id) = made {
+                    let who = me.username.clone();
+                    blocking(&app, move |a| spaces::note_changed(&a.store, &id, &who)).await;
+                }
             }
             if app.auth && let Some(me) = me {
                 r = blocking(&app, move |app| after_files(app, &me, &m2, &p2, r)).await.unwrap_or(Err(Bad::new(500, "server error")));
@@ -745,11 +915,17 @@ async fn main() {
     if std::env::args().nth(1).as_deref() == Some("healthcheck") {
         healthcheck();
     }
-    let store = Store { root: PathBuf::from(env("STORE", "/data")), keep: env("KEEP", "6").parse().unwrap_or(6), spaces: !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no") };
+    let base = PathBuf::from(env("STORE", "/data"));
+    let root = match chosen_root(&base) {
+        Some(sub) if !sub.is_empty() => base.join(sub),
+        _ => base.clone(),
+    };
+    let _ = std::fs::create_dir_all(&root);
+    let store = Store { root, keep: env("KEEP", "6").parse().unwrap_or(6), spaces: !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no") };
     let port: u16 = env("PORT", "8080").parse().unwrap_or(8080);
     let auth = !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no");
     let site = Some(env("SITE", "")).filter(|s| !s.is_empty()).map(PathBuf::from);
-    let app = Arc::new(App { store, lock: Mutex::new(()), location: env("LOCATION", "the server"), auth, site, rooms: live::Rooms::default() });
+    let app = Arc::new(App { store, base, lock: Mutex::new(()), location: env("LOCATION", "the server"), auth, site, rooms: live::Rooms::default() });
     if let Err(e) = std::fs::create_dir_all(app.store.meta()) {
         eprintln!("Can't use the folder {}: {e}", app.store.root.display());
         std::process::exit(1);

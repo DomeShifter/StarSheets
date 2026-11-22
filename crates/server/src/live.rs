@@ -42,6 +42,9 @@ enum RoomMsg {
     From { client: String, msg: ToServer },
     /// The file was replaced through the files API (a version restored): read it again.
     Replaced,
+    /// Copy every sheet of this spreadsheet file (bytes, name) to the end of the room's file;
+    /// answers with the new sheets' names.
+    AddSheets { name: String, bytes: Vec<u8>, by: String, reply: std::sync::mpsc::Sender<Result<Vec<String>, String>> },
 }
 
 #[derive(Default)]
@@ -67,7 +70,20 @@ impl Rooms {
         let _ = std::thread::Builder::new().name(format!("room-{file}")).spawn(move || Room::run(app, file, rx));
     }
 
+    /// Copies sheets into `file` through its room (starting one if needed), so everyone with it
+    /// open sees them at once; waits up to 30 s for the answer.
+    pub fn add_sheets(&self, app: &Shared, file: &str, name: String, bytes: Vec<u8>, by: String) -> Result<Vec<String>, String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.send(app, file, RoomMsg::AddSheets { name, bytes, by, reply: tx });
+        rx.recv_timeout(Duration::from_secs(30)).map_err(|_| "The spreadsheet didn't answer.".to_string())?
+    }
+
     /// The files API replaced this file: an open room reads it again.
+    /// How many files are open in rooms right now.
+    pub fn open_count(&self) -> usize {
+        self.map.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
     pub fn replaced(&self, file: &str) {
         if let Some(tx) = self.map.lock().unwrap_or_else(|e| e.into_inner()).get(file) {
             let _ = tx.send(RoomMsg::Replaced);
@@ -202,6 +218,12 @@ struct Room {
     disk_checked: Instant,
     /// When the preview picture was last drawn (at most once a minute while people edit).
     thumb_at: Option<Instant>,
+    /// Where the file is (its path in the store), to notice it being moved or binned.
+    path: Option<String>,
+    /// Who made the last change not yet saved (for "Last changed by" in Details).
+    last_editor: Option<String>,
+    /// The last "couldn't save" told to everyone, so it isn't repeated every 10 s.
+    told: Option<String>,
 }
 
 /// Why a save didn't happen.
@@ -224,11 +246,14 @@ impl Room {
             dirty_since: None,
             last_change: Instant::now(),
             save_failed_at: None,
-            empty_since: None,
+            empty_since: Some(Instant::now()), // until someone joins (a room opened only to add sheets closes too)
             guests: 0,
             disk: None,
             disk_checked: Instant::now(),
             thumb_at: None,
+            path: None,
+            last_editor: None,
+            told: None,
         };
         let opened = room.open();
         loop {
@@ -275,6 +300,7 @@ impl Room {
             let index = self.app.store.synced_index().map_err(|e| format!("Can't read the file list: {e}"))?;
             let path = index.get(&self.file).cloned().ok_or("This file isn't on the server any more.")?;
             let full = self.app.store.full(&path);
+            self.path = Some(path.clone());
             let bytes = std::fs::read(&full).map_err(|e| format!("Can't read the file: {e}"))?;
             self.disk = self.app.store.version_of(&full).ok();
             self.disk_checked = Instant::now();
@@ -339,6 +365,9 @@ impl Room {
                 }
             }
             RoomMsg::Replaced => self.reload(),
+            RoomMsg::AddSheets { name, bytes, by, reply } => {
+                let _ = reply.send(self.add_sheets(&name, &bytes, &by));
+            }
             RoomMsg::From { client, msg } if matches!(msg, ToServer::Change { .. } | ToServer::Undo | ToServer::Redo) && !self.clients.get(&client).is_some_and(|c| c.can_edit) => {
                 if let ToServer::Change { cseq, .. } = msg {
                     self.to(&client, &ToClient::Rejected { cseq, why: gridcraft_engine::VIEW_ONLY.into() });
@@ -414,6 +443,9 @@ impl Room {
         if let Some(c) = self.clients.get_mut(client) {
             c.blocked = None;
             c.redo.clear();
+            if !c.person.username.is_empty() {
+                self.last_editor = Some(c.person.username.clone());
+            }
         }
         self.record(client, before, after);
         self.all(&ToClient::Applied { seq: self.seq, client: client.to_string(), cseq, change });
@@ -520,6 +552,7 @@ impl Room {
             Ok(()) => {
                 self.dirty_since = None;
                 self.save_failed_at = None;
+                self.told = None;
                 self.all(&ToClient::Saved { at: now() as i64 });
                 if self.clients.is_empty() || self.thumb_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
                     self.thumb_at = Some(Instant::now());
@@ -531,7 +564,12 @@ impl Room {
             Err(SaveError::Outside) => self.check_disk(),
             Err(SaveError::Failed(why)) => {
                 self.save_failed_at = Some(Instant::now());
-                self.all(&ToClient::Message { text: format!("Couldn't save: {why}") });
+                // Moved to the bin: check_disk says so once, in plain words; other failures are
+                // told once each, not every 10 s.
+                if self.disk_now().is_some() && self.told.as_deref() != Some(why.as_str()) {
+                    self.all(&ToClient::Message { text: format!("Couldn't save: {why}") });
+                    self.told = Some(why);
+                }
             }
         }
     }
@@ -549,6 +587,9 @@ impl Room {
         self.app.store.keep_version(&self.file, &full).map_err(|e| failed(e.to_string()))?;
         self.app.store.write_file(&full, &bytes).map_err(|e| failed(e.to_string()))?;
         self.disk = self.app.store.version_of(&full).ok();
+        if let Some(who) = self.last_editor.take() {
+            let _ = crate::spaces::note_changed(&self.app.store, &self.file, &who);
+        }
         Ok(())
     }
 
@@ -564,6 +605,7 @@ impl Room {
     /// to it, and every tab is shown the file as it is on disk now. Nothing is written over.
     fn check_disk(&mut self) {
         self.disk_checked = Instant::now();
+        self.check_place();
         let now_on_disk = self.disk_now();
         if now_on_disk.is_none() || now_on_disk == self.disk {
             return;
@@ -579,6 +621,47 @@ impl Room {
             None => "This file was changed outside StarSheets (for example in Excel), so it was opened again.".to_string(),
         };
         self.all(&ToClient::Message { text });
+    }
+
+    /// Notices the file being renamed, moved (here or in another tab, by anyone) or put in the bin,
+    /// and tells every tab: they show the new name and place; in the bin, nothing saves until
+    /// it's restored (then saving carries on by itself).
+    fn check_place(&mut self) {
+        let now = {
+            let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
+            self.app.store.synced_index().ok().and_then(|i| i.get(&self.file).cloned())
+        };
+        if now == self.path {
+            return;
+        }
+        let (name, folder) = match (&now, &self.path) {
+            (Some(p), _) | (None, Some(p)) => (crate::store::base_of(p), crate::store::parent_of(p)),
+            (None, None) => return,
+        };
+        self.all(&ToClient::Moved { name, folder, binned: now.is_none() });
+        self.path = now;
+    }
+
+    /// Copies the sheets of another spreadsheet file to the end of this one, as a change made by
+    /// the server (every tab gets it at once; undo history isn't touched).
+    fn add_sheets(&mut self, name: &str, bytes: &[u8], by: &str) -> Result<Vec<String>, String> {
+        let mut s = Session::new();
+        s.execute("file.open", json!({ "name": name, "base64": gridcraft_engine::io::base64_encode(bytes) })).map_err(|e| format!("Can't read that sheet: {e}"))?;
+        let src = s.active().map(|d| d.wb.clone()).ok_or("nothing to copy")?;
+        let before = self.wb().ok_or("the spreadsheet isn't open")?;
+        let mut wb = (*before).clone();
+        let mut names = Vec::new();
+        for i in 0..src.sheets.len() {
+            if let Some(n) = sync::copy_sheet_into(&src, i, &mut wb) {
+                names.push(n);
+            }
+        }
+        sync::set_workbook_recalc(&mut self.session, wb);
+        self.server_change(before);
+        if !by.is_empty() {
+            self.last_editor = Some(by.to_string());
+        }
+        Ok(names)
     }
 
     /// Saves the room's workbook as a new file next to this one; returns its name.
@@ -611,6 +694,7 @@ mod tests {
     use super::*;
     use crate::App;
     use crate::store::Store;
+    use std::collections::HashMap;
     use tokio::sync::mpsc::UnboundedReceiver;
 
     struct Tab {
@@ -629,7 +713,7 @@ mod tests {
         std::fs::write(dir.join("t.csv"), "a,b\n1,2\n").unwrap();
         let store = Store { root: dir.clone(), keep: 3, spaces: false };
         let id = store.synced_index().unwrap().keys().next().unwrap().clone();
-        let app = Arc::new(App { store, lock: Mutex::new(()), location: String::new(), auth: false, site: None, rooms: Rooms::default() });
+        let app = Arc::new(App { store, base: dir.clone(), lock: Mutex::new(()), location: String::new(), auth: false, site: None, rooms: Rooms::default() });
         (app, id, dir)
     }
 
@@ -737,6 +821,32 @@ mod tests {
             }
         }
         panic!("no message");
+    }
+
+    #[test]
+    fn open_tabs_hear_about_moves_and_get_copied_sheets() {
+        let (app, file, dir) = app();
+        let mut a = join(&app, &file, "a");
+        // Renamed (by the files API, or anyone): the tab is told the new name and folder.
+        std::fs::create_dir_all(dir.join("Work")).unwrap();
+        {
+            let _g = app.lock.lock().unwrap();
+            let q: HashMap<String, String> = [("folder".to_string(), "Work".to_string())].into();
+            app.store.route("POST", &["files".into(), file.clone(), "move".into()], &q, None, b"").unwrap();
+        }
+        let mut moved = None;
+        for _ in 0..20 {
+            if let ToClient::Moved { name, folder, binned } = next(&mut a) {
+                moved = Some((name, folder, binned));
+                break;
+            }
+        }
+        assert_eq!(moved, Some(("t.csv".into(), "Work".into(), false)));
+        // Another spreadsheet's sheet copied in: every tab gets it.
+        let names = app.rooms.add_sheets(&app, &file, "x.csv".into(), b"from,another\n1,2\n".to_vec(), String::new()).unwrap();
+        assert_eq!(names.len(), 1);
+        assert!(matches!(next(&mut a), ToClient::Applied { .. }));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

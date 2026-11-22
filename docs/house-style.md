@@ -55,6 +55,14 @@ Everything sits on a 4 px scale.
 - **Other buttons:** white pill, grey outline, green text, to the left of the main one, 8 px apart.
 - **Buttons inside a list** ("Restore"): green text, no outline.
 
+## Text fields and search bars
+
+Every one-line text field (search bars, rename boxes, name fields) is `house::field`: the text is
+**centred top to bottom** in its box (never riding high), 14 px (`BODY`), with 8 px at the sides.
+Search bars use 16 px text (`SEARCH_TEXT`) in a 48 px rounded box with a search icon. A rename
+box inside a row or card is inset from the row's edges (at least 4 px all round) so there is white
+space around it.
+
 ## Menus
 
 Every menu (menu bar, right-click menus, the New button, the avatar menu) uses `house::menu(ui, width)`

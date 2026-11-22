@@ -79,6 +79,9 @@ pub fn me_ui(ui: &mut Ui) {
         if house::menu_row(ui, Some("lock"), "Change password…", "", true) {
             ask(ui, "password");
         }
+        if me.owner && house::menu_row(ui, Some("folder"), "Where files are kept…", "", true) {
+            ask(ui, "storage");
+        }
         if me.owner && house::menu_row(ui, Some("group"), "People…", "", true) {
             ask(ui, "people");
         }
@@ -110,6 +113,12 @@ enum Reply {
     People(Vec<Me>),
     Error(String),
     Done(String),
+    /// Where files are kept now, and the folders that could be chosen (GET /api/storage).
+    Storage(Json),
+    /// The setup made the owner's account: now move to the folder picked, if any.
+    SetUp,
+    /// The server is restarting in its new folder: wait for it, then start the page again.
+    Restarting,
 }
 
 #[derive(Default, PartialEq)]
@@ -122,6 +131,7 @@ enum Dialog {
     Profile,
     Password,
     People,
+    Storage,
 }
 
 #[derive(Default)]
@@ -150,6 +160,14 @@ pub struct Account {
     colour: String,
     people: Vec<Me>,
     remove_armed: Option<String>,
+    /// Where files are kept (dialog and first-time setup): what the server said, the folder
+    /// picked ("" = the top folder), whether to switch to StarSheets files already there, and
+    /// when the restart began (waiting for the server to answer again).
+    storage: Option<Json>,
+    storage_pick: Option<String>,
+    storage_use: bool,
+    restarting: Option<f64>,
+    polled: f64,
 }
 
 fn me_from(v: &Json) -> Option<Me> {
@@ -210,6 +228,9 @@ impl Account {
                     ME.with(|m| *m.borrow_mut() = user);
                     if auth && !signed_in {
                         self.open(if setup { Dialog::Setup } else { Dialog::SignIn });
+                        if setup {
+                            self.load_storage(ctx);
+                        }
                     }
                 }
                 Reply::Reload => reload(),
@@ -218,6 +239,18 @@ impl Account {
                     self.dialog = Dialog::None;
                 }
                 Reply::People(p) => self.people = p,
+                Reply::Storage(v) => {
+                    self.storage_pick.get_or_insert_with(|| v["current"].as_str().unwrap_or("").to_string());
+                    self.storage = Some(v);
+                }
+                Reply::SetUp => match self.storage_pick.clone().filter(|p| !p.is_empty()) {
+                    Some(folder) => call(&self.inbox, ctx, Method::Post, "api/storage", Some(json!({ "folder": folder, "mode": "move" })), |v| if v["restarting"].as_bool().unwrap_or(false) { Reply::Restarting } else { Reply::Reload }),
+                    None => reload(),
+                },
+                Reply::Restarting => {
+                    self.dialog = Dialog::None;
+                    self.restarting = Some(ctx.input(|i| i.time));
+                }
                 Reply::Signup { on, code } => {
                     self.signup_on = on;
                     self.signup_secret = code;
@@ -237,6 +270,10 @@ impl Account {
             match req.as_str() {
                 "profile" => self.open(Dialog::Profile),
                 "password" => self.open(Dialog::Password),
+                "storage" => {
+                    self.open(Dialog::Storage);
+                    self.load_storage(ctx);
+                }
                 "people" => {
                     self.open(Dialog::People);
                     call(&self.inbox, ctx, Method::Get, "api/users", None, |v| Reply::People(v.as_array().into_iter().flatten().filter_map(me_from).collect()));
@@ -308,7 +345,113 @@ impl Account {
             Dialog::Profile => self.profile(ctx),
             Dialog::Password => self.change_password(ctx),
             Dialog::People => self.people(ctx),
+            Dialog::Storage => self.storage_ui(ctx),
         }
+        self.restarting_ui(ctx);
+    }
+
+    fn load_storage(&mut self, ctx: &egui::Context) {
+        self.storage = None;
+        self.storage_pick = None;
+        self.storage_use = false;
+        call(&self.inbox, ctx, Method::Get, "api/storage", None, Reply::Storage);
+    }
+
+    /// Where files are kept (owner): the folder in use, and a list of the folders the server can
+    /// reach to choose another. Files move there (or, if StarSheets files are already there,
+    /// StarSheets can switch to those); the server then restarts.
+    fn storage_ui(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut cancel = false;
+        let mut go = false;
+        let v = self.storage.clone();
+        house::dialog(ctx, "starsheets_storage", 540.0, "Where files are kept", Some(&mut close), |ui| {
+            let Some(v) = &v else {
+                ui.label(RichText::new("Loading…").color(theme::TEXT_DIM));
+                return;
+            };
+            let location = v["location"].as_str().unwrap_or("the server");
+            let current = v["current"].as_str().unwrap_or("");
+            let here = |p: &str| if p.is_empty() { location.to_string() } else { format!("{location} › {}", p.replace('/', " › ")) };
+            house::text(ui, &format!("Now: {}", here(current)));
+            house::note(ui, "Choose another folder below. These are the folders the server can reach; to offer others, give the server a bigger folder when it's installed.");
+            house::gap(ui);
+            let folders: Vec<String> = v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect();
+            let with_files: Vec<String> = v["has_files"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect();
+            let pick = self.storage_pick.clone().unwrap_or_default();
+            egui::Frame::NONE.stroke(egui::Stroke::new(1.0, theme::DIVIDER)).corner_radius(8).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(280.0).min_scrolled_height(280.0).auto_shrink([false, false]).show(ui, |ui| {
+                    for f in std::iter::once(String::new()).chain(folders.iter().cloned()) {
+                        let depth = if f.is_empty() { 0 } else { f.matches('/').count() + 1 };
+                        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
+                        let p = ui.painter().clone();
+                        if pick == f {
+                            p.rect_filled(r, 6, theme::SHARE);
+                        } else if resp.hovered() {
+                            p.rect_filled(r, 6, theme::MENU_HOVER);
+                        }
+                        let x = r.left() + 8.0 + depth as f32 * 18.0;
+                        if let Some(img) = crate::icons::icon("folder") {
+                            img.paint_at(ui, egui::Rect::from_center_size(egui::pos2(x + 10.0, r.center().y), vec2(18.0, 18.0)));
+                        }
+                        let mut label = if f.is_empty() { format!("{location} (the top)") } else { f.rsplit('/').next().unwrap_or(&f).to_string() };
+                        if f == current {
+                            label.push_str("  · in use");
+                        } else if with_files.contains(&f) || (f.is_empty() && v["top_has_files"].as_bool().unwrap_or(false)) {
+                            label.push_str("  · has StarSheets files");
+                        }
+                        p.text(egui::pos2(x + 28.0, r.center().y), egui::Align2::LEFT_CENTER, label, egui::FontId::proportional(14.0), theme::TEXT);
+                        if resp.clicked() {
+                            self.storage_pick = Some(f.clone());
+                            self.storage_use = with_files.contains(&f) || (f.is_empty() && v["top_has_files"].as_bool().unwrap_or(false));
+                        }
+                    }
+                });
+            });
+            let target_has = with_files.contains(&pick) || (pick.is_empty() && v["top_has_files"].as_bool().unwrap_or(false));
+            if pick != current {
+                house::gap(ui);
+                if target_has {
+                    ui.radio_value(&mut self.storage_use, true, "Use the StarSheets files already in that folder (accounts there too: you may need to sign in again)");
+                    ui.radio_value(&mut self.storage_use, false, "Move my files there");
+                } else {
+                    house::note(ui, "Your spreadsheets, folders, versions, bin and accounts move there. Nobody can have a spreadsheet open while it happens; StarSheets restarts afterwards (a few seconds).");
+                }
+            }
+            self.messages(ui);
+            match house::actions(ui, &["Cancel", "Use this folder"]) {
+                Some(0) => cancel = true,
+                Some(_) => go = pick != current,
+                None => {}
+            }
+        });
+        if close || cancel || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.dialog = Dialog::None;
+        } else if go && !self.busy {
+            self.busy = true;
+            self.error = None;
+            let body = json!({ "folder": self.storage_pick.clone().unwrap_or_default(), "mode": if self.storage_use { "use" } else { "move" } });
+            call(&self.inbox, ctx, Method::Post, "api/storage", Some(body), |v| if v["restarting"].as_bool().unwrap_or(false) { Reply::Restarting } else { Reply::Reload });
+        }
+    }
+
+    /// After a change of folder: "StarSheets is restarting…" until the server answers again
+    /// (checked once a second), then the page starts again.
+    fn restarting_ui(&mut self, ctx: &egui::Context) {
+        let Some(since) = self.restarting else { return };
+        let now = ctx.input(|i| i.time);
+        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        if now - since > 1.5 && now - self.polled > 1.0 {
+            self.polled = now;
+            wasm_bindgen_futures::spawn_local(async {
+                if matches!(fetch(Method::Get, "api/info", None, None).await, Ok((200, _, _))) {
+                    reload();
+                }
+            });
+        }
+        house::dialog(ctx, "starsheets_restarting", 360.0, "Moving to the new folder", None, |ui| {
+            house::text(ui, "StarSheets is restarting in its new folder. This page starts again by itself in a few seconds.");
+        });
     }
 
     fn sign_in(&mut self, ctx: &egui::Context) {
@@ -401,6 +544,19 @@ impl Account {
             ui.add_space(house::S);
             let r = Self::field(ui, &mut self.password2, "Password again", true);
             go |= Self::enter(ui, &r);
+            // Where files go: the server's own folder, or a folder inside it.
+            let folders: Vec<String> = self.storage.as_ref().map(|v| v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            if !folders.is_empty() {
+                house::gap(ui);
+                house::label(ui, "Where to keep files", "Your spreadsheets are saved here. You can change it later (your avatar › Where files are kept).");
+                let mut labels = vec!["The top folder".to_string()];
+                labels.extend(folders.iter().map(|f| f.replace('/', " › ")));
+                let mut i = self.storage_pick.as_ref().and_then(|p| folders.iter().position(|f| f == p)).map_or(0, |i| i + 1);
+                let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+                if house::select(ui, "starsheets_setup_folder", ui.available_width(), &mut i, &refs, &[0]) {
+                    self.storage_pick = Some(if i == 0 { String::new() } else { folders[i - 1].clone() });
+                }
+            }
             self.messages(ui);
             go |= house::actions(ui, &["Create account"]).is_some();
         });
@@ -412,7 +568,7 @@ impl Account {
             self.busy = true;
             self.error = None;
             let body = json!({ "code": self.code.trim(), "name": self.name, "username": self.username, "password": self.password });
-            call(&self.inbox, ctx, Method::Post, "api/setup", Some(body), |_| Reply::Reload);
+            call(&self.inbox, ctx, Method::Post, "api/setup", Some(body), |_| Reply::SetUp);
         }
     }
 

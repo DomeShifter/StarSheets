@@ -101,6 +101,18 @@ pub fn menu_sep(ui: &mut Ui) {
     ui.add_space(S);
 }
 
+// ---------------------------------------------------------------- text fields
+
+/// A one-line text field the house way: the text centred top to bottom in the box (never riding
+/// high), BODY size (SEARCH_TEXT for search bars), with room at the sides. Use it for every
+/// single-line field: search bars, rename boxes, name fields.
+pub fn field<'t>(text: &'t mut dyn egui::TextBuffer, size: f32) -> egui::TextEdit<'t> {
+    egui::TextEdit::singleline(text).font(egui::FontId::proportional(size)).vertical_align(Align::Center).margin(vec2(S, XS))
+}
+
+/// Text size in search bars.
+pub const SEARCH_TEXT: f32 = 16.0;
+
 // ---------------------------------------------------------------- folder colours
 
 /// The colours a folder can have (right-click › Folder colour). Muted, distinct from each other,

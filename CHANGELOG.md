@@ -6,41 +6,55 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
 ### Added
 - **Home screen:** StarSheets opens on your files instead of a blank sheet, like Google Sheets'
   home. A folder tree on the left (My files, Shared with me, Recent, Starred, Bin, and for the
   server's owner Everyone's files), and your folders and spreadsheets as cards with a **preview
   picture** of each, or as a list. New spreadsheet, new folder and Upload are under New; you can
   also drop spreadsheets from your computer onto the page. Right-click for Open, Share, Star,
-  Rename, Make a copy, Download, Copy/Cut/Paste and Move to bin; drag things onto a folder, the
-  tree or the path to move them. The StarSheets logo in a spreadsheet takes you home.
+  Details, Rename, Make a copy, Download, Copy/Cut/Paste, Move to… and Move to bin; drag things
+  onto a folder, the tree or the path to move them.
 - **Everyone has their own folder** on the server, and **folders can be shared**: everything in a
   shared folder is shared too, also what's added later. Moving something into another person's
   folder makes it theirs, so StarSheets asks first.
+- **Details** (right-click): type, where it is, owner, size, when it changed and who changed it,
+  when you opened it, and who has access.
+- **Sort** menu: sort by name, date modified or size, either direction, with folders at the top
+  or mixed in with the files.
 - **Stars and Recent:** star files and folders to find them quickly; Recent lists what you opened.
 - **Getting around:** Back, Forward and Up buttons above your files; the mouse's back and forward
   buttons go back and forward through the folders you visited (Up and Backspace go to the folder
-  above) instead of leaving the page. A **Files** button next to Share
-  in every spreadsheet (and the StarSheets logo) opens your files at that spreadsheet's folder.
+  above) instead of leaving the page. A **Files** button next to Share in every spreadsheet opens
+  your files at that spreadsheet's folder in a new tab; the StarSheets logo goes there too.
 - **Folder colours:** right-click a folder › Folder colour, 14 colours to choose from. Only you
   see the colours you pick, as in Drive.
-- Right-click any empty space on the home screen for New spreadsheet, New folder and Paste.
 - **Move to…** (right-click): pick a folder in a small folder tree and move everything selected
   there. Select like in a file manager: click, Ctrl+click to add or remove one, Shift+click for a
-  range, Ctrl+A for all.
+  range, Ctrl+A for all. Right-click any empty space for New spreadsheet, New folder and Paste.
+- **Copy a sheet to another spreadsheet:** right-click a sheet's tab › Copy to › New spreadsheet,
+  or Existing spreadsheet… (pick it from a list with search). Formats come along; anyone with the
+  other spreadsheet open sees the new tab straight away.
+- **Choose where files are kept:** when setting up a new server, and later from your avatar ›
+  Where files are kept (the server's owner). StarSheets moves everything there (files, versions,
+  bin, accounts), or switches to StarSheets files already in that folder, and restarts itself.
 - **Your own bin:** each person's deleted things go to their own bin, and are deleted for good
   after 30 days. Restoring a file brings back its earlier versions and who it was shared with.
-
-### Changed
-- When a server that had files from before gets its first accounts, those files move into the
-  owner's own folder (and files someone else made into theirs) once, automatically. Nothing is
-  renamed or lost.
 
 ### Changed
 - **Files changed outside StarSheets are safe.** If a spreadsheet that's open in StarSheets is
   changed on disk (for example in Excel over a file share), StarSheets notices within a few
   seconds and shows that version. Anything typed here that wasn't saved yet goes into a copy next
   to it ("<name> (StarSheets copy <date>)"); the outside change is never written over.
+- **A spreadsheet moved or renamed while it's open** (in another tab, or by someone else) shows its
+  new name and place straight away. If it's moved to the bin, StarSheets says so: changes aren't
+  saved until it's restored, then saving carries on by itself.
+- When a server that had files from before gets its first accounts, those files move into the
+  owner's own folder (and files someone else made into theirs) once, automatically. Nothing is
+  renamed or lost.
+- Every menu now has the same look (16 px either side, 32 px rows, icons), and every one-line text
+  field and search bar has its text centred top to bottom.
 
 ## [0.2.0] - 2026-11-22
 
@@ -193,6 +207,7 @@ about them.
 - One Docker image (`ghcr.io/domeshifter/starsheets`) with the app and its file storage.
 - A password login, on by default (a random password is printed on first start if you don't set one).
 
-[Unreleased]: https://github.com/DomeShifter/StarSheets/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/DomeShifter/StarSheets/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.3.0
 [0.2.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.2.0
 [0.1.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.1.0

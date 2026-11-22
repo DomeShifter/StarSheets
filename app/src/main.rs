@@ -14,6 +14,8 @@ mod bottom;
 mod cfpanel;
 mod chartpanel;
 mod colourpicker;
+#[cfg(target_arch = "wasm32")]
+mod copyto;
 mod customdate;
 mod customnumber;
 mod datepicker;

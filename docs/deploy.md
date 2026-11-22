@@ -12,8 +12,16 @@ container (port 8080, files in `/data`). Settings:
 | `LOCATION` | How the app tells people where files are kept ("Saved to …") |
 | `KEEP` | How many earlier versions of each file to keep (default 6) |
 
-Spreadsheets are ordinary `.xlsx` files in `/data`, in folders as you make them in the app.
-`/data/.starsheets` holds the file ids, versions and sign-in sessions, and `/data/.bin` the bin.
+Spreadsheets are ordinary `.xlsx` files, in a folder for each person (`<username>/`) and in
+folders as people make them in the app. `.starsheets` holds the file and folder ids, versions,
+sharing, accounts and sign-in sessions; each person's bin is `<username>/.bin`.
+
+**Where files are kept.** By default, the top of `/data`. The server's owner can choose any folder
+inside `/data` (at first setup, or later from their avatar › Where files are kept). StarSheets then
+moves everything there (or switches to StarSheets files already in that folder), writes the choice
+to `/data/.starsheets-root` and **restarts itself**, so run the container with a restart policy
+(`--restart unless-stopped`, as in the README and `docker/compose.yml`). To offer more folders,
+mount a bigger folder as `/data`.
 
 ## By hand
 

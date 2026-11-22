@@ -62,6 +62,8 @@ struct Pending {
 }
 
 pub struct Live {
+    /// The file is in the bin (saving waits until it is restored).
+    binned: bool,
     /// The open file: (document uid, file id on the server).
     file: Option<(u64, String)>,
     ws: Option<web_sys::WebSocket>,
@@ -96,6 +98,7 @@ pub struct Live {
 impl Default for Live {
     fn default() -> Self {
         Live {
+            binned: false,
             file: None,
             ws: None,
             inbox: Rc::default(),
@@ -353,6 +356,22 @@ impl Live {
                 app.message = Some(("StarSheets".into(), text));
                 false
             }
+            // Renamed or moved (here, in another tab, or by someone else): show the new name and
+            // place (files.rs keeps them for the status line and the Files button). The bin is
+            // said plainly: nothing saves until it's restored, then saving carries on.
+            ToClient::Moved { name, folder, binned } => {
+                if let Some(d) = app.session.active_mut() {
+                    d.title = name.rsplit_once('.').map_or(name.clone(), |(s, _)| s.to_string());
+                }
+                ctx_moved(&name, &folder);
+                if binned {
+                    app.message = Some(("Moved to the bin".into(), "This spreadsheet was moved to the bin. What you change now isn't saved. To keep working on it, restore it from the Bin on your home screen (the Files button); saving then carries on by itself.".into()));
+                    self.binned = true;
+                } else if std::mem::take(&mut self.binned) {
+                    app.message = Some(("Back from the bin".into(), "This spreadsheet was restored from the bin, so your changes are being saved again.".into()));
+                }
+                false
+            }
             ToClient::People { people, you } => {
                 self.places.retain(|c, _| people.iter().any(|p| &p.client == c));
                 self.people = people;
@@ -538,4 +557,18 @@ fn live_url() -> Option<String> {
     url.set_protocol(if url.protocol() == "https:" { "wss:" } else { "ws:" });
     url.set_search("");
     Some(url.href())
+}
+
+/// Tells files.rs the open file's new name and folder (picked up in Files::logic).
+fn ctx_moved(name: &str, folder: &str) {
+    MOVED.with(|m| *m.borrow_mut() = Some((name.to_string(), folder.to_string())));
+}
+
+thread_local! {
+    static MOVED: std::cell::RefCell<Option<(String, String)>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The open file's new (name, folder) after a rename or move, once.
+pub fn take_moved() -> Option<(String, String)> {
+    MOVED.with(|m| m.borrow_mut().take())
 }

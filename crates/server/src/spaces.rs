@@ -145,6 +145,24 @@ fn rewrite_paths(store: &Store, moves: &[(String, String)]) -> io::Result<()> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- who changed what last
+
+fn changed_path(store: &Store) -> std::path::PathBuf {
+    store.meta().join("changed.json")
+}
+
+/// Notes that `username` saved a change to `file` just now (for Details: "Modified … by …").
+pub fn note_changed(store: &Store, file: &str, username: &str) -> io::Result<()> {
+    let mut all = store.load_json(&changed_path(store));
+    all.insert(file.to_string(), json!({ "by": username, "at": now() as i64 }));
+    store.save_json(&changed_path(store), &Value::Object(all))
+}
+
+/// Who last changed each file (file id → username), where known.
+pub fn changed_by(store: &Store) -> Map<String, Value> {
+    store.load_json(&changed_path(store)).into_iter().filter_map(|(k, v)| Some((k, v.get("by")?.clone()))).collect()
+}
+
 // ---------------------------------------------------------------- starred and recent
 
 fn prefs_path(store: &Store, username: &str) -> std::path::PathBuf {
