@@ -55,6 +55,27 @@ pub struct Bottom {
     drag_origin: Option<f32>,
 }
 
+/// Where a dragged tab would land (its new position among the tabs): past every tab whose middle
+/// its own middle has crossed. Dragging right, a tab only gives way once the dragged tab's middle
+/// passes its middle (so the last tab stays put until the dragged one is over it); dragging left,
+/// the same from the other side.
+fn landing(lefts: &[f32], widths: &[f32], from: usize, moved: f32) -> usize {
+    let centre = lefts[from] + widths[from] / 2.0 + moved;
+    (0..lefts.len()).filter(|k| *k != from && lefts[*k] + widths[*k] / 2.0 < centre).count()
+}
+
+/// How far tab `k` slides to make room while tab `from` is dragged to position `to`: the tabs
+/// between move one place towards where the dragged tab came from; the rest stay.
+fn make_room(k: usize, from: usize, to: usize, step: f32) -> f32 {
+    if from < k && k <= to {
+        -step
+    } else if to <= k && k < from {
+        step
+    } else {
+        0.0
+    }
+}
+
 /// The spring the tabs move on: stiffness and damping (a little under critical, so a dropped
 /// tab overshoots slightly and pings into place, like icons on a phone's home screen).
 const SPRING: (f32, f32) = (420.0, 30.0);
@@ -252,14 +273,7 @@ impl Bottom {
         let drag = match (from, pointer, origin) {
             (Some(fp), Some(p), Some(o)) if known => {
                 let moved = p.x - o.x;
-                let centre = lefts[fp] + ws[fp] / 2.0 + moved;
-                let to = (0..visible.len()).filter(|k| *k != fp && lefts[*k] + ws[*k] / 2.0 < centre).count();
-                #[cfg(target_arch = "wasm32")]
-                if let Some(w) = web_sys::window() {
-                    let dbg = format!("fp={fp} to={to} moved={moved:.0} p={:.0} o={:.0} centre={centre:.0} lefts={lefts:?} ws={ws:?}", p.x, o.x);
-                    let _ = js_sys::Reflect::set(&w, &"__ssTabDbg".into(), &dbg.into());
-                }
-                Some((fp, moved, to))
+                Some((fp, moved, landing(&lefts, &ws, fp, moved)))
             }
             _ => None,
         };
@@ -276,9 +290,8 @@ impl Bottom {
             // Where this tab should be, relative to its slot.
             let target = match drag {
                 Some((fp, moved, _)) if k == fp => moved,
-                Some((fp, _, to)) if fp < k && k <= to => -(ws[fp] + gap),
-                Some((fp, _, to)) if to <= k && k < fp => ws[fp] + gap,
-                _ => 0.0,
+                Some((fp, _, to)) => make_room(k, fp, to, ws[fp] + gap),
+                None => 0.0,
             };
             if let Some((name, left)) = &self.settle
                 && *name == tab.name
@@ -299,14 +312,6 @@ impl Bottom {
             moving |= off != target || vel != 0.0;
             self.slide.insert(tab.name.clone(), (off, vel));
             let rect = slot.translate(vec2(off, 0.0));
-            #[cfg(target_arch = "wasm32")]
-            if drag.is_some()
-                && let Some(w) = web_sys::window()
-            {
-                let prev = js_sys::Reflect::get(&w, &"__ssTabDbg2".into()).ok().and_then(|v| v.as_string()).unwrap_or_default();
-                let prev = if k == 0 { String::new() } else { prev };
-                let _ = js_sys::Reflect::set(&w, &"__ssTabDbg2".into(), &format!("{prev} | {} slot={:.0} off={off:.0} tgt={target:.0}", tab.name, slot.left()).into());
-            }
             if drag.is_some_and(|(fp, ..)| fp == k) {
                 deferred = Some((tab, rect));
             } else {
@@ -350,10 +355,12 @@ impl Bottom {
     fn tab_at(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, rect: egui::Rect, active: usize, count: usize) {
         // A fixed id per tab: the dragged one is drawn last, and an id that followed drawing order
         // would change mid-drag and drop it.
-        ui.scope_builder(egui::UiBuilder::new().id_salt(("starsheets_tab", &tab.name)).max_rect(rect).layout(Layout::left_to_right(Align::Center)), |ui| {
-            ui.spacing_mut().item_spacing.x = 0.0;
-            self.tab(app, ui, tab, tab.index == active, count);
-        });
+        // A child that doesn't take part in the strip's layout: the slots stay where they are and
+        // only the offset moves the tab (a scope would move the layout cursor to wherever the
+        // slid tab ends, pulling every later slot along with it).
+        let mut child = ui.new_child(egui::UiBuilder::new().id_salt(("starsheets_tab", &tab.name)).max_rect(rect).layout(Layout::left_to_right(Align::Center)));
+        child.spacing_mut().item_spacing.x = 0.0;
+        self.tab(app, &mut child, tab, tab.index == active, count);
     }
 
     fn tab_menu(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, count: usize) {
@@ -453,4 +460,39 @@ pub fn switch_to(app: &mut SheetApp, sheet: usize) {
         return;
     }
     app.run_or_alert("sheet.activate", json!({ "sheet": sheet }));
+}
+
+#[cfg(test)]
+mod tab_drag_tests {
+    use super::{landing, make_room};
+
+    /// Five tabs 84 px wide, 2 px apart: Sheet1 at 79, Sheet2 at 165 … Sheet5 at 423.
+    const LEFTS: [f32; 5] = [79.0, 165.0, 251.0, 337.0, 423.0];
+    const WS: [f32; 5] = [84.0; 5];
+
+    /// Which tabs have slid (by how much) when Sheet2 (index 1) has moved `by` px.
+    fn slid(by: f32) -> (usize, Vec<f32>) {
+        let to = landing(&LEFTS, &WS, 1, by);
+        (to, (0..5).filter(|k| *k != 1).map(|k| make_room(k, 1, to, 86.0)).collect())
+    }
+
+    #[test]
+    fn dragging_right_moves_only_the_tabs_passed() {
+        // A little way: nothing moves.
+        assert_eq!(slid(30.0), (1, vec![0.0, 0.0, 0.0, 0.0]));
+        // Past Sheet3's middle: only Sheet3 moves left.
+        assert_eq!(slid(90.0), (2, vec![0.0, -86.0, 0.0, 0.0]));
+        // Over Sheet4 but not yet past the last tab's middle: the last tab stays put.
+        assert_eq!(slid(200.0), (3, vec![0.0, -86.0, -86.0, 0.0]));
+        // Past the last tab's middle: now it moves left to make room at the end.
+        assert_eq!(slid(270.0), (4, vec![0.0, -86.0, -86.0, -86.0]));
+    }
+
+    #[test]
+    fn dragging_left_moves_tabs_right() {
+        let to = landing(&LEFTS, &WS, 3, -100.0);
+        assert_eq!(to, 2);
+        assert_eq!(make_room(2, 3, to, 86.0), 86.0);
+        assert_eq!(make_room(1, 3, to, 86.0), 0.0);
+    }
 }
