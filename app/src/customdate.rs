@@ -136,6 +136,8 @@ impl CustomDate {
                 }
             });
             house::gap(ui);
+            // The dialog's fields are white; the list's scroll handle keeps the house grey.
+            ui.visuals_mut().widgets.inactive.bg_fill = house::SCROLL_HANDLE;
             egui::ScrollArea::vertical().max_height(330.0).show(ui, |ui| {
                 crate::shell::menu_style_width(ui, ui.available_width());
                 for code in PRESETS {

@@ -158,9 +158,13 @@ impl Browser {
             return out;
         }
         let mut open = true;
+        let mut close_now = false;
         let title = if self.in_bin { "Bin" } else { "Open a file" };
-        let shown = egui::Window::new(RichText::new(title).size(crate::house::TITLE).color(crate::theme::TEXT)).frame(crate::house::dialog_frame()).id(egui::Id::new("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
+        let shown = egui::Window::new(title).title_bar(false).frame(crate::house::dialog_frame()).id(egui::Id::new("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
             ui.set_width(W);
+            if crate::house::title_row(ui, title) {
+                close_now = true;
+            }
             if self.in_bin {
                 self.bin_ui(ui, &mut out);
             } else {
@@ -180,7 +184,7 @@ impl Browser {
         {
             open = false;
         }
-        if !open {
+        if !open || close_now {
             self.open = false;
             self.dragging = None;
         }

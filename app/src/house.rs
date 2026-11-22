@@ -30,6 +30,8 @@ pub const CAPS: f32 = 11.0;
 pub const GREEN: Color32 = Color32::from_rgb(0x14, 0x6C, 0x2E);
 /// The soft blue behind a selected item (a chosen list row, a picked chip).
 pub const SELECTED: Color32 = Color32::from_rgb(0xE8, 0xF0, 0xFE);
+/// The scroll bar handle (and egui's resting widget fill outside forms).
+pub const SCROLL_HANDLE: Color32 = Color32::from_rgb(0xDA, 0xDC, 0xE0);
 /// Error text.
 pub const ERROR: Color32 = Color32::from_rgb(0xB3, 0x26, 0x1E);
 
@@ -64,19 +66,11 @@ pub fn install(ctx: &egui::Context) {
         s.spacing.menu_margin = Margin::symmetric(0, S as i8);
         // Solid scroll bars, always drawn when a list doesn't fit (egui's default thin ones only
         // show on hover, so a long list didn't look scrollable).
-        // egui's solid style still hides the bar until hovered (dormant opacity 0): show it always.
-        s.spacing.scroll = egui::style::ScrollStyle {
-            bar_width: 10.0,
-            handle_min_length: 24.0,
-            dormant_background_opacity: 0.0,
-            dormant_handle_opacity: 0.3,
-            active_handle_opacity: 0.45,
-            interact_handle_opacity: 0.6,
-            // The handle in the text colour: egui's default uses the widget fill, which the
-            // house forms make white (an invisible handle on a white panel).
-            foreground_color: true,
-            ..egui::style::ScrollStyle::solid()
-        };
+        // Solid bars, always drawn when a list doesn't fit (egui's default thin ones only show on
+        // hover, so a long list didn't look scrollable). A solid handle takes the widget fill
+        // colour, so forms keep their white fields inside the scrolling content, not around it.
+        s.spacing.scroll = egui::style::ScrollStyle { bar_width: 10.0, handle_min_length: 24.0, ..egui::style::ScrollStyle::solid() };
+        s.visuals.widgets.inactive.bg_fill = SCROLL_HANDLE;
         s.visuals.window_corner_radius = CornerRadius::same(PANEL_RADIUS);
         s.visuals.menu_corner_radius = CornerRadius::same(PANEL_RADIUS);
         s.visuals.window_stroke = Stroke::NONE;
@@ -90,7 +84,7 @@ pub fn install(ctx: &egui::Context) {
 /// sets up fonts). Cheap: a check of two values most frames.
 pub fn keep(ctx: &egui::Context) {
     let st = ctx.global_style();
-    if st.spacing.scroll.bar_width != 10.0 || st.visuals.window_corner_radius != CornerRadius::same(PANEL_RADIUS) {
+    if st.spacing.scroll.bar_width != 10.0 || st.visuals.window_corner_radius != CornerRadius::same(PANEL_RADIUS) || st.visuals.widgets.inactive.bg_fill != SCROLL_HANDLE {
         install(ctx);
     }
 }
@@ -166,6 +160,18 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, width: f32, title: &str, close: 
             body(ui)
         })
         .inner
+}
+
+/// A window's title row in the house style (title left, ✕ right), for windows drawn without
+/// egui's own title bar. Returns true when ✕ was clicked.
+pub fn title_row(ui: &mut Ui, title: &str) -> bool {
+    let mut close = false;
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).size(TITLE).color(theme::TEXT));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| close = close_button(ui));
+    });
+    ui.add_space(L - S);
+    close
 }
 
 /// A ✕ button for a dialog's corner.

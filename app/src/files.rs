@@ -15,7 +15,6 @@ use gridcraft_ui_egui::SheetApp;
 use serde_json::{Value as Json, json};
 use wasm_bindgen::JsCast as _;
 
-use crate::theme;
 
 /// Asks for the Open dialog, the version list, or another file action (menus set it in egui memory).
 pub const REQUEST: &str = "starsheets_files_request";
@@ -431,9 +430,12 @@ impl Files {
         if let Some(vs) = self.versions.clone() {
             let mut open = true;
             let mut restore = None;
-            egui::Window::new(RichText::new("Version history").size(crate::house::TITLE).color(theme::TEXT)).open(&mut open).collapsible(false).resizable(false).frame(crate::house::dialog_frame()).anchor(egui::Align2::RIGHT_TOP, vec2(-20.0, 90.0)).show(ui.ctx(), |ui| {
-                crate::house::form_style(ui);
+            egui::Window::new("Version history").title_bar(false).collapsible(false).resizable(false).frame(crate::house::dialog_frame()).anchor(egui::Align2::RIGHT_TOP, vec2(-20.0, 90.0)).show(ui.ctx(), |ui| {
                 ui.set_width(320.0);
+                if crate::house::title_row(ui, "Version history") {
+                    open = false;
+                }
+                crate::house::form_style(ui);
                 crate::house::note(ui, "Earlier copies are kept each time the file saves (the last 6).");
                 if vs.is_empty() {
                     ui.label("No earlier versions yet.");

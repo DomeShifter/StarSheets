@@ -225,7 +225,6 @@ impl ChartPanel {
             .resizable(false)
             .frame(house::panel_frame())
             .show(ui, |ui| {
-                house::form_style(ui);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Chart editor").size(16.0).color(theme::TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -253,6 +252,9 @@ impl ChartPanel {
                 });
                 ui.add_space(house::S);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(crate::house::panel_scroll_height(ui)).show(ui, |ui| {
+                    // White fields inside the scrolling part only: the scroll handle takes the
+                    // fill of the panel around it.
+                    house::form_style(ui);
                     ui.set_width(PANEL_W);
                     match tab {
                         Tab::Setup => self.setup(app, ui, &chart),
