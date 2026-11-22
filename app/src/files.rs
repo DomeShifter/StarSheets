@@ -257,7 +257,7 @@ impl Files {
                 // Someone saved this file elsewhere since we opened it: keep both.
                 // No date in the name: the server adds " (2)" if this name is taken too.
                 let name = format!("{} (conflicted copy)", self.link.as_ref().map_or("Untitled spreadsheet".into(), |l| stem(&l.name)));
-                app.message = Some(("Saved as a copy".into(), format!("This file was changed in another tab or by someone else, so your changes were saved as \"{name}\".")));
+                app.message = Some(("Saved as a copy".into(), format!("Your latest changes couldn't be added to the file, because it was saved by someone else (or by StarSheets after it restarted) since this tab last had it. Nothing is lost: your changes were saved as \"{name}\", next to it.")));
                 self.link = None;
                 post_new(doc, sent, bytes, name, &self.new_folder, self.inbox.clone(), ctx.clone());
             }

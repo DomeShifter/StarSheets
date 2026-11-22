@@ -6,6 +6,22 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+### Added
+- **Spelling suggestions:** while typing in a cell, click a word underlined in red to see up to
+  five corrections, add it to your own dictionary (kept in this browser), or ignore it.
+- **Activity log** for whoever runs the server: who opened and saved what, conflicts, changes made
+  outside StarSheets and failed saves, one line each with the time, in
+  `.starsheets/log.txt` next to your files (and in the server's output).
+
+### Fixed
+- Text being typed in a cell was thrown away when the connection to the server dropped and came
+  back (for example when the server restarted, or a tab had been open a long time), or when
+  another tab changed the same sheet. It now stays, and is saved when you finish.
+- Updating the server no longer reloads every open tab; tabs only reload when the way they talk
+  to the server has changed, and a cell being typed in comes back after that reload.
+- That reload could also save someone's latest changes as a "(conflicted copy)" even with the
+  file open in only one tab. The message now explains what happened.
+
 ## [0.3.0] - 2026-11-22
 
 ### Added

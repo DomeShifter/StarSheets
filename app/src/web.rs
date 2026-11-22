@@ -87,7 +87,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), spell: crate::spelling::Suggest::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
                 }),
             )
             .await;
@@ -128,6 +128,8 @@ struct WebShell {
     merge: crate::merge::MergeGuard,
     files: crate::files::Files,
     copyto: crate::copyto::CopyTo,
+    /// Spelling suggestions for a clicked misspelt word (spelling.rs).
+    spell: crate::spelling::Suggest,
     /// The home screen, shown instead of a spreadsheet when the page has no file (home.rs).
     home: crate::home::Home,
     live: crate::live::Live,
@@ -275,6 +277,7 @@ impl eframe::App for WebShell {
         self.protect.ui(&mut self.app, ui);
         // Before GridCraft draws: its alerts are shown as house dialogs instead.
         self.messages.ui(&mut self.app, &ctx);
+        self.spell.before(&ctx);
         self.app.ui(ui);
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
@@ -297,6 +300,7 @@ impl eframe::App for WebShell {
         self.files.ui(&mut self.app, ui);
         self.copyto.ui(&self.app, &ctx);
         self.protect.warning_ui(&mut self.app, &ctx);
+        self.spell.ui(&mut self.app, &ctx);
         crate::house::style_tooltips(&ctx);
         copy_without_https(ui.ctx());
     }

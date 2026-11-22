@@ -8,6 +8,7 @@
 
 mod auth;
 mod live;
+mod log;
 mod sharing;
 mod spaces;
 mod store;
@@ -586,7 +587,7 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
     .unwrap_or_else(|| Err("server error".into()));
     match r {
         Ok(()) => {
-            println!("Files are now kept in {:?}; restarting.", if json["folder"].as_str().unwrap_or("").is_empty() { "the top folder" } else { json["folder"].as_str().unwrap_or("") });
+            log::note(&app.store, &format!("files now kept in {:?}; restarting", if json["folder"].as_str().unwrap_or("").is_empty() { "the top folder" } else { json["folder"].as_str().unwrap_or("") }));
             tokio::spawn(async {
                 tokio::time::sleep(Duration::from_millis(600)).await;
                 std::process::exit(0);
@@ -856,6 +857,11 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
         Ok(mut r) => {
             if let (Some(id), Ok(Reply::Json(_, 200))) = (&replaced, &r) {
                 app.rooms.replaced(id);
+            }
+            if let (Some(id), Ok(Reply::Json(_, 409))) = (&replaced, &r) {
+                let who = me.as_ref().map_or_else(|| "a guest".to_string(), |u| u.username.clone());
+                let id = id.clone();
+                blocking(&app, move |a| log::note(&a.store, &format!("CONFLICT: {who} saved file {id} from an older copy (the tab wasn't live); the tab keeps their changes as a conflicted copy"))).await;
             }
             // Who changed it last (Details): a save through the API, or a new file / copy.
             if let Some(me) = &me {

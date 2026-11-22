@@ -105,13 +105,20 @@ fn text(m: &ToClient) -> String {
     serde_json::to_string(m).unwrap_or_default()
 }
 
+/// A person for the log: their username, or "a guest" with sign-in off.
+fn who(user: &Option<crate::auth::User>) -> String {
+    user.as_ref().map_or_else(|| "a guest".to_string(), |u| u.username.clone())
+}
+
 async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth::User>) {
     // The first message says which file.
     let (file, client) = loop {
         match socket.recv().await {
             Some(Ok(Message::Text(t))) => match serde_json::from_str::<ToServer>(&t) {
-                Ok(ToServer::Hello { file, build, client }) => {
-                    if build != sync::BUILD {
+                Ok(ToServer::Hello { file, build, client, protocol }) => {
+                    // Only a different protocol needs the tab to reload (not every new build).
+                    if protocol != sync::PROTOCOL {
+                        crate::log::note(&app.store, &format!("tab of {} on an older StarSheets (build {build}) asked to reload", who(&user)));
                         let _ = socket.send(Message::Text(text(&ToClient::Reload).into())).await;
                         return;
                     }
@@ -131,6 +138,8 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
             if let Some(u) = &user {
                 let _ = crate::spaces::note_opened(&app.store, u, &file);
             }
+            let name = app.store.synced_index().ok().and_then(|i| i.get(&file).cloned()).unwrap_or_else(|| file.clone());
+            crate::log::note(&app.store, &format!("{} opened {name}", who(&user)));
             crate::sharing::file_role(&app.store, app.auth, user.as_ref(), &file)
         })
         .await
@@ -357,6 +366,10 @@ impl Room {
                 self.people();
             }
             RoomMsg::Leave { client } => {
+                if let Some(c) = self.clients.get(&client) {
+                    let name = if c.person.username.is_empty() { c.person.name.clone() } else { c.person.username.clone() };
+                    crate::log::note(&self.app.store, &format!("{name} closed {}", self.path.clone().unwrap_or_default()));
+                }
                 self.clients.remove(&client);
                 self.people();
                 if self.clients.is_empty() {
@@ -564,6 +577,9 @@ impl Room {
             Err(SaveError::Outside) => self.check_disk(),
             Err(SaveError::Failed(why)) => {
                 self.save_failed_at = Some(Instant::now());
+                if self.told.as_deref() != Some(why.as_str()) {
+                    crate::log::note(&self.app.store, &format!("couldn't save {}: {why}", self.path.clone().unwrap_or_default()));
+                }
                 // Moved to the bin: check_disk says so once, in plain words; other failures are
                 // told once each, not every 10 s.
                 if self.disk_now().is_some() && self.told.as_deref() != Some(why.as_str()) {
@@ -587,9 +603,11 @@ impl Room {
         self.app.store.keep_version(&self.file, &full).map_err(|e| failed(e.to_string()))?;
         self.app.store.write_file(&full, &bytes).map_err(|e| failed(e.to_string()))?;
         self.disk = self.app.store.version_of(&full).ok();
-        if let Some(who) = self.last_editor.take() {
-            let _ = crate::spaces::note_changed(&self.app.store, &self.file, &who);
+        let editor = self.last_editor.take();
+        if let Some(who) = &editor {
+            let _ = crate::spaces::note_changed(&self.app.store, &self.file, who);
         }
+        crate::log::note(&self.app.store, &format!("saved {path} (last change by {})", editor.as_deref().unwrap_or("someone")));
         Ok(())
     }
 
@@ -611,6 +629,11 @@ impl Room {
             return;
         }
         let kept = if self.dirty_since.is_some() { self.wb().map(|wb| self.keep_copy(&wb)) } else { None };
+        crate::log::note(&self.app.store, &format!("{} changed outside StarSheets; {}", self.path.clone().unwrap_or_default(), match &kept {
+            Some(Ok(n)) => format!("unsaved changes kept in {n}"),
+            Some(Err(e)) => format!("unsaved changes could NOT be kept: {e}"),
+            None => "nothing was unsaved".into(),
+        }));
         if matches!(kept, Some(Ok(_))) {
             self.dirty_since = None; // kept: don't make a second copy if reading fails below
         }
@@ -638,6 +661,7 @@ impl Room {
             (Some(p), _) | (None, Some(p)) => (crate::store::base_of(p), crate::store::parent_of(p)),
             (None, None) => return,
         };
+        crate::log::note(&self.app.store, &format!("{} is now {}", self.path.clone().unwrap_or_default(), now.clone().unwrap_or_else(|| "in the bin".into())));
         self.all(&ToClient::Moved { name, folder, binned: now.is_none() });
         self.path = now;
     }

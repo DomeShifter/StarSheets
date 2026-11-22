@@ -231,7 +231,7 @@ impl Live {
             Event::Open => {
                 self.open = true;
                 if let Some((_, id)) = &self.file {
-                    self.send(&ToServer::Hello { file: id.clone(), build: sync::BUILD.to_string(), client: self.client.clone() });
+                    self.send(&ToServer::Hello { file: id.clone(), build: sync::BUILD.to_string(), client: self.client.clone(), protocol: sync::PROTOCOL });
                 }
                 false
             }
@@ -267,6 +267,7 @@ impl Live {
                         self.failures = 0;
                         self.sent_place = None;
                         self.rebuild(app, None);
+                        restore_draft(app, self.file.as_ref().map(|(_, id)| id.as_str()).unwrap_or(""));
                         // Everything not confirmed goes (again) on top of what the server has.
                         let resend: Vec<ToServer> = self.pending.iter().map(|p| ToServer::Change { cseq: p.cseq, base: seq, change: p.change.clone() }).collect();
                         for r in resend {
@@ -392,6 +393,8 @@ impl Live {
                     if let Some(s) = &storage {
                         let _ = s.set_item(&key, "1");
                     }
+                    // A cell being typed in comes back after the reload with its text.
+                    keep_draft(app, self.file.as_ref().map(|(_, id)| id.as_str()).unwrap_or(""));
                     if let Some(w) = web_sys::window() {
                         let _ = w.location().reload();
                     }
@@ -408,6 +411,10 @@ impl Live {
     /// changes on top, each again from where it now starts.
     fn rebuild(&mut self, app: &mut SheetApp, remote: Option<&Change>) {
         let Some(confirmed) = self.confirmed.clone() else { return };
+        // The sheet of a cell being typed in, by name: a sheet that arrives from the server as a
+        // whole (on reconnecting, or changed by another tab) is a new sheet to GridCraft, which
+        // would then throw the typing away as "the sheet was deleted".
+        let typing_on = app.editor.as_ref().and_then(|e| app.session.active().filter(|d| d.uid == e.doc).and_then(|d| d.wb.sheet(e.sheet)).map(|sh| sh.name.clone()));
         sync::restore_workbook(&mut app.session, &confirmed);
         for c in self.acked.drain(..).collect::<Vec<_>>() {
             let _ = sync::apply(&mut app.session, &c);
@@ -436,6 +443,16 @@ impl Live {
             kept.push_back(p);
         }
         self.pending = kept;
+        if let (Some(name), Some(d)) = (typing_on, app.session.active())
+            && let Some(e) = app.editor.as_mut()
+            && e.doc == d.uid
+            && e.sheet_in(&d.wb).is_none()
+            && let Some(i) = d.wb.sheets.iter().position(|sh| sh.name == name)
+        {
+            e.sheet = i;
+            e.sheet_uid = d.wb.sheets[i].uid.get();
+            e.sheet_order = gridcraft_ui_egui::editor::sheet_order(&d.wb);
+        }
     }
 
     /// Other people's selections on this sheet, in their colours; their name shows for a few
@@ -571,4 +588,26 @@ thread_local! {
 /// The open file's new (name, folder) after a rename or move, once.
 pub fn take_moved() -> Option<(String, String)> {
     MOVED.with(|m| m.borrow_mut().take())
+}
+
+/// Keeps the cell being typed in (sheet, cell, text) across a reload, in this tab's session
+/// storage (the page reloads when StarSheets itself was updated; nothing typed may be lost).
+fn keep_draft(app: &SheetApp, file: &str) {
+    let Some(e) = app.editor.as_ref() else { return };
+    let Some(s) = web_sys::window().and_then(|w| w.session_storage().ok().flatten()) else { return };
+    let v = serde_json::json!({ "sheet": e.sheet, "row": e.cell.row, "col": e.cell.col, "text": e.text });
+    let _ = s.set_item(&format!("starsheets_draft_{file}"), &v.to_string());
+}
+
+/// Opens the kept cell again with its text, once, after the file has loaded.
+fn restore_draft(app: &mut SheetApp, file: &str) {
+    let Some(s) = web_sys::window().and_then(|w| w.session_storage().ok().flatten()) else { return };
+    let key = format!("starsheets_draft_{file}");
+    let Some(v) = s.get_item(&key).ok().flatten().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
+    let _ = s.remove_item(&key);
+    let (sheet, row, col) = (v["sheet"].as_u64().unwrap_or(0), v["row"].as_u64().unwrap_or(0), v["col"].as_u64().unwrap_or(0));
+    let cell = gridcraft_engine::core::CellRef { row: row as u32, col: col as u32 };
+    let _ = app.run("sheet.activate", serde_json::json!({ "sheet": sheet }));
+    let _ = app.run("selection.set", serde_json::json!({ "range": cell.to_string() }));
+    app.begin_edit(Some(v["text"].as_str().unwrap_or("").to_string()), false);
 }

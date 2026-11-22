@@ -88,6 +88,12 @@ fn stamp() -> String {
     format!("{y:04}{m:02}{d:02}-{h:02}{mi:02}{s:02}")
 }
 
+/// "YYYY-mm-dd HH:MM:SS" (UTC) for the activity log.
+pub fn log_stamp() -> String {
+    let (y, m, d, h, mi, s) = civil(now() as i64);
+    format!("{y:04}-{m:02}-{d:02} {h:02}:{mi:02}:{s:02}")
+}
+
 /// "YYYY-mm-dd HH.MM" (UTC) for names people read (no ":" — Windows and SMB refuse it).
 pub fn readable_stamp() -> String {
     let (y, m, d, h, mi, _) = civil(now() as i64);

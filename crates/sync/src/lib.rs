@@ -16,6 +16,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value as Json, json};
 
 /// Tabs and server must run the same engine. CI sets STARSHEETS_BUILD to the commit for both.
+/// How tabs and the server talk. Bump it when a message changes shape: only then must open tabs
+/// reload. (A tab on another build of the same protocol keeps working: replayed changes are
+/// checked by fingerprint, and a difference falls back to sending the finished state.)
+pub const PROTOCOL: u32 = 2;
+
 pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
     Some(b) => b,
     None => "dev",
@@ -27,7 +32,14 @@ pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum ToServer {
     /// First message: the file (its id), the tab's build and a random id for this tab.
-    Hello { file: String, build: String, client: String },
+    Hello {
+        file: String,
+        build: String,
+        client: String,
+        /// PROTOCOL (0 from tabs older than it).
+        #[serde(default)]
+        protocol: u32,
+    },
     /// A change made on top of the server's revision `base`.
     Change { cseq: u64, base: u64, change: Change },
     Undo,
