@@ -60,7 +60,8 @@
 
 ## Live editing checklist ([plan](docs/live-editing.md))
 - [x] Step 0: Rust server (`crates/server`) replaces server/files.py, same API and same files on disk; checked against the old server request by request (`crates/server/tests/parity.py`)
-- [ ] Step 1: live sync between tabs (server runs the engine, saves the file; tabs catch up with each other)
+- [x] Step 1: live sync between tabs (server runs the engine, saves the file; tabs catch up with each other); undo of your own latest change
+- [ ] Step 1 follow-ups: keep changes made while offline across a reload; a log of unsaved changes on the server for a crash; selection follows rows inserted above it
 - [ ] Step 2: accounts (local, username and password) and seeing other people's cursors
 - [ ] Step 3: undo that only undoes your own changes
 - [ ] Step 4: share dialog and view-only mode
