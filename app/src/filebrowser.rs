@@ -1,4 +1,4 @@
-//! File › Open: a small Drive-like file window over the server folder (server/files.py):
+//! File › Open: a small Drive-like file window over the server folder (crates/server):
 //! a folder path you can click back along, folders then files, search across all folders, sort by
 //! name or date, and the usual handling: new folder, new spreadsheet here, rename (F2), copy / cut
 //! / paste (Ctrl+C / X / V), drag onto a folder or the path to move, move to bin (Delete), download,

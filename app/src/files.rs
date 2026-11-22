@@ -1,4 +1,4 @@
-//! Files on the StarSheets file server (server/files.py, under /api/ on the same site), the way
+//! Files on the StarSheets file server (crates/server, under /api/ on the same site), the way
 //! Google Drive and Sheets work: a spreadsheet saves itself a moment after each change (a new one
 //! as soon as any cell has something in it, as "Untitled spreadsheet"), the address bar keeps its
 //! file (`?file=<id>`) so a reload reopens it, and File › Open lists the files in the folder.

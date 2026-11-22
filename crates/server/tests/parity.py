@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""Checks the Rust server answers like server/files.py did: runs both on two copies of the same
+folder, sends the same requests to each, and compares status codes, replies and the files left
+on disk. Random ids and file versions are mapped to placeholders before comparing.
+
+  python3 crates/server/tests/parity.py path/to/starsheets-server [path/to/files.py]
+"""
+
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+RUST = sys.argv[1]
+PY = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "reference", "files.py")
+
+
+def free_port():
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def seed(store):
+    os.makedirs(os.path.join(store, "Work", "Old"))
+    for rel_path, data in [("Budget.xlsx", b"budget"), ("Work/Plan.xlsx", b"plan"), ("Work/Old/Ancient.csv", b"a,b"), ("notes.txt", b"not a sheet"), (".hidden.xlsx", b"x")]:
+        with open(os.path.join(store, rel_path), "wb") as f:
+            f.write(data)
+    site = os.path.join(store, "..", "site")
+    os.makedirs(os.path.join(site, "assets"), exist_ok=True)
+    for name, data in [("index.html", b"<html>app</html>"), ("app-0123456789abcdef.wasm", b"\0asm"), ("build.json", b"{}")]:
+        with open(os.path.join(site, name), "wb") as f:
+            f.write(data)
+    return os.path.abspath(site)
+
+
+class Server:
+    def __init__(self, cmd, store, site, auth):
+        self.port = free_port()
+        env = dict(os.environ, STORE=store, PORT=str(self.port), KEEP="2", LOCATION="the test", SITE=site,
+                   STARSHEETS_AUTH="on" if auth else "off", STARSHEETS_PASSWORD="pw")
+        self.proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.cookie = ""
+        for _ in range(100):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{self.port}/api/info", timeout=1)
+                return
+            except (urllib.error.URLError, ConnectionError):
+                time.sleep(0.05)
+        raise SystemExit(f"{cmd} did not start")
+
+    def call(self, method, path, body=None, headers=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}", data=body, method=method, headers=headers or {})
+        if self.cookie:
+            req.add_header("Cookie", self.cookie)
+        try:
+            r = urllib.request.urlopen(req, timeout=10)
+        except urllib.error.HTTPError as e:
+            r = e
+        data = r.read()
+        h = {k.lower(): v for k, v in r.headers.items()}
+        if "set-cookie" in h and h["set-cookie"].split("=", 1)[1].split(";")[0]:
+            self.cookie = h["set-cookie"].split(";")[0]
+        return r.status, h, data
+
+    def stop(self):
+        self.proc.terminate()
+        self.proc.wait(5)
+
+
+class Norm:
+    """Maps random ids / versions / times to stable placeholders, per server."""
+
+    def __init__(self):
+        self.ids, self.versions = {}, {}
+
+    def id(self, v):
+        return self.ids.setdefault(v, f"ID{len(self.ids)}") if v else v
+
+    def value(self, v, key=""):
+        if isinstance(v, dict):
+            return {k: self.value(x, k) for k, x in v.items()}
+        if isinstance(v, list):
+            return [self.value(x, key) for x in v]
+        if key == "id":
+            return self.id(v)
+        if key in ("version", "v"):
+            return self.versions.setdefault(v, f"V{len(self.versions)}")
+        if key in ("modified", "deleted"):
+            return "T"
+        return v
+
+
+def run(server, norm, steps):
+    out = []
+    ctx = {}
+    for step in steps:
+        method, path, body, headers, keep = step
+        path = path.format(**{k: urllib.parse.quote(str(v), safe='') for k, v in ctx.items()})
+        headers = {k: v.format(**ctx) for k, v in (headers or {}).items()}
+        status, h, data = server.call(method, path, body, headers)
+        try:
+            reply = json.loads(data) if data else None
+        except ValueError:
+            reply = data.decode("latin-1")
+        if keep and isinstance(reply, dict):
+            for name, key in keep.items():
+                ctx[name] = reply[key]
+        if method == "GET" and keep and "etag" in h:
+            ctx[keep.get("_etag", "etag")] = h["etag"]
+        if isinstance(reply, list) and keep and "_first_v" in keep and reply:
+            ctx[keep["_first_v"]] = reply[0]["v"]
+        if isinstance(reply, list) and keep and "_first_bin" in keep and reply:
+            ctx[keep["_first_bin"]] = reply[0]["name"]
+        shown = {k: h[k] for k in ("x-file-name", "x-folder", "content-type", "cache-control", "content-encoding") if k in h}
+        if "etag" in h:
+            shown["etag"] = norm.value(h["etag"], "version")
+        reply = norm.value(reply)
+        if isinstance(reply, dict) and isinstance(reply.get("files"), list):
+            reply["files"].sort(key=lambda f: (f["folder"], f["name"]))
+        out.append((method, re.sub(r"[0-9a-f]{16}", "ID", path), status, reply, shown))
+    return out
+
+
+def tree(store):
+    """Visible files with contents, plus how many versions/bin entries exist."""
+    found = []
+    for root, dirs, names in os.walk(store):
+        dirs.sort()
+        for n in sorted(names):
+            full = os.path.join(root, n)
+            rel_path = os.path.relpath(full, store)
+            if rel_path.startswith(".starsheets"):
+                if "versions" in rel_path:
+                    found.append(("version of", rel_path.split(os.sep)[2] and "X", open(full, "rb").read()))
+                continue
+            found.append((rel_path, open(full, "rb").read()))
+    return sorted(found, key=repr)
+
+
+STEPS = [
+    ("GET", "/api/info", None, None, None),
+    ("GET", "/api/files", None, None, None),
+    ("POST", "/api/files?name=Budget&folder=", b"new budget", None, {"new": "id"}),
+    ("POST", "/api/files?name=a%2Fb%3Ac.XLSX&folder=Work", b"slashes", None, None),
+    ("POST", "/api/files?folder=Nope", b"x", None, None),
+    ("POST", "/api/files?folder=..%2Fx", b"x", None, None),
+    ("GET", "/api/files/{new}", None, None, {"_etag": "etag"}),
+    ("PUT", "/api/files/{new}", b"v2", {"If-Match": "{etag}"}, None),
+    ("PUT", "/api/files/{new}", b"stale", {"If-Match": "{etag}"}, None),
+    ("PUT", "/api/files/{new}", b"v3", None, None),
+    ("PUT", "/api/files/{new}", b"v4", None, None),
+    ("GET", "/api/files/{new}/versions", None, None, {"_first_v": "v0"}),
+    ("GET", "/api/files/{new}/versions/{v0}", None, None, None),
+    ("GET", "/api/files/{new}/versions/nope", None, None, None),
+    ("POST", "/api/files/{new}/rename?name=Budget", None, None, None),
+    ("POST", "/api/files/{new}/rename?name=Caf%C3%A9%20%E2%9C%93", None, None, None),
+    ("GET", "/api/files/{new}", None, None, None),
+    ("POST", "/api/files/{new}/copy", None, None, {"copy": "id"}),
+    ("POST", "/api/files/{copy}/move?folder=Work/Old", None, None, None),
+    ("POST", "/api/files/{copy}/copy?folder=Work", None, None, None),
+    ("GET", "/api/files/nope", None, None, None),
+    ("POST", "/api/folders?path=Work&name=Sub", None, None, None),
+    ("POST", "/api/folders?path=Work&name=Sub", None, None, None),
+    ("POST", "/api/folders?path=", None, None, None),
+    ("POST", "/api/folders/rename?path=Work/Sub&name=Renamed", None, None, None),
+    ("POST", "/api/folders/move?path=Work/Old&to=Work/Renamed", None, None, None),
+    ("POST", "/api/folders/move?path=Work&to=Work/Renamed", None, None, None),
+    ("POST", "/api/folders/copy?path=Work/Renamed&to=", None, None, None),
+    ("POST", "/api/folders/rename?path=&name=x", None, None, None),
+    ("GET", "/api/files", None, None, None),
+    ("DELETE", "/api/files/{copy}", None, None, None),
+    ("DELETE", "/api/folders?path=Renamed", None, None, None),
+    ("GET", "/api/bin", None, None, {"_first_bin": "b0"}),
+    ("POST", "/api/bin/restore?name={b0}", None, None, None),
+    ("POST", "/api/bin/restore?name=nope", None, None, None),
+    ("DELETE", "/api/bin?name=nope", None, None, None),
+    ("DELETE", "/api/bin", None, None, None),
+    ("GET", "/api/bin", None, None, None),
+    ("GET", "/api/files", None, None, None),
+    ("GET", "/api/whatever", None, None, None),
+    ("GET", "/", None, None, None),
+    ("GET", "/some/route", None, None, None),
+    ("GET", "/app-0123456789abcdef.wasm", None, None, None),
+    ("GET", "/missing.js", None, None, None),
+    ("GET", "/build.json", None, None, None),
+]
+
+LOGIN_STEPS = [
+    ("GET", "/api/info", None, None, None),
+    ("GET", "/api/files", None, None, None),
+    ("POST", "/api/login", b'{"password": "wrong"}', None, None),
+    ("POST", "/api/login", b'{"password": "pw"}', None, None),
+    ("GET", "/api/info", None, None, None),
+    ("GET", "/api/bin", None, None, None),
+]
+
+
+def compare(label, steps, auth):
+    results, trees = [], []
+    for cmd in ([sys.executable, "-u", PY], [RUST]):
+        base = tempfile.mkdtemp()
+        store = os.path.join(base, "store")
+        os.makedirs(store)
+        site = seed(store)
+        s = Server(cmd, store, site, auth)
+        try:
+            results.append(run(s, Norm(), steps))
+        finally:
+            s.stop()
+        trees.append(tree(store))
+        shutil.rmtree(base)
+    bad = 0
+    for a, b in zip(*results):
+        # files.py sorted versions saved within one second at random (fixed in the Rust server).
+        if "/versions" in a[1]:
+            continue
+        a_cmp, b_cmp = list(a), list(b)
+        # Content types may be spelt differently (text/javascript vs application/javascript).
+        for x in (a_cmp, b_cmp):
+            x[4] = {k: v for k, v in x[4].items() if k != "content-type" or "json" in v or "octet" in v or "wasm" in v}
+        if a_cmp != b_cmp:
+            bad += 1
+            print(f"DIFF {label}: {a[0]} {a[1]}\n  python: {a[2:]}\n  rust:   {b[2:]}")
+    trees = [[t for t in tr if t[0] != "version of"] for tr in trees]
+    if trees[0] != trees[1]:
+        bad += 1
+        print(f"DIFF {label}: files on disk\n  python: {trees[0]}\n  rust:   {trees[1]}")
+    print(f"{label}: {len(steps)} requests, {'all the same' if not bad else f'{bad} differences'}")
+    return bad
+
+
+def version_order():
+    """Rust only: versions saved within one second are kept newest-first, oldest dropped."""
+    base = tempfile.mkdtemp()
+    store = os.path.join(base, "store")
+    os.makedirs(store)
+    s = Server([RUST], store, seed(store), auth=False)
+    try:
+        _, _, data = s.call("POST", "/api/files?name=V", b"v1")
+        fid = json.loads(data)["id"]
+        for body in (b"v2", b"v3", b"v4", b"v5"):
+            s.call("PUT", f"/api/files/{fid}", body)
+        vs = json.loads(s.call("GET", f"/api/files/{fid}/versions")[2])
+        got = [s.call("GET", f"/api/files/{fid}/versions/{v['v']}")[2] for v in vs]
+    finally:
+        s.stop()
+        shutil.rmtree(base)
+    ok = got == [b"v4", b"v3"]
+    print(f"version order: {'right' if ok else f'WRONG {got}'}")
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    fails = compare("files", STEPS, auth=False) + compare("login", LOGIN_STEPS, auth=True) + version_order()
+    sys.exit(1 if fails else 0)

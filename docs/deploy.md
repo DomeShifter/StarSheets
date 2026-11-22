@@ -19,6 +19,10 @@ Spreadsheets are ordinary `.xlsx` files in `/data`, in folders as you make them 
 
 - The app is a static site (`dist/` from `trunk build --release`). Serve WebAssembly as
   `application/wasm`, compressed; hashed files can be cached forever, `index.html` should not be.
-- `server/files.py` (Python 3, standard library only) stores the files. Put it behind the same
-  host name as the app under `/api/`, or let it serve the app too with `SITE=path/to/dist`.
+- `starsheets-server` (from `crates/server`, a single program) stores the files. Put it behind the
+  same host name as the app under `/api/`, or let it serve the app too with `SITE=path/to/dist`.
+  It reads the same settings as the Docker image. A folder used by the older `server/files.py`
+  works unchanged.
+- Live editing (coming) will use a WebSocket under `/api/`: a reverse proxy must pass
+  `Upgrade` and `Connection` headers through.
 - Use HTTPS (or localhost): browsers only give full clipboard access to secure pages.

@@ -7,6 +7,10 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- The server is now one Rust program (`starsheets-server`) instead of a Python script, the first
+  step towards live editing ([docs/live-editing.md](docs/live-editing.md)). Same files, folders,
+  versions and bin; nothing to move. Versions saved within the same second are now kept in the
+  right order. The Docker image no longer contains Python.
 - Messages (such as editing a protected cell) appear as StarSheets dialogs with plain wording.
 - Pie and doughnut charts: each slice can have its own colour (chart editor › Customise › Pie
   slices), kept in the .xlsx file; colour schemes now colour every slice.

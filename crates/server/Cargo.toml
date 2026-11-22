@@ -1,0 +1,24 @@
+[package]
+name = "starsheets-server"
+description = "StarSheets' server: stores spreadsheets as .xlsx files in a folder tree and serves the web app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "starsheets-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs", "net", "time"] }
+serde_json = { workspace = true }
+sha2 = "0.11"
+hex = "0.4"
+rand = "0.10"
+mime_guess = "2"
+percent-encoding = "2"
+form_urlencoded = "1"

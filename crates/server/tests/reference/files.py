@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# RETIRED (replaced by crates/server, the Rust server). Kept only as the reference that
+# crates/server/tests/parity.py checks the Rust server against. Not deployed.
 """StarSheets file store: spreadsheets as ordinary .xlsx files in a folder tree (STORE).
 
 A small JSON API for the web app, served behind the same nginx as the app (under /api/).

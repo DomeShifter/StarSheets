@@ -1,14 +1,13 @@
 # StarSheets roadmap
 
-> **Last updated:** 2026-11-21 · **Now:** phase 1 (look and feel); phase 0 done except the spike report
+> **Last updated:** 2026-11-22 · **Now:** live editing, step 0 (Rust server); phase 1 extras continue alongside
 
 | Phase | Goal | Done when | Status |
 |---|---|---|---|
 | 0 Test build | Our app with a Sheets menu bar and toolbar instead of GridCraft's ribbon, Sheets colours | Opens and edits an xlsx in the browser with no ribbon; list of what can't be restyled | **in progress** |
 | 1 Look and feel | Sheets menus, toolbar with icons, bottom bar (+, sheet list, tabs, quick sum), blue selection, side panels instead of dialogs, Sheets shortcuts | Side-by-side screenshots match closely | next |
 | 2 Saving like Drive | Small server: file list home page, saving after every change (no Save button), version history | Close the tab, reopen, nothing lost; restore an older version | |
-| 3 Sharing | Logins, view and edit links | A second person opens a shared sheet | |
-| 4 Live co-editing (optional) | Two people editing at once | Two browsers edit together without clashes | |
+| 3 Live editing and sharing | The same file open in several tabs or by several people, all seeing each other's changes as they happen; accounts; sharing like Google (owner, can edit, can view, link) | Two browsers edit together and stay identical; a viewer can't edit | **started** ([plan](docs/live-editing.md)) |
 | 5 Extras | Sheets-only functions (QUERY, SPLIT…), phone layout | as needed | |
 
 ## Phase 0 checklist
@@ -58,5 +57,12 @@
 - [ ] QUERY: check every case against answers recorded from Google Sheets; dates shown as dates in results
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
+
+## Live editing checklist ([plan](docs/live-editing.md))
+- [x] Step 0: Rust server (`crates/server`) replaces server/files.py, same API and same files on disk; checked against the old server request by request (`crates/server/tests/parity.py`)
+- [ ] Step 1: live sync between tabs (server runs the engine, saves the file; tabs catch up with each other)
+- [ ] Step 2: accounts (local, username and password) and seeing other people's cursors
+- [ ] Step 3: undo that only undoes your own changes
+- [ ] Step 4: share dialog and view-only mode
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).

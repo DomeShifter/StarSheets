@@ -56,6 +56,45 @@ jobs:
           path: dist/
           retention-days: 30
 
+  server:
+    name: Build server (Linux amd64 + arm64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch GridCraft at the pinned tag and apply our patches
+        run: scripts/fetch-upstream.sh
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/cargo-home/registry
+            ~/cargo-home/git
+            target
+          key: server-${{ hashFiles('Cargo.lock') }}
+          restore-keys: server-
+      # Built inside Debian 13, the same C library as the Docker image and Debian servers.
+      - name: Build
+        run: |
+          mkdir -p ~/cargo-home
+          docker run --rm -v "$PWD":/src -v ~/cargo-home:/cargo-home -e CARGO_HOME=/cargo-home -w /src rust:1.100.0-trixie bash -c '
+            set -e
+            apt-get update -qq && apt-get install -y -qq gcc-aarch64-linux-gnu libc6-dev-arm64-cross >/dev/null
+            rustup target add aarch64-unknown-linux-gnu
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+            cargo build --release -p starsheets-server --target x86_64-unknown-linux-gnu --target aarch64-unknown-linux-gnu
+            mkdir -p server-bin/amd64 server-bin/arm64
+            cp target/x86_64-unknown-linux-gnu/release/starsheets-server server-bin/amd64/
+            cp target/aarch64-unknown-linux-gnu/release/starsheets-server server-bin/arm64/
+            chown -R '"$(id -u):$(id -g)"' server-bin target /cargo-home'
+          ls -la server-bin/*
+      - name: Same answers as the old Python server
+        run: python3 crates/server/tests/parity.py server-bin/amd64/starsheets-server
+      - uses: actions/upload-artifact@v7
+        with:
+          name: starsheets-server
+          path: server-bin/
+          retention-days: 30
+
   test:
     name: Tests (native)
     runs-on: ubuntu-latest
@@ -71,12 +110,12 @@ jobs:
         with:
           key: test
       - name: Test
-        run: cargo test -p starsheets -p sheets-functions
+        run: cargo test -p starsheets -p sheets-functions -p starsheets-server
 
   release:
     name: Release (Docker image + draft release)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web, test]
+    needs: [web, test, server]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -93,6 +132,10 @@ jobs:
         with:
           name: starsheets-web
           path: site
+      - uses: actions/download-artifact@v8
+        with:
+          name: starsheets-server
+          path: server-bin
       - name: Compress the site (served pre-compressed) and zip it for the release
         run: |
           (cd site && zip -qr "../starsheets-web-$VERSION.zip" .)

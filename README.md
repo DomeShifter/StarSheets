@@ -60,8 +60,8 @@ python3 scripts/fetch-fonts.py     # the free fonts in the font menu
 cd app && trunk build --release    # the app, in dist/
 ```
 
-Serve `dist/` with any web server, or run `server/files.py` with `SITE=dist` to get the app and
-the file storage together. More in [docs/deploy.md](docs/deploy.md) and
+Serve `dist/` with any web server, or run the server (`cargo run --release -p starsheets-server`)
+with `SITE=app/dist` to get the app and the file storage together. More in [docs/deploy.md](docs/deploy.md) and
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## How it fits together
@@ -71,7 +71,7 @@ the file storage together. More in [docs/deploy.md](docs/deploy.md) and
 | Formula engine, xlsx/csv import and export, grid, charts | [GridCraft](https://github.com/storytold/gridcraft), pinned to one release, with small patches (`patches/`, listed in [docs/upstream.md](docs/upstream.md)) |
 | Google Sheets look: title, menus, toolbar, side panels | `app/` |
 | Google-only functions (QUERY) | `crates/sheets-functions` |
-| File storage, login | `server/files.py` |
+| File storage, login (and soon live editing) | `crates/server` (Rust) |
 
 Design choices and the reasons for them are in [docs/decisions.md](docs/decisions.md).
 
