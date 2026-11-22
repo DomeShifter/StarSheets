@@ -338,18 +338,6 @@ impl ProtectPanel {
             self.asking = Some(cell);
             self.dont_ask = false;
         }
-        // A restricted cell: say why the edit can't start (GridCraft refuses it quietly).
-        if let Some(cell) = app.editor.as_ref().map(|e| e.cell)
-            && let Some(sheet) = app.session.active().map(|d| d.wb.active_sheet())
-            && app.session.active().is_some_and(|d| d.wb.sheets.get(sheet).is_some_and(|s| s.is_protected()))
-            && entries(app).iter().any(|e| !e.meta.warn && e.sheet == sheet && (if e.meta.sheet { !except_contains(&e.meta.except, cell) } else { e.range.contains(cell) }))
-        {
-            app.cancel_edit();
-            app.message = Some((
-                "Protected cell".into(),
-                "You're trying to edit a protected cell. To change it, remove its protection in Data › Protect sheets and ranges.".into(),
-            ));
-        }
         let Some(_) = self.asking else { return };
         let mut answer = None;
         let mut closed = false;

@@ -26,6 +26,7 @@ mod house;
 mod icons;
 mod linkcard;
 mod merge;
+mod messages;
 mod namespanel;
 mod notes;
 mod sheets_formulas;

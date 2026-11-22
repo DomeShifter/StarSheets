@@ -7,6 +7,7 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- Messages (such as editing a protected cell) appear as StarSheets dialogs with plain wording.
 - Pie and doughnut charts: each slice can have its own colour (chart editor › Customise › Pie
   slices), kept in the .xlsx file; colour schemes now colour every slice.
 - Settings and the colour-scale points use the house drop-down.
