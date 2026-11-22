@@ -78,6 +78,7 @@ pub struct ChartPanel {
     open: [bool; 5],
     title_which: usize,
     series_which: usize,
+    slice_which: usize,
     scheme: usize,
     /// The data range and X-axis boxes while they are being typed in.
     range_draft: Option<String>,
@@ -389,8 +390,31 @@ impl ChartPanel {
                 app.run_or_alert("chart.set", json!({ "chart": id, key: v }));
             }
         }
+        // Pie and doughnut: each slice's colour, as Sheets' "Pie slice" section.
+        if pie && section(ui, "Pie slices", &mut self.open[2]) {
+            let Some(d) = app.session.active() else { return };
+            let data = gridcraft_chart::resolve(&d.wb, d.wb.active_sheet(), c);
+            let names: Vec<String> = data.categories.iter().take(200).cloned().collect();
+            if !names.is_empty() {
+                let labels: Vec<&str> = names.iter().map(String::as_str).collect();
+                self.slice_which = self.slice_which.min(labels.len() - 1);
+                house::label(ui, "Slice", "");
+                house::select(ui, "chart_slice_which", PANEL_W, &mut self.slice_which, &labels, &[]);
+                let j = self.slice_which;
+                let rgba = if j == 0 { data.series.first().map(|s| s.color) } else { data.palette.get(j % data.palette.len().max(1)).copied() };
+                let now = rgba.map(|[r, g, b, _]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b));
+                house::label(ui, "Colour", "");
+                if let Some(rgb) = colour_button(ui, "chart_slice_colour", now) {
+                    app.run_or_alert("chart.formatSelection", json!({ "chart": id, "point": j, "color": format!("#{rgb:06X}") }));
+                }
+            }
+            let mut labels_on = c.data_labels;
+            if ui.checkbox(&mut labels_on, "Data labels").changed() {
+                app.run_or_alert("chart.set", json!({ "chart": id, "dataLabels": labels_on }));
+            }
+        }
         // Series.
-        if section(ui, "Series", &mut self.open[2]) {
+        if !pie && section(ui, "Series", &mut self.open[2]) {
             let mut names = vec!["Apply to all series".to_string()];
             names.extend(c.series.iter().enumerate().map(|(i, s)| series_name(app, s.name.as_deref(), i)));
             let labels: Vec<&str> = names.iter().map(String::as_str).collect();
@@ -399,19 +423,11 @@ impl ChartPanel {
             let targets: Vec<usize> = if self.series_which == 0 { (0..c.series.len()).collect() } else { vec![self.series_which - 1] };
             house::label(ui, "Colour", "");
             let now = targets.first().map(|i| series_colour(app, c, *i)).map(|c| u32::from(c.r()) << 16 | u32::from(c.g()) << 8 | u32::from(c.b()));
-            let swatch = egui::Button::new(RichText::new("   ").size(house::BODY))
-                .fill(now.map_or(Color32::WHITE, |rgb| Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)))
-                .stroke(Stroke::new(1.0, theme::BOX))
-                .corner_radius(f32::from(house::FIELD_RADIUS))
-                .min_size(vec2(64.0, house::FIELD_HEIGHT));
-            let r = ui.add(swatch).on_hover_text("Series colour");
-            egui::Popup::menu(&r).id(egui::Id::new("chart_series_colour")).show(|ui| {
-                if let Some(crate::colourpicker::Choice::Colour(rgb)) = crate::colourpicker::palette(ui, now, false, false) {
-                    for i in &targets {
-                        app.run_or_alert("chart.formatSelection", json!({ "chart": id, "series": i, "color": format!("#{rgb:06X}") }));
-                    }
+            if let Some(rgb) = colour_button(ui, "chart_series_colour", now) {
+                for i in &targets {
+                    app.run_or_alert("chart.formatSelection", json!({ "chart": id, "series": i, "color": format!("#{rgb:06X}") }));
                 }
-            });
+            }
             if !pie {
                 let mut trend = targets.iter().all(|i| c.series.get(*i).is_some_and(|s| !s.trendlines.is_empty()));
                 if ui.checkbox(&mut trend, "Trendline").changed() {
@@ -448,6 +464,23 @@ impl ChartPanel {
             }
         }
     }
+}
+
+/// A colour box that opens the house colour menu; the colour picked, if any.
+fn colour_button(ui: &mut Ui, id: &str, now: Option<u32>) -> Option<u32> {
+    let swatch = egui::Button::new(RichText::new("   ").size(house::BODY))
+        .fill(now.map_or(Color32::WHITE, |rgb| Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)))
+        .stroke(Stroke::new(1.0, theme::BOX))
+        .corner_radius(f32::from(house::FIELD_RADIUS))
+        .min_size(vec2(64.0, house::FIELD_HEIGHT));
+    let r = ui.add(swatch).on_hover_text("Colour");
+    let mut picked = None;
+    egui::Popup::menu(&r).id(egui::Id::new(id)).show(|ui| {
+        if let Some(crate::colourpicker::Choice::Colour(rgb)) = crate::colourpicker::palette(ui, now, false, false) {
+            picked = Some(rgb);
+        }
+    });
+    picked
 }
 
 /// A Customise section header (a full-width row with ▾/▴ and a line under it); true when open.
@@ -548,6 +581,28 @@ mod tests {
         s.execute("chart.selectData", json!({ "chart": id, "categories": "A2:A3" })).unwrap();
         s.execute("chart.set", json!({ "chart": id, "title": null })).unwrap();
         assert_eq!(s.active().unwrap().wb.active().unwrap().charts[0].title, None);
+    }
+
+    #[test]
+    fn a_pie_slice_keeps_its_colour_through_xlsx() {
+        let mut s = gridcraft_engine::Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        for (c, v) in [("A1", "x"), ("B1", "y"), ("A2", "a"), ("B2", "1"), ("A3", "b"), ("B3", "2"), ("A4", "c"), ("B4", "3")] {
+            s.execute("cell.set", json!({ "cell": c, "input": v })).unwrap();
+        }
+        s.execute("insert.chart", json!({ "range": "A1:B4", "type": "pie" })).unwrap();
+        let id = s.active().unwrap().wb.active().unwrap().charts[0].id;
+        s.execute("chart.formatSelection", json!({ "chart": id, "point": 2, "color": "#FF0000" })).unwrap();
+        let wb = &s.active().unwrap().wb;
+        let bytes = gridcraft_engine::io::save_bytes(wb, "t.xlsx").unwrap();
+        let (back, _) = gridcraft_engine::io::open_bytes("t.xlsx", &bytes).unwrap();
+        let c = &back.sheets[0].charts[0];
+        assert_eq!(c.point_colors.get(2).copied().flatten().and_then(|c| c.resolve(&back.theme)), Some([255, 0, 0]));
+        let data = gridcraft_chart::resolve(&back, 0, c);
+        assert_eq!(data.palette[2], [255, 0, 0, 255]);
+        // A colour scheme colours every slice.
+        s.execute("chart.changeColors", json!({ "chart": id, "palette": "monochrome" })).unwrap();
+        assert_eq!(s.active().unwrap().wb.active().unwrap().charts[0].point_colors.len(), 3);
     }
 
     fn test_chart() -> Chart {

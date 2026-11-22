@@ -7,6 +7,9 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- Pie and doughnut charts: each slice can have its own colour (chart editor › Customise › Pie
+  slices), kept in the .xlsx file; colour schemes now colour every slice.
+- Settings and the colour-scale points use the house drop-down.
 - Dragging the fill handle from cells with data validation extends the rule to the new cells.
 - File › Settings: "Display language" is replaced by **how numbers are written** (1,234.56,
   1.234,56, 1 234,56 or 1'234.56), set by the locale; cells show and accept that format.

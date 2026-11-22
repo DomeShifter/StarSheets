@@ -139,11 +139,8 @@ impl SettingsWindow {
             house::gap(ui);
             house::label(ui, "Locale", "How typed dates are read (05/08/2026 is 5 August in the UK, May 8 in the US), and the formats below.");
             let before = d.locale;
-            egui::ComboBox::from_id_salt("set_locale").width(ui.available_width()).selected_text(LOCALES[d.locale].0).show_ui(ui, |ui| {
-                for (i, l) in LOCALES.iter().enumerate() {
-                    ui.selectable_value(&mut d.locale, i, l.0);
-                }
-            });
+            let locales: Vec<&str> = LOCALES.iter().map(|l| l.0).collect();
+            house::select(ui, "set_locale", ui.available_width(), &mut d.locale, &locales, &[]);
             if d.locale != before {
                 let (_, _, date, time, _) = LOCALES[d.locale];
                 d.date = date.into();
@@ -156,25 +153,20 @@ impl SettingsWindow {
                     house::form_style(c);
                 }
                 let w = cols[0].available_width();
-                house::label(&mut cols[0], "Date", "");
-                egui::ComboBox::from_id_salt("set_date").width(w).selected_text(sample(&d.date)).show_ui(&mut cols[0], |ui| {
-                    for f in DATE_FORMATS {
-                        ui.selectable_value(&mut d.date, f.to_string(), sample(f));
+                // Each list shows the sample date, time or number in that format.
+                let pick = |ui: &mut egui::Ui, id: &str, label: &str, codes: &[&str], now: &mut String, shown: &dyn Fn(&str) -> String| {
+                    house::label(ui, label, "");
+                    let labels: Vec<String> = codes.iter().map(|c| shown(c)).collect();
+                    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+                    let mut k = codes.iter().position(|c| *c == now.as_str()).unwrap_or(0);
+                    if house::select(ui, id, w, &mut k, &refs, &[]) {
+                        *now = codes[k].to_string();
                     }
-                });
-                house::label(&mut cols[1], "Time", "");
-                egui::ComboBox::from_id_salt("set_time").width(w).selected_text(sample(&d.time)).show_ui(&mut cols[1], |ui| {
-                    for f in TIME_FORMATS {
-                        ui.selectable_value(&mut d.time, f.to_string(), sample(f));
-                    }
-                });
-                house::label(&mut cols[2], "Numbers", "");
-                let shown = NUMBER_FORMATS.iter().find(|(_, c)| *c == d.number).map_or("Automatic", |(l, _)| l);
-                egui::ComboBox::from_id_salt("set_number").width(w).selected_text(shown).show_ui(&mut cols[2], |ui| {
-                    for (label, code) in NUMBER_FORMATS {
-                        ui.selectable_value(&mut d.number, code.to_string(), *label);
-                    }
-                });
+                };
+                pick(&mut cols[0], "set_date", "Date", DATE_FORMATS, &mut d.date, &sample);
+                pick(&mut cols[1], "set_time", "Time", TIME_FORMATS, &mut d.time, &sample);
+                let codes: Vec<&str> = NUMBER_FORMATS.iter().map(|(_, c)| *c).collect();
+                pick(&mut cols[2], "set_number", "Numbers", &codes, &mut d.number, &|c: &str| NUMBER_FORMATS.iter().find(|(_, x)| *x == c).map_or("Automatic", |(l, _)| l).to_string());
             });
             house::note(ui, "New dates, times and numbers you type get these formats; cells already formatted keep theirs.");
             house::gap(ui);

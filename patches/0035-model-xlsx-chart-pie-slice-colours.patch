@@ -1,0 +1,382 @@
+diff --git a/crates/chart/src/resolve.rs b/crates/chart/src/resolve.rs
+index baa0730..3d4264e 100644
+--- a/crates/chart/src/resolve.rs
++++ b/crates/chart/src/resolve.rs
+@@ -412,7 +412,24 @@ pub fn resolve(wb: &Workbook, sheet: usize, chart: &Chart) -> ChartData {
+     }
+     let n = series.iter().map(|s| s.values.len()).max().unwrap_or(0);
+     let categories = categories.unwrap_or_else(|| (1..=n).map(|i| i.to_string()).collect());
+-    let palette = default_palette(&wb.theme, n.min(PALETTE_CYCLE));
++    let mut palette = default_palette(&wb.theme, n.min(PALETTE_CYCLE));
++    // Pie and doughnut slices with their own colour: the palette runs per point, and the first
++    // slice takes the series colour, so both carry the override.
++    if matches!(chart.kind, ChartKind::Pie | ChartKind::Doughnut) && chart.point_colors.iter().any(Option::is_some) {
++        let base = palette.clone();
++        palette = (0..n.min(4096))
++            .map(|j| {
++                chart.point_colors.get(j).and_then(|c| c.as_ref()).and_then(|c| c.resolve(&wb.theme)).map(|[r, g, b]| [r, g, b, 0xFF]).unwrap_or_else(|| {
++                    if base.is_empty() { series_color(&wb.theme, j) } else { base[j % base.len()] }
++                })
++            })
++            .collect();
++        if let (Some(first), Some(Some(c))) = (series.first_mut(), chart.point_colors.first()) {
++            if let Some([r, g, b]) = c.resolve(&wb.theme) {
++                first.color = [r, g, b, 0xFF];
++            }
++        }
++    }
+     ChartData { categories, category_levels, series, palette }
+ }
+ 
+diff --git a/crates/chart/src/tests.rs b/crates/chart/src/tests.rs
+index 8a9b864..bacdcaf 100644
+--- a/crates/chart/src/tests.rs
++++ b/crates/chart/src/tests.rs
+@@ -56,6 +56,7 @@ fn chart(kind: ChartKind) -> Chart {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     }
+ }
+ 
+diff --git a/crates/engine/src/cmd/extra.rs b/crates/engine/src/cmd/extra.rs
+index 6325de4..430041d 100644
+--- a/crates/engine/src/cmd/extra.rs
++++ b/crates/engine/src/cmd/extra.rs
+@@ -77,7 +77,7 @@ pub fn specs() -> Vec<CommandSpec> {
+             "Format Selection",
+             ["Format", "Current Selection"],
+             None,
+-            "{chart?, series?: index, color?: hex}",
++            "{chart?, series?: index, point?: index (a pie or doughnut slice), color?: hex}",
+             has_doc,
+             format_series
+         ),
+diff --git a/crates/engine/src/cmd/extra/chart.rs b/crates/engine/src/cmd/extra/chart.rs
+index 8d9af20..6e7ee59 100644
+--- a/crates/engine/src/cmd/extra/chart.rs
++++ b/crates/engine/src/cmd/extra/chart.rs
+@@ -146,6 +146,23 @@ pub(super) fn change_colors(s: &mut Session, p: &Json) -> Result<Json> {
+         p.get("colors").and_then(Json::as_array).map(|a| a.iter().filter_map(|c| c.as_str().and_then(Color::from_hex)).collect());
+     let palette = str_param(p, "palette").unwrap_or("colorful").to_string();
+     with_chart(s, p, |c| {
++        // A pie or doughnut takes the scheme across its slices, each its own colour.
++        if matches!(c.kind, gridcraft_model::ChartKind::Pie | gridcraft_model::ChartKind::Doughnut) {
++            let n = c.series.first().map_or(0, |se| points_in(&se.values));
++            c.point_colors = (0..n)
++                .map(|i| match &explicit {
++                    Some(cols) if !cols.is_empty() => cols.get(i % cols.len()).copied(),
++                    _ => match palette.as_str() {
++                        "monochrome" => Some(Color::Theme(4, (-600 + (i as i16 * 1200 / n.max(1) as i16)).clamp(-800, 800))),
++                        p if p.starts_with("accent") => {
++                            let k: u8 = p.trim_start_matches("accent").parse().unwrap_or(1);
++                            Some(Color::Theme(3 + k.clamp(1, 6), (-600 + i as i16 * 1200 / n.max(1) as i16).clamp(-800, 800)))
++                        }
++                        _ => None,
++                    },
++                })
++                .collect();
++        }
+         for (i, se) in c.series.iter_mut().enumerate() {
+             se.color = match &explicit {
+                 Some(cols) if !cols.is_empty() => cols.get(i % cols.len()).copied(),
+@@ -253,11 +270,29 @@ pub(super) fn move_chart(s: &mut Session, p: &Json) -> Result<Json> {
+ 
+ pub(super) fn format_series(s: &mut Session, p: &Json) -> Result<Json> {
+     let idx = u32_param(p, "series").unwrap_or(0) as usize;
++    let point = u32_param(p, "point").map(|v| v as usize).filter(|v| *v < 4096);
+     let color = str_param(p, "color").and_then(Color::from_hex);
+     with_chart(s, p, |c| {
+-        if let Some(se) = c.series.get_mut(idx) {
+-            se.color = color;
++        match point {
++            // One slice of a pie or doughnut.
++            Some(j) => {
++                if c.point_colors.len() <= j {
++                    c.point_colors.resize(j + 1, None);
++                }
++                c.point_colors[j] = color;
++            }
++            None => {
++                if let Some(se) = c.series.get_mut(idx) {
++                    se.color = color;
++                }
++            }
+         }
+         Ok(())
+     })
+ }
++
++/// How many points a series formula covers (`Sheet1!$B$2:$B$7` → 6), at most 4096.
++fn points_in(formula: &str) -> usize {
++    let body = formula.trim_start_matches('=').rsplit('!').next().unwrap_or("").replace('$', "");
++    gridcraft_core::RangeRef::parse(&body).map_or(0, |r| (r.count() as usize).min(4096))
++}
+diff --git a/crates/engine/src/cmd/forecast.rs b/crates/engine/src/cmd/forecast.rs
+index 88de4b4..ff9b054 100644
+--- a/crates/engine/src/cmd/forecast.rs
++++ b/crates/engine/src/cmd/forecast.rs
+@@ -459,6 +459,7 @@ fn forecast_sheet(s: &mut Session, p: &Json) -> Result<Json> {
+             source: None,
+             by_rows: false,
+             pivot: None,
++            point_colors: Vec::new(),
+         });
+         cx.wb.sheets.insert(at, Arc::new(sheet));
+         for nm in cx.wb.names.iter_mut() {
+diff --git a/crates/engine/src/cmd/insert.rs b/crates/engine/src/cmd/insert.rs
+index 14ace94..dbebf8e 100644
+--- a/crates/engine/src/cmd/insert.rs
++++ b/crates/engine/src/cmd/insert.rs
+@@ -857,6 +857,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
+         source: (areas.len() == 1).then(|| format!("{}!{}", gridcraft_formula::quote_sheet(&sh.name), bounds.a1())),
+         by_rows,
+         pivot: None,
++        point_colors: Vec::new(),
+     };
+     Ok((sheet, chart))
+ }
+diff --git a/crates/engine/src/cmd/insert/chart.rs b/crates/engine/src/cmd/insert/chart.rs
+index ac486f8..b2563c4 100644
+--- a/crates/engine/src/cmd/insert/chart.rs
++++ b/crates/engine/src/cmd/insert/chart.rs
+@@ -268,6 +268,7 @@ pub fn build_chart(s: &Session, p: &Json) -> Result<(usize, Chart)> {
+         source: (areas.len() == 1).then(|| format!("{}!{}", gridcraft_formula::quote_sheet(&sh.name), bounds.a1())),
+         by_rows,
+         pivot: None,
++        point_colors: Vec::new(),
+     };
+     Ok((sheet, chart))
+ }
+diff --git a/crates/engine/src/cmd/pivot/charts.rs b/crates/engine/src/cmd/pivot/charts.rs
+index 5551c4d..c3e74cb 100644
+--- a/crates/engine/src/cmd/pivot/charts.rs
++++ b/crates/engine/src/cmd/pivot/charts.rs
+@@ -75,6 +75,7 @@ pub(super) fn insert_pivot_chart(s: &mut Session, p: &Json) -> Result<Json> {
+         source: None,
+         by_rows: false,
+         pivot: Some(link),
++        point_colors: Vec::new(),
+     };
+     edit(s, |cx| {
+         cx.sheet_mut(si)?.charts.push(chart);
+diff --git a/crates/model/src/features.rs b/crates/model/src/features.rs
+index 8ab7460..d71d463 100644
+--- a/crates/model/src/features.rs
++++ b/crates/model/src/features.rs
+@@ -615,6 +615,10 @@ pub struct Chart {
+     /// whenever the PivotTable is refreshed or its layout changes.
+     #[serde(default)]
+     pub pivot: Option<String>,
++    /// Pie and doughnut charts: a colour for each point (slice) of the first series, `None` for
++    /// the palette's (`c:dPt` in the file).
++    #[serde(default)]
++    pub point_colors: Vec<Option<Color>>,
+ }
+ 
+ impl Chart {
+@@ -1149,6 +1153,7 @@ mod tests {
+             source: None,
+             by_rows: false,
+             pivot: None,
++            point_colors: Vec::new(),
+         };
+         let mut json = serde_json::to_value(&chart).expect("serialize chart");
+         json.as_object_mut().expect("chart object").remove("hole_size");
+diff --git a/crates/model/src/sheet.rs b/crates/model/src/sheet.rs
+index 2a1201f..bdcc1a2 100644
+--- a/crates/model/src/sheet.rs
++++ b/crates/model/src/sheet.rs
+@@ -949,6 +949,7 @@ mod tests {
+                 source: None,
+                 by_rows: false,
+                 pivot: None,
++                point_colors: Vec::new(),
+             }),
+             ObjKind::Image => s.images.push(Image { id, anchor, data: Arc::new(vec![]), mime: String::new(), alt: String::new() }),
+             ObjKind::Shape | ObjKind::Equation => s.shapes.push(Shape {
+diff --git a/crates/xlsx/src/chart.rs b/crates/xlsx/src/chart.rs
+index fea91ce..314c35f 100644
+--- a/crates/xlsx/src/chart.rs
++++ b/crates/xlsx/src/chart.rs
+@@ -238,6 +238,19 @@ pub fn read_chart(root: &El) -> Option<Chart> {
+             series.push(ser);
+         }
+     }
++    // Point colours (`c:dPt`) of the first series of a pie-like chart.
++    let mut point_colors: Vec<Option<Color>> = vec![];
++    if let Some(s) = first.kids("ser").next() {
++        for pt in s.kids("dPt") {
++            let Some(i) = pt.child("idx").and_then(|e| e.attr_u32("val")).map(|i| i as usize).filter(|i| *i < 4096) else { continue };
++            if let Some(c) = pt.path(&["spPr", "solidFill"]).and_then(dml_color) {
++                if point_colors.len() <= i {
++                    point_colors.resize(i + 1, None);
++                }
++                point_colors[i] = Some(c);
++            }
++        }
++    }
+     let kind = if groups.len() > 1 { ChartKind::Combo } else { first_kind };
+     let show_val = |e: &El| e.child("dLbls").is_some_and(|d| bool_val(d, "showVal"));
+     let data_labels = groups.iter().any(|(g, _)| show_val(g) || g.kids("ser").any(show_val));
+@@ -287,6 +300,7 @@ pub fn read_chart(root: &El) -> Option<Chart> {
+         source: None,
+         by_rows: false,
+         pivot: root.path(&["pivotSource", "name"]).map(|n| strip_book(n.text.trim()).to_string()).filter(|n| !n.is_empty()),
++        point_colors,
+     })
+ }
+ 
+@@ -536,7 +550,7 @@ fn multi_level_cat(f: &str, values: &str, wb: &Workbook, si: usize) -> Option<St
+     Some(s)
+ }
+ 
+-fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String {
++fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize, points: &[Option<Color>]) -> String {
+     let mut x = format!("<c:ser><c:idx val=\"{idx}\"/><c:order val=\"{idx}\"/>");
+     if let Some(n) = &s.name {
+         if is_ref(n) || is_defined_name(wb, si, n) {
+@@ -570,6 +584,12 @@ fn series_xml(s: &Series, idx: usize, g: G, wb: &Workbook, si: usize) -> String
+         G::Bubble => x.push_str("<c:invertIfNegative val=\"0\"/>"),
+         _ => {}
+     }
++    // A pie or doughnut slice's own colour (`c:dPt`, after spPr and explosion).
++    for (j, c) in points.iter().enumerate() {
++        if let Some(c) = c.as_ref().and_then(|c| srgb(c, &wb.theme)) {
++            let _ = write!(x, "<c:dPt><c:idx val=\"{j}\"/><c:bubble3D val=\"0\"/><c:spPr><a:solidFill>{c}</a:solidFill></c:spPr></c:dPt>");
++        }
++    }
+     // Trendlines sit between dLbls and the data in CT_LineSer, CT_BarSer, CT_AreaSer,
+     // CT_ScatterSer and CT_BubbleSer; pie and radar series have none.
+     if !matches!(g, G::Pie | G::Doughnut | G::Radar) {
+@@ -669,7 +689,8 @@ fn dlbls(show: bool) -> String {
+ }
+ 
+ fn group_xml(g: G, series: &[(usize, &Series)], ch: &Chart, axes: (u32, u32), wb: &Workbook, si: usize) -> String {
+-    let sers: String = series.iter().map(|(i, s)| series_xml(s, *i, g, wb, si)).collect();
++    let points = |i: usize| if i == 0 && matches!(g, G::Pie | G::Doughnut) { ch.point_colors.as_slice() } else { &[] };
++    let sers: String = series.iter().map(|(i, s)| series_xml(s, *i, g, wb, si, points(*i))).collect();
+     let dl = dlbls(ch.data_labels);
+     let ax = format!("<c:axId val=\"{}\"/><c:axId val=\"{}\"/>", axes.0, axes.1);
+     match g {
+diff --git a/crates/xlsx/src/chartex.rs b/crates/xlsx/src/chartex.rs
+index de54c59..d304b70 100644
+--- a/crates/xlsx/src/chartex.rs
++++ b/crates/xlsx/src/chartex.rs
+@@ -140,6 +140,7 @@ pub fn read_chartex(root: &El) -> Option<Chart> {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     })
+ }
+ 
+diff --git a/crates/xlsx/src/tests/chart_book_names.rs b/crates/xlsx/src/tests/chart_book_names.rs
+index 94d148d..4cb71da 100644
+--- a/crates/xlsx/src/tests/chart_book_names.rs
++++ b/crates/xlsx/src/tests/chart_book_names.rs
+@@ -85,6 +85,7 @@ fn chart_names_are_written_qualified() {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     wb.sheets = vec![Arc::new(s), Arc::new(Sheet::new("My Data"))];
+     wb.names = vec![
+@@ -166,6 +167,7 @@ fn chart_names_keep_spaces_around_a_quoted_sheet_name() {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     wb.sheets = vec![Arc::new(s), Arc::new(Sheet::new(" Sales "))];
+     wb.names = vec![
+diff --git a/crates/xlsx/src/tests/fixtures.rs b/crates/xlsx/src/tests/fixtures.rs
+index 7a5cc56..df9cee7 100644
+--- a/crates/xlsx/src/tests/fixtures.rs
++++ b/crates/xlsx/src/tests/fixtures.rs
+@@ -558,6 +558,7 @@ fn chartex_parts_as_excel_expects_them() {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     wb.sheets = vec![std::sync::Arc::new(sheet)];
+     let bytes = crate::write_xlsx(&wb).unwrap();
+@@ -617,6 +618,7 @@ fn doughnut_writes_every_series_as_a_ring_with_hole_and_angle() {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     wb.sheets = vec![std::sync::Arc::new(sheet)];
+     let bytes = crate::write_xlsx(&wb).unwrap();
+diff --git a/crates/xlsx/src/tests/literal_category_roundtrip.rs b/crates/xlsx/src/tests/literal_category_roundtrip.rs
+index a514fa6..a0f80fa 100644
+--- a/crates/xlsx/src/tests/literal_category_roundtrip.rs
++++ b/crates/xlsx/src/tests/literal_category_roundtrip.rs
+@@ -51,6 +51,7 @@ fn literal_category_with_separators_survives_save() {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     wb.sheets = vec![Arc::new(s)];
+     let bytes = write_xlsx(&wb).unwrap();
+diff --git a/crates/xlsx/src/tests/multilevel_category_roundtrip.rs b/crates/xlsx/src/tests/multilevel_category_roundtrip.rs
+index f4c118f..ed9087d 100644
+--- a/crates/xlsx/src/tests/multilevel_category_roundtrip.rs
++++ b/crates/xlsx/src/tests/multilevel_category_roundtrip.rs
+@@ -51,6 +51,7 @@ fn workbook(categories: &str, values: &str) -> Workbook {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     Workbook { sheets: vec![Arc::new(s)], ..Workbook::default() }
+ }
+diff --git a/crates/xlsx/src/tests/roundtrip.rs b/crates/xlsx/src/tests/roundtrip.rs
+index ab55c84..e4751ea 100644
+--- a/crates/xlsx/src/tests/roundtrip.rs
++++ b/crates/xlsx/src/tests/roundtrip.rs
+@@ -429,6 +429,7 @@ fn sample() -> Workbook {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     };
+     for kind in [
+         ChartKind::ColumnClustered,
+diff --git a/crates/xlsx/src/tests/smooth_roundtrip.rs b/crates/xlsx/src/tests/smooth_roundtrip.rs
+index 96c346d..13d55d5 100644
+--- a/crates/xlsx/src/tests/smooth_roundtrip.rs
++++ b/crates/xlsx/src/tests/smooth_roundtrip.rs
+@@ -39,6 +39,7 @@ fn smooth_line_setting_round_trips() {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     let mut smooth_series = base_series.clone();
+     smooth_series.smooth = true;
+@@ -60,6 +61,7 @@ fn smooth_line_setting_round_trips() {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     });
+     wb.sheets = vec![Arc::new(s)];
+     let bytes = write_xlsx(&wb).unwrap();
+diff --git a/crates/xlsx/src/tests/trendline_roundtrip.rs b/crates/xlsx/src/tests/trendline_roundtrip.rs
+index f5bf7fe..658bf31 100644
+--- a/crates/xlsx/src/tests/trendline_roundtrip.rs
++++ b/crates/xlsx/src/tests/trendline_roundtrip.rs
+@@ -63,6 +63,7 @@ fn chart(id: u32, kind: ChartKind, trendlines: Vec<Trendline>) -> Chart {
+         source: None,
+         by_rows: false,
+         pivot: None,
++        point_colors: Vec::new(),
+     }
+ }
+ 

@@ -585,11 +585,11 @@ fn scale_editor(ui: &mut Ui, d: &mut Draft) {
                 1 => vec![0, 3, 4, 5],
                 _ => vec![2, 3, 4, 5],
             };
-            egui::ComboBox::from_id_salt(("cf_point", i)).width(120.0).selected_text(POINT_KINDS[p.kind].0).show_ui(ui, |ui| {
-                for k in kinds {
-                    ui.selectable_value(&mut p.kind, k, POINT_KINDS[k].0);
-                }
-            });
+            let labels: Vec<&str> = kinds.iter().map(|k| POINT_KINDS[*k].0).collect();
+            let mut at = kinds.iter().position(|k| *k == p.kind).unwrap_or(0);
+            if crate::house::select(ui, &format!("cf_point_{i}"), 120.0, &mut at, &labels, &[]) {
+                p.kind = kinds[at];
+            }
             let takes_value = matches!(POINT_KINDS[p.kind].1, "num" | "percent" | "percentile");
             ui.add_enabled(takes_value, egui::TextEdit::singleline(&mut p.value).hint_text("Value").desired_width(100.0));
             if p.kind != 0
