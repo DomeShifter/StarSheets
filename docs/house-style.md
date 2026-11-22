@@ -64,6 +64,19 @@ Everything sits on a 4 px scale.
 | Selected item in a list or chip | #E8F0FE |
 | Focused field | Blue outline |
 
+## Tooltips and messages
+
+| Thing | Look |
+|---|---|
+| Tooltip | Dark grey (#3C4043), white text, 4 px corners, 8 px side padding |
+| Message ("Heads up") | A house dialog with an OK button, in StarSheets' words (never "GridCraft") |
+
+## Side panels
+
+Right-hand panels (conditional formatting, data validation, chart editor, named ranges, protected
+ranges) are 320 px of content with 16 px padding, keep room for their scroll bar, and only one is
+open at a time. Changes in them show on the sheet straight away.
+
 ## Live preview
 
 Where a change can be shown before it is applied (colours, formats), show it in the sheet straight
