@@ -32,6 +32,7 @@ mod notes;
 mod sheets_formulas;
 mod settings;
 mod shell;
+mod spelling;
 mod theme;
 #[cfg(target_arch = "wasm32")]
 mod web;

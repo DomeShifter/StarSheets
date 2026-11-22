@@ -82,6 +82,7 @@ pub fn start() {
                     app.ui.sheets_keys = true;
                     app.ui.menu_look = Some(crate::shell::MENU_LOOK);
                     crate::settings::Prefs::load().apply(&mut app);
+                    gridcraft_ui_egui::spelling::set(crate::spelling::known);
                     let mut prefs = crate::prefs::PrefsSync::new(stored_ui, stored_prefs);
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
@@ -203,6 +204,7 @@ impl eframe::App for WebShell {
         self.files.logic(&mut self.app, ctx);
         self.files.take_imports(&mut self.app, &self.inbox, ctx);
         self.webfonts.logic(&self.app, ctx);
+        crate::spelling::logic(&self.app, ctx);
         crate::house::keep(ctx);
         self.app.logic(ctx);
         // Store changed preferences straight away: a reload or closed tab runs no exit code (#1562).
