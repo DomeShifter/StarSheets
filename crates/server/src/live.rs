@@ -200,6 +200,8 @@ struct Room {
     /// The file's version on disk when we last read or wrote it, and when we last looked.
     disk: Option<String>,
     disk_checked: Instant,
+    /// When the preview picture was last drawn (at most once a minute while people edit).
+    thumb_at: Option<Instant>,
 }
 
 /// Why a save didn't happen.
@@ -226,6 +228,7 @@ impl Room {
             guests: 0,
             disk: None,
             disk_checked: Instant::now(),
+            thumb_at: None,
         };
         let opened = room.open();
         loop {
@@ -518,6 +521,12 @@ impl Room {
                 self.dirty_since = None;
                 self.save_failed_at = None;
                 self.all(&ToClient::Saved { at: now() as i64 });
+                if self.clients.is_empty() || self.thumb_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
+                    self.thumb_at = Some(Instant::now());
+                    if let (Some(v), Ok(png)) = (self.disk.clone(), crate::thumbs::draw(&wb)) {
+                        let _ = crate::thumbs::keep(&self.app.store, &self.file, &v, &png);
+                    }
+                }
             }
             Err(SaveError::Outside) => self.check_disk(),
             Err(SaveError::Failed(why)) => {

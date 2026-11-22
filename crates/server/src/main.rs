@@ -11,6 +11,7 @@ mod live;
 mod sharing;
 mod spaces;
 mod store;
+mod thumbs;
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -464,6 +465,62 @@ async fn gate(app: &Shared, m: &str, p: &[String], mut q: HashMap<String, String
     r.unwrap_or_else(|| Err(error(500, "server error")))
 }
 
+/// GET /api/files/ID/thumb: the file's preview picture (thumbs.rs), drawn if there isn't one for
+/// this version yet. Outside the store lock while drawing. 404: no picture (the app shows an icon).
+async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &HeaderMap) -> Response<Body> {
+    enum Got {
+        Have(Vec<u8>, String),
+        Draw(String, Vec<u8>, String),
+    }
+    let f2 = file.clone();
+    let got = blocking(app, move |app| -> Result<Got, Response<Body>> {
+        if sharing::file_role(&app.store, app.auth, me.as_ref(), &f2) < sharing::Role::View {
+            return Err(error(403, "You don't have access to that."));
+        }
+        let path = app.store.synced_index().ok().and_then(|i| i.get(&f2).cloned()).ok_or_else(|| error(404, "no such file"))?;
+        let full = app.store.full(&path);
+        let version = app.store.version_of(&full).map_err(|_| error(404, "no such file"))?;
+        if let Some(png) = thumbs::cached(&app.store, &f2, &version) {
+            return Ok(Got::Have(png, version));
+        }
+        if std::fs::metadata(&full).map(|m| m.len()).unwrap_or(0) > thumbs::MAX_READ {
+            return Err(error(404, "too big for a picture"));
+        }
+        let bytes = std::fs::read(&full).map_err(|_| error(404, "no such file"))?;
+        Ok(Got::Draw(store::base_of(&path), bytes, version))
+    })
+    .await
+    .unwrap_or_else(|| Err(error(500, "server error")));
+    let (png, version) = match got {
+        Err(resp) => return resp,
+        Ok(Got::Have(png, v)) => (png, v),
+        Ok(Got::Draw(name, bytes, v)) => {
+            let (store_root, f3, v2) = (app.clone(), file.clone(), v.clone());
+            let drawn = tokio::task::spawn_blocking(move || {
+                let png = thumbs::from_bytes(&name, &bytes)?;
+                let _ = thumbs::keep(&store_root.store, &f3, &v2, &png);
+                Ok::<_, String>(png)
+            })
+            .await;
+            match drawn {
+                Ok(Ok(png)) => (png, v),
+                _ => return error(404, "no picture"),
+            }
+        }
+    };
+    let etag = format!("\"{version}\"");
+    if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
+        return Response::builder().status(304).header(header::ETAG, etag).body(Body::empty()).unwrap();
+    }
+    Response::builder()
+        .status(200)
+        .header(header::CONTENT_TYPE, "image/png")
+        .header(header::CACHE_CONTROL, "private, no-cache")
+        .header(header::ETAG, etag)
+        .body(Body::from(png))
+        .unwrap()
+}
+
 /// After a files request, with accounts: the file list shows only what the person may see, with
 /// who owns each thing, their role, stars and when they last opened it, and the tops of "Shared
 /// with me".
@@ -612,6 +669,9 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
         return error(401, "please sign in");
     }
     let me = current_user(&app, &headers);
+    if m == "GET" && p.len() == 3 && p[0] == "files" && p[2] == "thumb" {
+        return thumb(&app, me, p[1].clone(), &headers).await;
+    }
     let q = match gate(&app, &m, &p, q, me.clone(), &body).await {
         Ok(q) => q,
         Err(resp) => return resp,

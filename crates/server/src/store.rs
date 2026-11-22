@@ -793,6 +793,7 @@ impl Store {
         {
             for id in ids.values().filter_map(Value::as_str) {
                 let _ = fs::remove_dir_all(self.versions().join(id));
+                crate::thumbs::forget(self, id);
             }
         }
         Ok(())
