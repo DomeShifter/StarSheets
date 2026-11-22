@@ -532,6 +532,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn plain_ranges_from_the_editor_are_accepted() {
+        let mut s = gridcraft_engine::Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        for (c, v) in [("A1", "x"), ("B1", "y"), ("C1", "z"), ("A2", "a"), ("B2", "1"), ("C2", "4"), ("A3", "b"), ("B3", "2"), ("C3", "5")] {
+            s.execute("cell.set", json!({ "cell": c, "input": v })).unwrap();
+        }
+        s.execute("insert.chart", json!({ "range": "A1:B3" })).unwrap();
+        let id = s.active().unwrap().wb.active().unwrap().charts[0].id;
+        s.execute("chart.selectData", json!({ "chart": id, "range": "A1:C3" })).unwrap();
+        assert_eq!(s.active().unwrap().wb.active().unwrap().charts[0].series.len(), 2);
+        s.execute("chart.selectData", json!({ "chart": id, "categories": "A2:A3" })).unwrap();
+        s.execute("chart.set", json!({ "chart": id, "title": null })).unwrap();
+        assert_eq!(s.active().unwrap().wb.active().unwrap().charts[0].title, None);
+    }
+
     fn test_chart() -> Chart {
         let mut s = gridcraft_engine::Session::new();
         s.execute("file.new", json!({})).unwrap();

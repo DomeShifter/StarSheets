@@ -68,8 +68,10 @@ pub fn install(ctx: &egui::Context) {
         s.spacing.scroll = egui::style::ScrollStyle {
             bar_width: 10.0,
             handle_min_length: 24.0,
-            dormant_background_opacity: 0.35,
-            dormant_handle_opacity: 0.7,
+            dormant_background_opacity: 0.0,
+            dormant_handle_opacity: 0.3,
+            active_handle_opacity: 0.45,
+            interact_handle_opacity: 0.6,
             // The handle in the text colour: egui's default uses the widget fill, which the
             // house forms make white (an invisible handle on a white panel).
             foreground_color: true,
