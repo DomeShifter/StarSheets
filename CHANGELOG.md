@@ -7,6 +7,8 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- GridCraft's own dialogs (Insert link, Paste special, Find and replace…) have Sheets-style titles:
+  top left with ✕, no grey title band.
 - Dragging a sheet tab: the tab follows the pointer, the others slide aside, and it springs into
   place on release.
 - Clicking anywhere on a note starts editing it.
