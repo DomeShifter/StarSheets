@@ -7,6 +7,9 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- File › Settings: "Display language" is replaced by **how numbers are written** (1,234.56,
+  1.234,56, 1 234,56 or 1'234.56), set by the locale; cells show and accept that format.
+- Enter accepts a highlighted function suggestion ("=lef" → "=LEFT(") and editing goes on.
 - Tooltips in the house style: dark grey with white text.
 - The formula bar stays one line (long text runs on) until you expand it; bigger fx icon.
 - No lines above and below the toolbar.

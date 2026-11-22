@@ -1,7 +1,7 @@
 //! File › Settings, after Google Sheets' "Settings for this spreadsheet": the locale (how typed
 //! dates are read, e.g. 05/08/2026 as 5 August in the UK), the default date, time and number
-//! formats new entries get, and the display language of GridCraft's dialogs. Kept in the browser,
-//! and handed to GridCraft's input reader (patch 0026).
+//! formats new entries get, and how numbers are written (1,234.56 or 1.234,56). Kept in the
+//! browser, and handed to GridCraft's input reader and number display (patches 0026, 0033).
 
 use gridcraft_engine::core::Value;
 use gridcraft_ui_egui::SheetApp;
@@ -12,6 +12,17 @@ use crate::house;
 /// Asks for the Settings window (File › Settings), through egui's memory.
 pub const REQUEST: &str = "starsheets_settings";
 const STORE_KEY: &str = "starsheets_settings";
+
+/// How numbers are written: label, decimal mark, thousands separator.
+const SEPARATORS: &[(&str, char, char)] = &[
+    ("1,234.56", '.', ','),
+    ("1.234,56", ',', '.'),
+    ("1 234,56", ',', '\u{202f}'),
+    ("1'234.56", '.', '\''),
+];
+
+/// Each locale's way of writing numbers (an index into SEPARATORS), in LOCALES order.
+const LOCALE_SEPARATORS: &[usize] = &[0, 0, 0, 0, 0, 1, 1, 2, 1, 1, 1, 0];
 
 /// A locale: name, day first?, date, time and date-time formats.
 const LOCALES: &[(&str, bool, &str, &str, &str)] = &[
@@ -42,13 +53,15 @@ pub struct Prefs {
     pub date: String,
     pub time: String,
     pub number: String,
-    pub language: usize,
+    /// How numbers are written (an index into SEPARATORS).
+    #[serde(default)]
+    pub separators: usize,
 }
 
 impl Default for Prefs {
     fn default() -> Prefs {
         let (_, _, date, time, _) = LOCALES[0];
-        Prefs { locale: 0, date: date.into(), time: time.into(), number: String::new(), language: 0 }
+        Prefs { locale: 0, date: date.into(), time: time.into(), number: String::new(), separators: 0 }
     }
 }
 
@@ -73,15 +86,15 @@ impl Prefs {
         }
     }
 
-    /// Hands the locale to GridCraft's input reader, and the language to its dialogs.
+    /// Hands the locale to GridCraft's input reader and number display.
     pub fn apply(&self, app: &mut SheetApp) {
         let (_, day_first, ..) = LOCALES[self.locale.min(LOCALES.len() - 1)];
         let datetime = format!("{} {}", self.date, self.time);
         let number = (!self.number.is_empty()).then_some(self.number.as_str());
         gridcraft_engine::core::parse::set_input_locale(day_first, Some(&self.date), Some(&self.time), Some(&datetime), number);
-        if let Some(lang) = gridcraft_ui_egui::i18n::Language::ALL.get(self.language) {
-            app.ui.language = *lang;
-        }
+        let (_, decimal, group) = SEPARATORS[self.separators.min(SEPARATORS.len() - 1)];
+        gridcraft_engine::core::parse::set_number_separators(decimal, group);
+        let _ = app;
         DEFAULTS.with(|d| *d.borrow_mut() = (self.date.clone(), self.time.clone()));
     }
 }
@@ -135,6 +148,7 @@ impl SettingsWindow {
                 let (_, _, date, time, _) = LOCALES[d.locale];
                 d.date = date.into();
                 d.time = time.into();
+                d.separators = LOCALE_SEPARATORS.get(d.locale).copied().unwrap_or(0);
             }
             house::gap(ui);
             ui.columns(3, |cols| {
@@ -164,13 +178,9 @@ impl SettingsWindow {
             });
             house::note(ui, "New dates, times and numbers you type get these formats; cells already formatted keep theirs.");
             house::gap(ui);
-            house::label(ui, "Display language", "For dialogs. StarSheets' own menus and toolbar are in English for now.");
-            let langs = gridcraft_ui_egui::i18n::Language::ALL;
-            egui::ComboBox::from_id_salt("set_lang").width(ui.available_width()).selected_text(langs.get(d.language).map_or("English", |l| l.name())).show_ui(ui, |ui| {
-                for (i, l) in langs.iter().enumerate() {
-                    ui.selectable_value(&mut d.language, i, l.name());
-                }
-            });
+            house::label(ui, "Numbers are written", "The decimal mark and thousands separator in cells (formulas keep 1.5 and commas).");
+            let labels: Vec<&str> = SEPARATORS.iter().map(|x| x.0).collect();
+            house::select(ui, "set_separators", ui.available_width(), &mut d.separators, &labels, &[]);
             match house::actions(ui, &["Cancel", "Save settings"]) {
                 Some(0) => done = Some(false),
                 Some(_) => done = Some(true),
@@ -212,5 +222,16 @@ mod tests {
         assert_eq!(t.format, Some("hh:mm:ss"));
         set_input_locale(false, None, None, None, None);
         assert_eq!(parse_input("05/08/1930", DateSystem::default()).value.as_f64(), Some(11_086.0));
+    }
+
+    #[test]
+    fn a_decimal_comma_reads_and_shows_numbers_the_local_way() {
+        use gridcraft_engine::core::parse::{localize_number_text, set_number_separators};
+        set_number_separators(',', '.');
+        assert_eq!(parse_input("1.234,5", DateSystem::default()).value.as_f64(), Some(1234.5));
+        assert_eq!(parse_input("2,25", DateSystem::default()).value.as_f64(), Some(2.25));
+        assert_eq!(localize_number_text("1,234.50"), "1.234,50");
+        set_number_separators('.', ',');
+        assert_eq!(localize_number_text("1,234.50"), "1,234.50");
     }
 }

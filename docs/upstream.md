@@ -37,6 +37,8 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0029-ui-egui-sheets-chart-menu | Sheets mode: a chart's right-click menu is "Edit chart" (opens the host's chart editor) and "Delete chart" | Sheets-specific |
 | 0030-ui-egui-sheets-dialog-titles | Sheets mode: dialogs have no title band; the title sits top left (22 px) with ✕ at the right, as in Google Sheets | Sheets-specific |
 | 0031-ui-egui-sheets-formula-bar-one-line | Sheets mode: the formula bar stays one line until the chevron expands it (long text runs on, no wrap), and fx is drawn larger; `widgets::icon_button_sized` | Sheets-specific |
+| 0032-ui-egui-sheets-enter-accepts-suggestion | Sheets mode: Enter accepts the highlighted function suggestion ("=lef" → "=LEFT(") and editing continues, as in Google Sheets | Sheets-specific |
+| 0033-core-engine-number-separators | `parse::set_number_separators`: a host decimal mark and thousands separator; typed numbers may use them ("1.234,5"), `display::format` shows non-date numbers with them, and `edit_text` edits plain numbers with the decimal mark. Default unchanged | could help upstream |
 | 0002-ui-egui-theme-token-override | `Tokens::install` / `Tokens::for_mode`: a host can replace the colour palettes | to offer as a PR |
 | 0003-ui-egui-chrome-sheet-tabs-switch | `Chrome.sheet_tabs: bool`: a host can hide the sheet tabs and status bar | to offer as a PR |
 | 0004-ui-egui-sheets-cell-keys | `UiState.sheets_keys`: Enter edits (and is consumed so the new editor doesn't commit at once), Backspace only clears, no Enter-paste, static copy outline | to offer as a PR (as an option) |
