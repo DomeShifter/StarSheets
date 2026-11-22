@@ -6,6 +6,12 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+### Changed
+- **Files changed outside StarSheets are safe.** If a spreadsheet that's open in StarSheets is
+  changed on disk (for example in Excel over a file share), StarSheets notices within a few
+  seconds and shows that version. Anything typed here that wasn't saved yet goes into a copy next
+  to it ("<name> (StarSheets copy <date>)"); the outside change is never written over.
+
 ## [0.2.0] - 2026-11-22
 
 ### Added

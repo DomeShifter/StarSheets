@@ -74,7 +74,17 @@ fn mtime(meta: &fs::Metadata) -> (i64, u128) {
 
 /// "YYYYmmdd-HHMMSS" (UTC) for version file names.
 fn stamp() -> String {
-    let secs = now() as i64;
+    let (y, m, d, h, mi, s) = civil(now() as i64);
+    format!("{y:04}{m:02}{d:02}-{h:02}{mi:02}{s:02}")
+}
+
+/// "YYYY-mm-dd HH.MM" (UTC) for names people read (no ":" — Windows and SMB refuse it).
+pub fn readable_stamp() -> String {
+    let (y, m, d, h, mi, _) = civil(now() as i64);
+    format!("{y:04}-{m:02}-{d:02} {h:02}.{mi:02}")
+}
+
+fn civil(secs: i64) -> (i64, i64, i64, i64, i64, i64) {
     let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
     let z = days + 719_468;
@@ -86,7 +96,7 @@ fn stamp() -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}{m:02}{d:02}-{:02}{:02}{:02}", rem / 3600, rem % 3600 / 60, rem % 60)
+    (y, m, d, rem / 3600, rem % 3600 / 60, rem % 60)
 }
 
 /// A safe folder path relative to the store ("" = the top), or Bad.
@@ -346,7 +356,7 @@ impl Store {
     }
 
     /// Reserves a free file name in `folder` (stem.ext, stem (2).ext, …) by creating it exclusively.
-    fn claim_name(&self, folder: &str, stem: &str, ext: &str, own: Option<&str>) -> R<String> {
+    pub fn claim_name(&self, folder: &str, stem: &str, ext: &str, own: Option<&str>) -> R<String> {
         use std::os::unix::fs::OpenOptionsExt;
         for n in 1..10000 {
             let name = numbered(stem, n, ext);

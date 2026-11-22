@@ -24,6 +24,11 @@ use crate::store::now;
 /// Quiet time before saving, and the longest a change waits to be saved.
 const SAVE_IDLE: Duration = Duration::from_secs(2);
 const SAVE_MAX: Duration = Duration::from_secs(30);
+/// How often an open file is checked for changes made outside StarSheets (Excel, a file share).
+#[cfg(not(test))]
+const DISK_CHECK: Duration = Duration::from_secs(3);
+#[cfg(test)]
+const DISK_CHECK: Duration = Duration::from_millis(200);
 /// A room with nobody in it closes after this (once saved).
 const EMPTY_FOR: Duration = Duration::from_secs(10);
 /// Every this many changes everyone gets a fingerprint of the whole file to check.
@@ -189,6 +194,16 @@ struct Room {
     save_failed_at: Option<Instant>,
     empty_since: Option<Instant>,
     guests: u32,
+    /// The file's version on disk when we last read or wrote it, and when we last looked.
+    disk: Option<String>,
+    disk_checked: Instant,
+}
+
+/// Why a save didn't happen.
+enum SaveError {
+    /// The file changed on disk since we read it: never write over that.
+    Outside,
+    Failed(String),
 }
 
 impl Room {
@@ -206,6 +221,8 @@ impl Room {
             save_failed_at: None,
             empty_since: None,
             guests: 0,
+            disk: None,
+            disk_checked: Instant::now(),
         };
         let opened = room.open();
         loop {
@@ -223,6 +240,9 @@ impl Room {
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
+            }
+            if room.disk_checked.elapsed() >= DISK_CHECK {
+                room.check_disk();
             }
             room.save_if_due(false);
             if room.clients.is_empty() && room.dirty_since.is_none() && room.empty_since.is_some_and(|t| t.elapsed() > EMPTY_FOR) && room.close(&rx) {
@@ -248,7 +268,10 @@ impl Room {
             let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
             let index = self.app.store.synced_index().map_err(|e| format!("Can't read the file list: {e}"))?;
             let path = index.get(&self.file).cloned().ok_or("This file isn't on the server any more.")?;
-            let bytes = std::fs::read(self.app.store.full(&path)).map_err(|e| format!("Can't read the file: {e}"))?;
+            let full = self.app.store.full(&path);
+            let bytes = std::fs::read(&full).map_err(|e| format!("Can't read the file: {e}"))?;
+            self.disk = self.app.store.version_of(&full).ok();
+            self.disk_checked = Instant::now();
             (crate::store::base_of(&path), bytes)
         };
         let mut s = Session::new();
@@ -309,15 +332,7 @@ impl Room {
                     self.save_if_due(true);
                 }
             }
-            RoomMsg::Replaced => {
-                if self.open().is_ok() {
-                    self.history.clear();
-                    self.dirty_since = None;
-                    self.seq += 1;
-                    let wb = self.snapshot();
-                    self.all(&ToClient::Reset { seq: self.seq, workbook: wb });
-                }
-            }
+            RoomMsg::Replaced => self.reload(),
             RoomMsg::From { client, msg } if matches!(msg, ToServer::Change { .. } | ToServer::Undo | ToServer::Redo) && !self.clients.get(&client).is_some_and(|c| c.can_edit) => {
                 if let ToServer::Change { cseq, .. } = msg {
                     self.to(&client, &ToClient::Rejected { cseq, why: gridcraft_engine::VIEW_ONLY.into() });
@@ -501,21 +516,81 @@ impl Room {
                 self.save_failed_at = None;
                 self.all(&ToClient::Saved { at: now() as i64 });
             }
-            Err(why) => {
+            Err(SaveError::Outside) => self.check_disk(),
+            Err(SaveError::Failed(why)) => {
                 self.save_failed_at = Some(Instant::now());
                 self.all(&ToClient::Message { text: format!("Couldn't save: {why}") });
             }
         }
     }
 
-    fn save(&self, wb: &Workbook) -> Result<(), String> {
+    fn save(&mut self, wb: &Workbook) -> Result<(), SaveError> {
         let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
-        let index = self.app.store.synced_index().map_err(|e| e.to_string())?;
-        let path = index.get(&self.file).cloned().ok_or("the file was moved to the bin")?;
-        let bytes = gridcraft_engine::io::save_bytes(wb, &crate::store::base_of(&path)).map_err(|e| e.to_string())?;
+        let failed = |e: String| SaveError::Failed(e);
+        let index = self.app.store.synced_index().map_err(|e| failed(e.to_string()))?;
+        let path = index.get(&self.file).cloned().ok_or_else(|| failed("the file was moved to the bin".into()))?;
         let full = self.app.store.full(&path);
-        self.app.store.keep_version(&self.file, &full).map_err(|e| e.to_string())?;
-        self.app.store.write_file(&full, &bytes).map_err(|e| e.to_string())
+        if self.app.store.version_of(&full).ok() != self.disk {
+            return Err(SaveError::Outside);
+        }
+        let bytes = gridcraft_engine::io::save_bytes(wb, &crate::store::base_of(&path)).map_err(|e| failed(e.to_string()))?;
+        self.app.store.keep_version(&self.file, &full).map_err(|e| failed(e.to_string()))?;
+        self.app.store.write_file(&full, &bytes).map_err(|e| failed(e.to_string()))?;
+        self.disk = self.app.store.version_of(&full).ok();
+        Ok(())
+    }
+
+    /// The file's version on disk now (None: gone, moved to the bin, or unreadable).
+    fn disk_now(&self) -> Option<String> {
+        let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let path = self.app.store.synced_index().ok()?.get(&self.file).cloned()?;
+        self.app.store.version_of(&self.app.store.full(&path)).ok()
+    }
+
+    /// Someone may have changed the file outside StarSheets (in Excel, over a file share). If so,
+    /// their version wins the file: changes made here that weren't saved yet go into a copy next
+    /// to it, and every tab is shown the file as it is on disk now. Nothing is written over.
+    fn check_disk(&mut self) {
+        self.disk_checked = Instant::now();
+        let now_on_disk = self.disk_now();
+        if now_on_disk.is_none() || now_on_disk == self.disk {
+            return;
+        }
+        let kept = if self.dirty_since.is_some() { self.wb().map(|wb| self.keep_copy(&wb)) } else { None };
+        if matches!(kept, Some(Ok(_))) {
+            self.dirty_since = None; // kept: don't make a second copy if reading fails below
+        }
+        self.reload();
+        let text = match kept {
+            Some(Ok(name)) => format!("This file was changed outside StarSheets (for example in Excel). You're now seeing that version; the changes made here in the last few seconds are kept in \u{201c}{name}\u{201d} in the same folder."),
+            Some(Err(why)) => format!("This file was changed outside StarSheets, and the last few seconds of changes made here couldn't be kept: {why}"),
+            None => "This file was changed outside StarSheets (for example in Excel), so it was opened again.".to_string(),
+        };
+        self.all(&ToClient::Message { text });
+    }
+
+    /// Saves the room's workbook as a new file next to this one; returns its name.
+    fn keep_copy(&self, wb: &Workbook) -> Result<String, String> {
+        let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
+        let store = &self.app.store;
+        let path = store.synced_index().map_err(|e| e.to_string())?.get(&self.file).cloned().ok_or("the file is gone")?;
+        let folder = crate::store::parent_of(&path);
+        let (stem, _) = crate::store::split_name(&crate::store::base_of(&path));
+        let name = store.claim_name(&folder, &format!("{stem} (StarSheets copy {})", crate::store::readable_stamp()), ".xlsx", None).map_err(|e| e.msg)?;
+        let bytes = gridcraft_engine::io::save_bytes(wb, &name).map_err(|e| e.to_string())?;
+        store.write_file(&store.full(&crate::store::join(&folder, &name)), &bytes).map_err(|e| e.to_string())?;
+        Ok(name)
+    }
+
+    /// Reads the file again and gives every tab the new state (history starts again).
+    fn reload(&mut self) {
+        if self.open().is_ok() {
+            self.history.clear();
+            self.dirty_since = None;
+            self.seq += 1;
+            let wb = self.snapshot();
+            self.all(&ToClient::Reset { seq: self.seq, workbook: wb });
+        }
     }
 }
 
@@ -639,6 +714,39 @@ mod tests {
         let saved = std::fs::read_to_string(dir.join("t.csv")).unwrap();
         assert!(saved.contains("from a") && saved.contains("from b"), "{saved}");
         assert_eq!(std::fs::read_dir(dir.join(".starsheets/versions").join(&file)).unwrap().count(), 1, "the old copy is kept");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Waits for the next Message, skipping anything else.
+    fn message(t: &mut Tab) -> String {
+        for _ in 0..20 {
+            if let ToClient::Message { text } = next(t) {
+                return text;
+            }
+        }
+        panic!("no message");
+    }
+
+    #[test]
+    fn changes_made_outside_starsheets_are_never_overwritten() {
+        let (app, file, dir) = app();
+        let mut a = join(&app, &file, "a");
+        // Changed outside while nothing is unsaved: the room opens the file again.
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(dir.join("t.csv"), "a,b\n1,2\nexcel,3\n").unwrap();
+        assert!(matches!(next(&mut a), ToClient::Reset { .. }));
+        assert!(message(&mut a).contains("opened again"));
+        // Changed outside while a change waits to be saved: ours goes into a copy, theirs stays.
+        edit(&app, &file, &mut a, "cell.set", json!({"cell": "C1", "input": "ours"}));
+        take_applied(&mut a);
+        std::fs::write(dir.join("t.csv"), "a,b\ntheirs,9\n").unwrap();
+        assert!(matches!(next(&mut a), ToClient::Reset { .. }));
+        assert!(message(&mut a).contains("StarSheets copy"));
+        app.rooms.send(&app, &file, RoomMsg::Leave { client: "a".into() });
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(std::fs::read_to_string(dir.join("t.csv")).unwrap().contains("theirs"), "their version is untouched");
+        let copies: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.contains("StarSheets copy")).collect();
+        assert_eq!(copies.len(), 1, "{copies:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
 
