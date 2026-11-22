@@ -127,7 +127,7 @@ pub fn check(store: &Store, username: &str, password: &str) -> Option<User> {
 
 pub fn clean_username(s: &str) -> Result<String, String> {
     let u = s.trim().to_lowercase();
-    if !(2..=32).contains(&u.chars().count()) || !u.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) {
+    if !(2..=32).contains(&u.chars().count()) || !u.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) || u.starts_with('.') {
         return Err("A username is 2 to 32 letters, numbers, dots, dashes or underscores.".into());
     }
     Ok(u)
@@ -282,7 +282,7 @@ mod tests {
     fn store() -> Store {
         let dir = std::env::temp_dir().join(format!("starsheets-auth-{}", random_hex(6)));
         std::fs::create_dir_all(&dir).unwrap();
-        Store { root: dir, keep: 2 }
+        Store { root: dir, keep: 2, spaces: false }
     }
 
     #[test]

@@ -220,6 +220,11 @@ def compare(label, steps, auth):
         if a[1] == "/api/info" and isinstance(b[3], dict):
             b = (*b[:3], {k: v for k, v in b[3].items() if k in a[3]}, b[4])
         a_cmp, b_cmp = list(a), list(b)
+        # A file restored from the bin keeps its id in the Rust server (its versions and sharing
+        # come back); files.py gave it a new one. Ids are compared as names, so drop them here.
+        if a[1] == "/api/files" and a[0] == "GET":
+            for x in (a_cmp, b_cmp):
+                x[3] = {**x[3], "files": [{k: v for k, v in f.items() if k != "id"} for f in x[3]["files"]]}
         # Content types may be spelt differently (text/javascript vs application/javascript).
         for x in (a_cmp, b_cmp):
             x[4] = {k: v for k, v in x[4].items() if k != "content-type" or "json" in v or "octet" in v or "wasm" in v}
@@ -320,6 +325,31 @@ def accounts():
         r = post("/api/signup", {"username": "Cat", "name": "Cat", "password": "catspassword", "code": "joinus"})
         got.append(("cat signs up and is signed in", r[0] == 200 and not json.loads(r[2])["user"]["owner"] and json.loads(s.call("GET", "/api/info")[2])["user"]["username"] == "cat"))
         got.append(("cat sees no one else's files", listed() == []))
+        # Everyone has their own folder; folder sharing covers what's inside, also added later.
+        lst = lambda: json.loads(s.call("GET", "/api/files")[2])
+        got.append(("cat's files go in cat's folder", json.loads(s.call("POST", "/api/files?name=Mine", b"m")[2])["folder"] == "cat"))
+        got.append(("no folders at the very top", post("/api/folders?path=&name=X", {})[0] == 201 and lst()["folders"] == ["cat", "cat/X"]))
+        got.append(("not in someone else's folder", post("/api/folders?path=owner&name=Y", {})[0] == 403))
+        team = json.loads(post("/api/folders?path=cat/X&name=Team", {})[2])["path"]
+        s.call("POST", f"/api/files?name=Inside&folder={team}", b"i")
+        got.append(("cat shares a folder with bob", post(f"/api/folders/sharing?path={team}", {"people": {"bob": "edit"}})[0] == 200))
+        got.append(("a person's own folder can't be shared", post("/api/folders/sharing?path=cat", {"link": "view"})[0] == 400))
+        s.call("POST", "/api/logout"); s.cookie = ""
+        post("/api/login", {"username": "bob", "password": "bobspassword"})
+        mine = lst()
+        got.append(("bob sees the shared folder", mine["shared"]["folders"] == [team] and "cat/X" not in mine["folders"] and any(f["name"] == "Inside.xlsx" for f in mine["files"])))
+        got.append(("bob adds a file in it", json.loads(s.call("POST", f"/api/files?name=FromBob&folder={team}", b"f")[2]).get("folder") == team))
+        got.append(("bob can't take cat's folder", post(f"/api/folders/move?path={team}&to=bob", {})[0] == 403))
+        fb = [f for f in lst()["files"] if f["name"] == "FromBob.xlsx"][0]
+        got.append(("what bob adds there is cat's", fb["owner"] == "cat" and fb["role"] == "edit"))
+        got.append(("bob stars it", post(f"/api/files/{fb['id']}/star", {"on": True})[0] == 200 and [f for f in lst()["files"] if f["id"] == fb["id"]][0]["starred"]))
+        got.append(("bob deletes it: it goes to cat's bin", s.call("DELETE", f"/api/files/{fb['id']}")[0] == 200 and json.loads(s.call("GET", "/api/bin")[2]) == []))
+        s.call("POST", "/api/logout"); s.cookie = ""
+        post("/api/login", {"username": "cat", "password": "catspassword"})
+        bin_ = json.loads(s.call("GET", "/api/bin")[2])
+        got.append(("cat's bin has it", [b["name"] for b in bin_] == ["FromBob.xlsx"]))
+        post("/api/bin/restore?name=FromBob.xlsx", {})
+        got.append(("restored with its id", any(f["id"] == fb["id"] for f in lst()["files"])))
     finally:
         s.stop()
         shutil.rmtree(base)

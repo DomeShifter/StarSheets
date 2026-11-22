@@ -9,6 +9,7 @@
 mod auth;
 mod live;
 mod sharing;
+mod spaces;
 mod store;
 
 use std::collections::HashMap;
@@ -180,6 +181,8 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
                 }
                 let user = auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map_err(|e| (400, e))?;
                 let _ = std::fs::remove_file(app.store.meta().join("setup-code"));
+                // Files already in the folder become the new owner's.
+                spaces::migrate(&app.store).map_err(|e| (500, e.to_string()))?;
                 Ok(session(app, &user))
             })
             .await;
@@ -200,6 +203,7 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             }
             let r = blocking(app, move |app| {
                 let user = auth::sign_up(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password"), &field(&json, "code"))?;
+                let _ = spaces::ensure_space(&app.store, &user.username);
                 Ok(session(app, &user))
             })
             .await;
@@ -287,7 +291,10 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
                 } else if reset {
                     auth::update(&app.store, &field(&json, "username"), None, None, Some(&field(&json, "password"))).map(|u| u.json())
                 } else {
-                    auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map(|u| u.json())
+                    auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map(|u| {
+                        let _ = spaces::ensure_space(&app.store, &u.username);
+                        u.json()
+                    })
                 }
             })
             .await;
@@ -303,75 +310,209 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
 
 // ---------------------------------------------------------------- sharing
 
-/// Checks a files/folders/bin request against the person's role, and answers the sharing
-/// endpoints (/api/files/ID/sharing). `None`: go ahead.
-async fn sharing_gate(app: &Shared, m: &str, p: &[String], me: Option<auth::User>, body: &[u8]) -> Option<Response<Body>> {
+/// Checks a files/folders/bin request against what the person may do, fills in where things go
+/// by default (their own folder), and answers sharing and star requests itself. Returns the
+/// query to use, or the answer to send.
+async fn gate(app: &Shared, m: &str, p: &[String], mut q: HashMap<String, String>, me: Option<auth::User>, body: &[u8]) -> Result<HashMap<String, String>, Response<Body>> {
     if !app.auth {
-        return None;
+        return Ok(q);
     }
-    let admin = me.as_ref().is_some_and(|u| u.owner);
-    match p.first().map(String::as_str) {
-        Some("folders" | "bin") if !admin && !(p[0] == "folders" && m == "POST" && p.len() == 1) => {
-            return Some(error(403, "Only the owner of this server can change folders and the bin."));
-        }
-        Some("files") if p.len() >= 2 => {}
-        _ => return None,
-    }
-    let (file, rest, m) = (p[1].clone(), p[2..].to_vec(), m.to_string());
+    let Some(me) = me else { return Err(error(401, "please sign in")) };
+    let (p, m) = (p.to_vec(), m.to_string());
     let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
-    let r = blocking(app, move |app| {
-        let role = sharing::role(&app.store, app.auth, me.as_ref(), &file);
-        let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
-        let need = match (rest.as_slice(), m.as_str()) {
-            (["sharing"], "GET") | ([], "GET") | (["versions", ..], "GET") | (["copy"], "POST") => sharing::Role::View,
-            ([], "PUT") | (["rename"], "POST") => sharing::Role::Edit,
-            _ => sharing::Role::Owner,
-        };
-        if role < need {
-            let why = if role == sharing::Role::None { "You don't have access to this file." } else { "You can only view this file." };
-            return Some(error(403, why));
-        }
-        match (rest.as_slice(), m.as_str()) {
-            (["sharing"], "GET") => Some(send_json(&sharing::describe(&app.store, &file, role), 200)),
-            (["sharing"], "POST") => Some(match sharing::update(&app.store, &file, &json) {
-                Ok(()) => send_json(&sharing::describe(&app.store, &file, role), 200),
-                Err(why) => error(400, &why),
-            }),
-            _ => None,
-        }
-    })
-    .await;
-    r.unwrap_or_else(|| Some(error(500, "server error")))
-}
-
-/// After a files request: new files and copies belong to whoever made them, and the file list
-/// shows only what the person may see (with the folders on the way to it).
-fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Reply, Bad>) -> Result<Reply, Bad> {
-    let Ok(Reply::Json(mut v, code)) = r else { return r };
-    let path: Vec<&str> = p.iter().map(String::as_str).collect();
-    match (path.as_slice(), m) {
-        (["files"], "POST") | (["files", _, "copy"], "POST") if code < 300 => {
-            if let Some(id) = v.get("id").and_then(Value::as_str) {
-                let _ = sharing::new_file(&app.store, id, me);
+    let r = blocking(app, move |app| -> Result<HashMap<String, String>, Response<Body>> {
+        use sharing::{Item, Role};
+        let store = &app.store;
+        let _ = spaces::ensure_space(store, &me.username);
+        let a = sharing::Access::new(store, true, Some(&me));
+        let need = |have: Role, want: Role| -> Result<(), Response<Body>> {
+            if have >= want {
+                Ok(())
+            } else if have == Role::None {
+                Err(error(403, "You don't have access to that."))
+            } else if want == Role::Owner {
+                Err(error(403, "Only its owner can do that."))
+            } else {
+                Err(error(403, "You can only view that."))
             }
-        }
-        (["files"], "GET") if !me.owner => {
-            let files: Vec<Value> = v["files"].as_array().cloned().unwrap_or_default().into_iter().filter(|f| f["id"].as_str().is_some_and(|id| sharing::listed(&app.store, true, Some(me), id))).collect();
-            let mut folders: Vec<String> = Vec::new();
-            for f in &files {
-                let mut path = String::new();
-                for part in f["folder"].as_str().unwrap_or("").split('/').filter(|x| !x.is_empty()) {
-                    path = if path.is_empty() { part.to_string() } else { format!("{path}/{part}") };
-                    if !folders.contains(&path) {
-                        folders.push(path.clone());
+        };
+        let home = me.username.clone();
+        let rest: Vec<&str> = p.iter().map(String::as_str).collect();
+        let path_q = |q: &HashMap<String, String>, k: &str| store::rel(q.get(k).map(String::as_str)).map_err(|b| error(b.code, &b.msg));
+        match (rest.as_slice(), m.as_str()) {
+            (["files"], "GET") => {}
+            (["files"], "POST") => {
+                let mut folder = path_q(&q, "folder")?;
+                if folder.is_empty() {
+                    folder = home.clone();
+                }
+                need(a.folder_role(&folder), Role::Edit)?;
+                q.insert("folder".into(), folder);
+            }
+            (["files", id, sub @ ..], _) => {
+                let role = a.file_role(id);
+                let path = a.file_paths.get(*id).cloned().unwrap_or_default();
+                match (sub, m.as_str()) {
+                    ([], "GET") => {
+                        need(role, Role::View)?;
+                        let _ = spaces::note_opened(store, &me, id);
                     }
+                    (["versions", ..], "GET") => need(role, Role::View)?,
+                    ([], "PUT") | (["rename"], "POST") | ([], "DELETE") => need(role, Role::Edit)?,
+                    (["copy"], "POST") => {
+                        need(role, Role::View)?;
+                        let parent = store::parent_of(&path);
+                        let target = match q.get("folder") {
+                            Some(f) => store::rel(Some(f)).map_err(|b| error(b.code, &b.msg))?,
+                            None if a.folder_role(&parent) >= Role::Edit && !parent.is_empty() => parent,
+                            None => home.clone(),
+                        };
+                        need(a.folder_role(&target), Role::Edit)?;
+                        q.insert("folder".into(), target);
+                    }
+                    (["move"], "POST") => {
+                        let target = path_q(&q, "folder")?;
+                        need(a.folder_role(&target), Role::Edit)?;
+                        // Into someone else's folder: it becomes theirs, so only its owner may.
+                        need(role, if store::space_of(&target) == store::space_of(&path) { Role::Edit } else { Role::Owner })?;
+                    }
+                    (["sharing"], "GET") => {
+                        need(role, Role::View)?;
+                        return Err(send_json(&sharing::describe(store, Item::File(id), &path, role), 200));
+                    }
+                    (["sharing"], "POST") => {
+                        need(role, Role::Owner)?;
+                        return Err(match sharing::update(store, Item::File(id), &path, &json) {
+                            Ok(()) => send_json(&sharing::describe(store, Item::File(id), &path, role), 200),
+                            Err(why) => error(400, &why),
+                        });
+                    }
+                    (["star"], "POST") => {
+                        need(role, Role::View)?;
+                        let on = json.get("on").and_then(Value::as_bool).unwrap_or(true);
+                        return Err(match spaces::set_star(store, &me, &format!("f:{id}"), on) {
+                            Ok(()) => send_json(&json!({ "ok": true }), 200),
+                            Err(e) => error(500, &e.to_string()),
+                        });
+                    }
+                    _ => need(role, Role::Owner)?,
                 }
             }
-            v = json!({ "files": files, "folders": folders });
+            (["folders", sub @ ..], _) => {
+                let mut path = path_q(&q, "path")?;
+                match (sub, m.as_str()) {
+                    ([], "POST") => {
+                        if path.is_empty() {
+                            path = home.clone();
+                            q.insert("path".into(), path.clone());
+                        }
+                        need(a.folder_role(&path), Role::Edit)?;
+                    }
+                    (["rename"], "POST") | ([], "DELETE") => need(a.folder_role(&path), Role::Edit)?,
+                    (["move"], "POST") => {
+                        let to = path_q(&q, "to")?;
+                        need(a.folder_role(&to), Role::Edit)?;
+                        need(a.folder_role(&path), if store::space_of(&to) == store::space_of(&path) { Role::Edit } else { Role::Owner })?;
+                    }
+                    (["copy"], "POST") => {
+                        need(a.folder_role(&path), Role::View)?;
+                        if !q.contains_key("to") {
+                            q.insert("to".into(), home.clone());
+                        }
+                        need(a.folder_role(&path_q(&q, "to")?), Role::Edit)?;
+                    }
+                    (["sharing" | "star"], _) => {
+                        let role = a.folder_role(&path);
+                        let Some(id) = a.folder_ids.get(&path).cloned() else { return Err(error(404, "no such folder")) };
+                        if path == home || (!path.contains('/') && !path.is_empty()) {
+                            return Err(error(400, "Share the folders inside it instead."));
+                        }
+                        return Err(match (sub, m.as_str()) {
+                            (["sharing"], "GET") => {
+                                need(role, Role::View)?;
+                                send_json(&sharing::describe(store, Item::Folder(&id), &path, role), 200)
+                            }
+                            (["sharing"], "POST") => {
+                                need(role, Role::Owner)?;
+                                match sharing::update(store, Item::Folder(&id), &path, &json) {
+                                    Ok(()) => send_json(&sharing::describe(store, Item::Folder(&id), &path, role), 200),
+                                    Err(why) => error(400, &why),
+                                }
+                            }
+                            (["star"], "POST") => {
+                                need(role, Role::View)?;
+                                let on = json.get("on").and_then(Value::as_bool).unwrap_or(true);
+                                match spaces::set_star(store, &me, &format!("d:{id}"), on) {
+                                    Ok(()) => send_json(&json!({ "ok": true }), 200),
+                                    Err(e) => error(500, &e.to_string()),
+                                }
+                            }
+                            _ => error(404, "not found"),
+                        });
+                    }
+                    _ => need(a.folder_role(&path), Role::Owner)?,
+                }
+            }
+            (["bin", ..], _) => {
+                q.insert("space".into(), home.clone());
+            }
+            _ => {}
         }
-        _ => {}
+        Ok(q)
+    })
+    .await;
+    r.unwrap_or_else(|| Err(error(500, "server error")))
+}
+
+/// After a files request, with accounts: the file list shows only what the person may see, with
+/// who owns each thing, their role, stars and when they last opened it, and the tops of "Shared
+/// with me".
+fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Reply, Bad>) -> Result<Reply, Bad> {
+    let Ok(Reply::Json(v, code)) = r else { return r };
+    if !(p.len() == 1 && p[0] == "files" && m == "GET") {
+        return Ok(Reply::Json(v, code));
     }
-    Ok(Reply::Json(v, code))
+    let a = sharing::Access::new(&app.store, true, Some(me));
+    let starred = spaces::starred(&app.store, me);
+    let opened = spaces::opened(&app.store, me);
+    let files: Vec<Value> = v["files"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|mut f| {
+            let id = f["id"].as_str()?.to_string();
+            if !a.file_listed(&id) {
+                return None;
+            }
+            let folder = f["folder"].as_str().unwrap_or("").to_string();
+            f["owner"] = json!(store::space_of(&folder));
+            f["role"] = json!(a.file_role(&id).name());
+            f["starred"] = json!(starred.contains(&format!("f:{id}")));
+            f["shared"] = json!(a.file_shared(&id));
+            if let Some(t) = opened.get(&id) {
+                f["opened"] = t.clone();
+            }
+            Some(f)
+        })
+        .collect();
+    let folders: Vec<String> = v["folders"].as_array().cloned().unwrap_or_default().into_iter().filter_map(|f| f.as_str().map(str::to_string)).filter(|f| a.folder_listed(f)).collect();
+    let info: serde_json::Map<String, Value> = folders
+        .iter()
+        .map(|f| {
+            let id = a.folder_ids.get(f).cloned().unwrap_or_default();
+            (f.clone(), json!({ "id": id, "owner": store::space_of(f), "role": a.folder_role(f).name(), "shared": a.folder_shared(f), "starred": starred.contains(&format!("d:{id}")) }))
+        })
+        .collect();
+    let (shared_folders, shared_files) = a.shared_roots();
+    let people: Vec<Value> = auth::users(&app.store).iter().map(|u| json!({ "username": u.username, "name": u.name, "colour": u.colour })).collect();
+    Ok(Reply::Json(
+        json!({
+            "files": files, "folders": folders, "folder_info": info, "space": me.username, "admin": me.owner,
+            "shared": { "folders": shared_folders, "files": shared_files }, "people": people,
+        }),
+        code,
+    ))
 }
 
 // ---------------------------------------------------------------- the web app's files
@@ -471,9 +612,10 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
         return error(401, "please sign in");
     }
     let me = current_user(&app, &headers);
-    if let Some(resp) = sharing_gate(&app, &m, &p, me.clone(), &body).await {
-        return resp;
-    }
+    let q = match gate(&app, &m, &p, q, me.clone(), &body).await {
+        Ok(q) => q,
+        Err(resp) => return resp,
+    };
     let if_match = headers.get(header::IF_MATCH).and_then(|v| v.to_str().ok()).map(str::to_string);
     // A file replaced through the API (a version restored) is read again by its live room.
     let replaced = (m == "PUT" && p.len() == 2 && p[0] == "files").then(|| p[1].clone());
@@ -535,7 +677,7 @@ async fn main() {
     if std::env::args().nth(1).as_deref() == Some("healthcheck") {
         healthcheck();
     }
-    let store = Store { root: PathBuf::from(env("STORE", "/data")), keep: env("KEEP", "6").parse().unwrap_or(6) };
+    let store = Store { root: PathBuf::from(env("STORE", "/data")), keep: env("KEEP", "6").parse().unwrap_or(6), spaces: !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no") };
     let port: u16 = env("PORT", "8080").parse().unwrap_or(8080);
     let auth = !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no");
     let site = Some(env("SITE", "")).filter(|s| !s.is_empty()).map(PathBuf::from);
@@ -551,6 +693,14 @@ async fn main() {
         println!("No accounts yet. Open StarSheets and create the owner account with this setup code: {}", auth::setup_code(&app.store));
     } else {
         println!("Sign-in is on ({} accounts).", auth::users(&app.store).len());
+        match spaces::migrate(&app.store) {
+            Ok(0) => {}
+            Ok(n) => println!("Moved {n} files and folders into people's own folders (once, for accounts)."),
+            Err(e) => {
+                eprintln!("Couldn't move files into people's own folders: {e}");
+                std::process::exit(1);
+            }
+        }
     }
     let router = Router::new().route("/api/live", axum::routing::get(live::ws)).fallback(handle).with_state(app).layer(axum::extract::DefaultBodyLimit::disable());
     let listener = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {

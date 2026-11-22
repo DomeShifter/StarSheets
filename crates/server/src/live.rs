@@ -112,7 +112,10 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
         let (app, user, file) = (app.clone(), user.clone(), file.clone());
         tokio::task::spawn_blocking(move || {
             let _g = app.lock.lock().unwrap_or_else(|e| e.into_inner());
-            crate::sharing::role(&app.store, app.auth, user.as_ref(), &file)
+            if let Some(u) = &user {
+                let _ = crate::spaces::note_opened(&app.store, u, &file);
+            }
+            crate::sharing::file_role(&app.store, app.auth, user.as_ref(), &file)
         })
         .await
         .unwrap_or_default()
@@ -615,7 +618,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("starsheets-live-{}", crate::store::random_hex(6)));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("t.csv"), "a,b\n1,2\n").unwrap();
-        let store = Store { root: dir.clone(), keep: 3 };
+        let store = Store { root: dir.clone(), keep: 3, spaces: false };
         let id = store.synced_index().unwrap().keys().next().unwrap().clone();
         let app = Arc::new(App { store, lock: Mutex::new(()), location: String::new(), auth: false, site: None, rooms: Rooms::default() });
         (app, id, dir)

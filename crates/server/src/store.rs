@@ -5,6 +5,13 @@
 //! `.starsheets/index.json`, the last KEEP versions in `.starsheets/versions/<id>/`, and a bin in
 //! `.bin` (original places in `.starsheets/bin.json`). Folders and files starting with "." are
 //! not shown. Callers hold one lock around every call, as the Python server did.
+//!
+//! With accounts (`spaces`), each person has a folder at the top named after their username
+//! (`<username>/…`), and their bin is `<username>/.bin`; bin.json keys are then
+//! "<username>/<name in the bin>". Folders get hidden ids too (`.starsheets/folders.json`), so
+//! sharing a folder survives renaming and moving it. Something moved to the bin remembers the ids
+//! inside it, so restoring brings back its versions and sharing. Things stay in a bin for
+//! BIN_DAYS days.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -13,6 +20,9 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value, json};
+
+/// Days something stays in the bin before it's deleted for good.
+pub const BIN_DAYS: i64 = 30;
 
 pub const EXTS: [&str; 5] = [".xlsx", ".xlsm", ".xls", ".csv", ".ods"];
 
@@ -191,6 +201,13 @@ fn copy_tree(src: &Path, dst: &Path) -> io::Result<()> {
 pub struct Store {
     pub root: PathBuf,
     pub keep: usize,
+    /// A folder per person at the top (sign-in on); false = one shared tree (sign-in off).
+    pub spaces: bool,
+}
+
+/// The first part of a path: whose space it's in (spaces on).
+pub fn space_of(relpath: &str) -> &str {
+    relpath.split('/').next().unwrap_or("")
 }
 
 type Index = BTreeMap<String, String>;
@@ -208,8 +225,15 @@ impl Store {
     fn versions(&self) -> PathBuf {
         self.meta().join("versions")
     }
-    fn bin(&self) -> PathBuf {
-        self.root.join(".bin")
+    fn folders_path(&self) -> PathBuf {
+        self.meta().join("folders.json")
+    }
+    /// The bin for `space` ("" = the shared one, without spaces).
+    fn bin(&self, space: &str) -> PathBuf {
+        if self.spaces && !space.is_empty() { self.full(space).join(".bin") } else { self.root.join(".bin") }
+    }
+    fn bin_key(&self, space: &str, name: &str) -> String {
+        if self.spaces && !space.is_empty() { format!("{space}/{name}") } else { name.to_string() }
     }
 
     pub fn full(&self, relpath: &str) -> PathBuf {
@@ -245,6 +269,49 @@ impl Store {
 
     fn save_index(&self, index: &Index) -> io::Result<()> {
         self.save_json(&self.index_path(), &json!(index))
+    }
+
+    fn load_folders(&self) -> Index {
+        self.load_json(&self.folders_path()).into_iter().filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string()))).collect()
+    }
+
+    fn save_folders(&self, folders: &Index) -> io::Result<()> {
+        self.save_json(&self.folders_path(), &json!(folders))
+    }
+
+    /// Folder ids ({id: path}), in line with the folder tree, as `synced_index` does for files.
+    pub fn synced_folders(&self) -> io::Result<Index> {
+        let mut ids = self.load_folders();
+        let (_, folders) = self.walk();
+        let present: BTreeSet<String> = folders.into_iter().collect();
+        let before = ids.len();
+        ids.retain(|_, path| present.contains(path));
+        let mut changed = ids.len() != before;
+        let known: BTreeSet<String> = ids.values().cloned().collect();
+        for path in present.difference(&known) {
+            ids.insert(random_hex(8), path.clone());
+            changed = true;
+        }
+        if changed {
+            self.save_folders(&ids)?;
+        }
+        Ok(ids)
+    }
+
+    /// After a folder moved from `old` to `new`: the ids inside follow it.
+    fn moved_prefix(&self, index: &mut Index, old: &str, new: &str) -> io::Result<()> {
+        let follow = |v: &mut String| {
+            if v == old {
+                *v = new.to_string();
+            } else if let Some(tail) = v.strip_prefix(&format!("{old}/")) {
+                *v = format!("{new}/{tail}");
+            }
+        };
+        index.values_mut().for_each(follow);
+        self.save_index(index)?;
+        let mut folders = self.load_folders();
+        folders.values_mut().for_each(follow);
+        self.save_folders(&folders)
     }
 
     /// Spreadsheet files and folders as paths relative to the store, skipping hidden ones.
@@ -337,21 +404,34 @@ impl Store {
         Ok(())
     }
 
-    /// Moves a file or folder into the bin, remembering where it was.
-    fn to_bin(&self, relpath: &str) -> io::Result<()> {
-        fs::create_dir_all(self.bin())?;
+    /// Moves a file or folder into the bin (its owner's, with spaces), remembering where it was
+    /// and the ids of everything in it.
+    fn to_bin(&self, relpath: &str, index: &mut Index) -> io::Result<()> {
+        let space = if self.spaces { space_of(relpath) } else { "" };
+        let bin = self.bin(space);
+        fs::create_dir_all(&bin)?;
         let name = base_of(relpath);
         let (stem, ext) = if self.full(relpath).is_file() { splitext(&name) } else { (name.clone(), String::new()) };
         // Its own name; only a clash with something already in the bin adds " (2)", " (3)"…
         let mut target = name;
         let mut n = 1;
-        while self.bin().join(&target).exists() {
+        while bin.join(&target).exists() {
             n += 1;
             target = numbered(&stem, n, &ext);
         }
-        move_any(&self.full(relpath), &self.bin().join(&target))?;
+        let under = |path: &str| -> Option<String> {
+            if path == relpath { Some(String::new()) } else { path.strip_prefix(&format!("{relpath}/")).map(str::to_string) }
+        };
+        let file_ids: Map<String, Value> = index.iter().filter_map(|(id, p)| Some((under(p)?, json!(id)))).collect();
+        let mut folders = self.load_folders();
+        let folder_ids: Map<String, Value> = folders.iter().filter_map(|(id, p)| Some((under(p)?, json!(id)))).collect();
+        move_any(&self.full(relpath), &bin.join(&target))?;
+        index.retain(|_, p| under(p).is_none());
+        self.save_index(index)?;
+        folders.retain(|_, p| under(p).is_none());
+        self.save_folders(&folders)?;
         let mut bins = self.load_json(&self.bin_index_path());
-        bins.insert(target, json!({"original": relpath, "deleted": now() as i64}));
+        bins.insert(self.bin_key(space, &target), json!({"original": relpath, "deleted": now() as i64, "files": file_ids, "folders": folder_ids}));
         self.save_json(&self.bin_index_path(), &Value::Object(bins))
     }
 
@@ -407,7 +487,7 @@ impl Store {
         match head {
             Some("files") => self.route_files(method, p, q, if_match, body, &mut index),
             Some("folders") => self.route_folders(method, p, q, &mut index),
-            Some("bin") => self.route_bin(method, p, q),
+            Some("bin") => self.route_bin(method, p, q, &mut index),
             _ => Err(Bad::new(404, "not found")),
         }
     }
@@ -425,6 +505,10 @@ impl Store {
                     "name": base_of(path), "folder": parent_of(path), "modified": secs,
                     "size": m.len(), "version": format!("{ns:x}-{:x}", m.len()),
                 }));
+            }
+            if self.spaces {
+                let by_path: HashMap<String, String> = self.synced_folders()?.into_iter().map(|(id, path)| (path, id)).collect();
+                return ok(json!({"files": out, "folders": folders, "folder_ids": by_path}));
             }
             return ok(json!({"files": out, "folders": folders}));
         }
@@ -465,9 +549,7 @@ impl Store {
                 ok(json!({"version": self.version_of(&fpath)?, "name": base_of(&path), "folder": parent_of(&path)}))
             }
             ([], "DELETE") => {
-                self.to_bin(&path)?;
-                index.remove(fid);
-                self.save_index(index)?;
+                self.to_bin(&path, index)?;
                 ok(json!({"ok": true}))
             }
             (["rename"], "POST") => {
@@ -542,6 +624,9 @@ impl Store {
         if action.is_empty() && method == "POST" {
             let parent = rel(qs(q, "path"))?;
             self.need_folder(&parent)?;
+            if self.spaces && parent.is_empty() {
+                return Err(Bad::new(400, "Folders go inside someone's own folder."));
+            }
             return Ok(Reply::Json(json!({"path": self.claim_folder(&parent, qs(q, "name"))?}), 201));
         }
         let path = rel(qs(q, "path"))?;
@@ -549,16 +634,13 @@ impl Store {
             return Err(Bad::new(400, "the top folder can't be changed"));
         }
         self.need_folder(&path)?;
-        let move_prefix = |index: &mut Index, old: &str, new: &str| {
-            for v in index.values_mut() {
-                if let Some(tail) = v.strip_prefix(&format!("{old}/")) {
-                    *v = format!("{new}/{tail}");
-                }
-            }
-        };
+        if self.spaces && !path.contains('/') {
+            return Err(Bad::new(400, "A person's own folder can't be changed."));
+        }
+        self.synced_folders()?;
         match (action, method) {
             ("", "DELETE") => {
-                self.to_bin(&path)?;
+                self.to_bin(&path, index)?;
                 ok(json!({"ok": true}))
             }
             ("rename", "POST") => {
@@ -569,8 +651,7 @@ impl Store {
                 let parent = parent_of(&path);
                 let new = join(&parent, &self.free_folder_name(&parent, &want)?);
                 fs::rename(self.full(&path), self.full(&new))?;
-                move_prefix(index, &path, &new);
-                self.save_index(index)?;
+                self.moved_prefix(index, &path, &new)?;
                 ok(json!({"path": new}))
             }
             ("move" | "copy", "POST") => {
@@ -585,8 +666,7 @@ impl Store {
                 let new = join(&to, &self.free_folder_name(&to, &base_of(&path))?);
                 if action == "move" {
                     move_any(&self.full(&path), &self.full(&new))?;
-                    move_prefix(index, &path, &new);
-                    self.save_index(index)?;
+                    self.moved_prefix(index, &path, &new)?;
                 } else {
                     copy_tree(&self.full(&path), &self.full(&new))?;
                 }
@@ -596,24 +676,42 @@ impl Store {
         }
     }
 
-    fn route_bin(&self, method: &str, p: &[String], q: &HashMap<String, String>) -> R<Reply> {
+    /// The bin of `space` (q "space"; "" without spaces). Old things are cleared out first.
+    fn route_bin(&self, method: &str, p: &[String], q: &HashMap<String, String>, index: &mut Index) -> R<Reply> {
+        let space = if self.spaces { rel(qs(q, "space"))? } else { String::new() };
+        if self.spaces && (space.is_empty() || space.contains('/')) {
+            return Err(Bad::new(400, "which bin?"));
+        }
+        let bin = self.bin(&space);
         let mut bins = self.load_json(&self.bin_index_path());
-        let mut present: Vec<String> = fs::read_dir(self.bin())
-            .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        let mut present: Vec<String> = fs::read_dir(&bin)
+            .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect())
             .unwrap_or_default();
         present.sort();
+        let deleted_at = |bins: &Map<String, Value>, name: &str| -> i64 {
+            bins.get(&self.bin_key(&space, name)).and_then(|i| i.get("deleted")).and_then(Value::as_i64).or_else(|| fs::metadata(bin.join(name)).ok().map(|m| mtime(&m).0)).unwrap_or(0)
+        };
+        // Things deleted more than BIN_DAYS ago go for good.
+        let too_old = now() as i64 - BIN_DAYS * 86400;
+        let old: Vec<String> = present.iter().filter(|n| deleted_at(&bins, n) < too_old).cloned().collect();
+        if !old.is_empty() {
+            for name in &old {
+                self.forget(&bin, &space, name, &mut bins)?;
+            }
+            present.retain(|n| !old.contains(n));
+            self.save_json(&self.bin_index_path(), &Value::Object(bins.clone()))?;
+        }
         let sub: Vec<&str> = p[1..].iter().map(String::as_str).collect();
         match (sub.as_slice(), method) {
             ([], "GET") => {
                 let mut out = Vec::new();
                 for name in &present {
-                    let full = self.bin().join(name);
-                    let m = fs::metadata(&full)?;
-                    let info = bins.get(name).cloned().unwrap_or(json!({}));
+                    let m = fs::metadata(bin.join(name))?;
+                    let info = bins.get(&self.bin_key(&space, name)).cloned().unwrap_or(json!({}));
                     out.push(json!({
                         "name": name,
                         "original": info.get("original").cloned().unwrap_or(json!(name)),
-                        "deleted": info.get("deleted").cloned().unwrap_or(json!(mtime(&m).0)),
+                        "deleted": deleted_at(&bins, name),
                         "folder": m.is_dir(),
                     }));
                 }
@@ -625,17 +723,14 @@ impl Store {
                 if !present.iter().any(|n| n == name) || name.contains('/') {
                     return Err(Bad::new(404, "not in the bin"));
                 }
-                let original = bins
-                    .get(name)
-                    .and_then(|i| i.get("original"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(name)
-                    .to_string();
+                let key = self.bin_key(&space, name);
+                let info = bins.get(&key).cloned().unwrap_or(json!({}));
+                let original = info.get("original").and_then(Value::as_str).unwrap_or(name).to_string();
                 let mut folder = parent_of(&original);
-                if !self.full(&folder).is_dir() {
-                    folder = String::new();
+                if !self.full(&folder).is_dir() || (self.spaces && space_of(&folder) != space) {
+                    folder = space.clone();
                 }
-                let src = self.bin().join(name);
+                let src = bin.join(name);
                 let target = if src.is_dir() {
                     let t = join(&folder, &self.free_folder_name(&folder, &base_of(&original))?);
                     move_any(&src, &self.full(&t))?;
@@ -646,7 +741,28 @@ impl Store {
                     fs::rename(&src, self.full(&t))?;
                     t
                 };
-                bins.remove(name);
+                // The ids come back with it: versions and sharing are kept.
+                let at = |sub: &str| if sub.is_empty() { target.clone() } else { format!("{target}/{sub}") };
+                if let Some(ids) = info.get("files").and_then(Value::as_object) {
+                    for (sub, id) in ids {
+                        if let Some(id) = id.as_str() {
+                            index.retain(|_, p| *p != at(sub));
+                            index.insert(id.to_string(), at(sub));
+                        }
+                    }
+                    self.save_index(index)?;
+                }
+                if let Some(ids) = info.get("folders").and_then(Value::as_object) {
+                    let mut folders = self.load_folders();
+                    for (sub, id) in ids {
+                        if let Some(id) = id.as_str() {
+                            folders.retain(|_, p| *p != at(sub));
+                            folders.insert(id.to_string(), at(sub));
+                        }
+                    }
+                    self.save_folders(&folders)?;
+                }
+                bins.remove(&key);
                 self.save_json(&self.bin_index_path(), &Value::Object(bins))?;
                 ok(json!({"path": target}))
             }
@@ -659,15 +775,27 @@ impl Store {
                     if !present.contains(&name) || name.contains('/') {
                         continue;
                     }
-                    let src = self.bin().join(&name);
-                    if src.is_dir() { fs::remove_dir_all(&src)? } else { fs::remove_file(&src)? }
-                    bins.remove(&name);
+                    self.forget(&bin, &space, &name, &mut bins)?;
                 }
                 self.save_json(&self.bin_index_path(), &Value::Object(bins))?;
                 ok(json!({"ok": true}))
             }
             _ => Err(Bad::new(404, "not found")),
         }
+    }
+
+    /// Deletes something in a bin for good, with the versions of the files in it.
+    fn forget(&self, bin: &Path, space: &str, name: &str, bins: &mut Map<String, Value>) -> io::Result<()> {
+        let src = bin.join(name);
+        if src.is_dir() { fs::remove_dir_all(&src)? } else { fs::remove_file(&src)? }
+        if let Some(info) = bins.remove(&self.bin_key(space, name))
+            && let Some(ids) = info.get("files").and_then(Value::as_object)
+        {
+            for id in ids.values().filter_map(Value::as_str) {
+                let _ = fs::remove_dir_all(self.versions().join(id));
+            }
+        }
+        Ok(())
     }
 }
 
