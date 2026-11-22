@@ -53,6 +53,9 @@ new features and the last one for fixes.
 - When a server that had files from before gets its first accounts, those files move into the
   owner's own folder (and files someone else made into theirs) once, automatically. Nothing is
   renamed or lost.
+- **Protected ranges with a warning work:** after the "Heads up!" warning, OK lets you edit (what
+  you started typing is kept), and "Don't show this again for 5 minutes" can be ticked. The
+  warning was drawn twice each frame, so the tick undid itself and the edit was dropped.
 - Every menu now has the same look (16 px either side, 32 px rows, icons), and every one-line text
   field and search bar has its text centred top to bottom.
 

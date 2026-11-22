@@ -69,6 +69,11 @@ pub struct ProtectPanel {
     allowed: Option<CellRef>,
     quiet_until: f64,
     dont_ask: bool,
+    /// OK was pressed: start the edit on the next frame.
+    start_edit: bool,
+    /// What the edit held when the warning stopped it (the key that was typed, or the cell's text
+    /// for F2 / double-click), so OK carries on from there and nothing typed is lost.
+    held_text: Option<String>,
 }
 
 fn entries(app: &SheetApp) -> Vec<Entry> {
@@ -148,6 +153,16 @@ impl ProtectPanel {
             if w >= 0 {
                 self.new_draft(app, Some(w as usize));
             }
+        }
+    }
+
+    /// The "Heads up!" warning for warned ranges: once per frame, after the grid (web.rs). It was
+    /// drawn from `intercept`, which runs twice a frame, so each click on its checkbox toggled it
+    /// twice (it never ticked) and OK could be handled before the grid saw the same click.
+    pub fn warning_ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+        // The edit allowed last frame starts now, after that click has gone.
+        if std::mem::take(&mut self.start_edit) {
+            app.begin_edit(self.held_text.take(), false);
         }
         self.warn(app, ctx);
     }
@@ -331,7 +346,7 @@ impl ProtectPanel {
     fn warn(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
         let editing = app.editor.as_ref().map(|e| e.cell);
-        if editing.is_none() {
+        if editing.is_none() && !self.start_edit {
             self.allowed = None;
         }
         if self.asking.is_none()
@@ -341,6 +356,7 @@ impl ProtectPanel {
             && let Some(sheet) = app.session.active().map(|d| d.wb.active_sheet())
             && entries(app).iter().any(|e| e.meta.warn && e.sheet == sheet && e.range.contains(cell) && !except_contains(&e.meta.except, cell))
         {
+            self.held_text = app.editor.as_ref().map(|e| e.text.clone());
             app.cancel_edit();
             self.asking = Some(cell);
             self.dont_ask = false;
@@ -368,7 +384,8 @@ impl ProtectPanel {
                 }
                 self.asking = None;
                 self.allowed = Some(asked);
-                app.begin_edit(None, false);
+                self.start_edit = true;
+                ctx.request_repaint();
             }
             Some(false) => self.asking = None,
             None => {}

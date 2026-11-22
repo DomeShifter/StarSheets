@@ -296,6 +296,7 @@ impl eframe::App for WebShell {
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);
         self.copyto.ui(&self.app, &ctx);
+        self.protect.warning_ui(&mut self.app, &ctx);
         crate::house::style_tooltips(&ctx);
         copy_without_https(ui.ctx());
     }
