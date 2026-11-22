@@ -739,8 +739,19 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             });
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            // Your avatar (with its menu) at the far right, then Share, then who else is here.
+            #[cfg(target_arch = "wasm32")]
+            {
+                crate::account::me_ui(ui);
+                ui.add_space(8.0);
+            }
             let share = Button::new(RichText::new("Share").size(14.0).color(theme::TEXT)).fill(theme::SHARE).corner_radius(18.0).min_size(vec2(84.0, 36.0));
-            ui.add_enabled(false, share).on_disabled_hover_text("Sharing arrives in phase 3");
+            ui.add_enabled(false, share).on_disabled_hover_text("Sharing comes in a later step");
+            #[cfg(target_arch = "wasm32")]
+            {
+                ui.add_space(8.0);
+                crate::account::others_ui(ui);
+            }
         });
     });
 }

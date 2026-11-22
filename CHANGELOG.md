@@ -7,6 +7,12 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Added
+- **Accounts:** everyone signs in with a username and password kept on your server (no sign-in
+  through other companies). The first visit makes the owner's account with a setup code from the
+  server's log; the owner adds other people. Your avatar (top right) changes your name, colour and
+  password.
+- **See who's here:** the avatars of everyone with the file open, and their selections on the
+  grid in their colour, with their name.
 - **Live editing between tabs:** open the same spreadsheet in several tabs (or browsers) and every
   change shows everywhere straight away. The server keeps the file and saves it; no more
   "conflicted copy" files. Undo works on your own latest change for now (when someone has

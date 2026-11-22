@@ -8,7 +8,8 @@ services:
     volumes:
       - ./spreadsheets:/data
     environment:
-      # Choose your own password (without one, a random password is printed in the log on first start).
+      # The first visit makes the owner's account with a setup code: this one, or (without it) a
+      # code printed in the log on first start. Other people get accounts from the owner.
       STARSHEETS_PASSWORD: "change-me"
       # How the app describes where files are kept.
       LOCATION: "the server"

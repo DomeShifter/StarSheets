@@ -54,8 +54,6 @@ enum Reply {
     Opened { id: String, name: String, version: String, bytes: Vec<u8>, folder: String, modified: i64 },
     /// How the server describes where files are kept.
     Info(String, bool),
-    /// The password was accepted: start again, signed in.
-    SignedIn,
     Renamed(String),
     Navigate(String),
     /// An import saved to the server, to open in a new tab.
@@ -79,11 +77,6 @@ pub struct Files {
     browser_to_file: bool,
     /// Where the server keeps files, for the status line's hover text (GET /api/info).
     location: String,
-    /// The server wants a password (and the box's text and message).
-    need_login: bool,
-    password: String,
-    login_error: Option<String>,
-    login_focused: bool,
     /// The folder a new spreadsheet is saved in (`?folder=` from "New spreadsheet" in a folder).
     new_folder: String,
     versions: Option<Vec<(String, i64)>>,
@@ -240,13 +233,9 @@ impl Files {
                 self.link = None;
                 post_new(doc, sent, bytes, name, &self.new_folder, self.inbox.clone(), ctx.clone());
             }
-            Reply::Failed(e) if self.need_login || e == "please sign in" => {
+            Reply::Failed(e) if e == "please sign in" => {
                 self.busy = false;
-                if e == "please sign in" {
-                    self.need_login = true;
-                } else {
-                    self.login_error = Some(if e == "wrong password" { "That password isn't right.".into() } else { e });
-                }
+                crate::account::ask_sign_in();
             }
             Reply::Failed(e) => {
                 self.busy = false;
@@ -276,13 +265,8 @@ impl Files {
             Reply::Refresh => self.refresh(ctx),
             Reply::Info(location, locked) => {
                 self.location = location;
-                self.need_login = locked;
-            }
-            Reply::SignedIn => {
-                set_unsaved_flag(false);
-                if let Some(w) = web_sys::window() {
-                    let _ = w.location().reload();
-                }
+                // Signing in is account.rs's (it asks /api/info itself).
+                let _ = locked;
             }
             Reply::NewFolder(path) => {
                 self.refresh(ctx);
@@ -442,10 +426,6 @@ impl Files {
 
     /// The file window and the version list.
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
-        if self.need_login {
-            self.login_ui(ui.ctx());
-            return;
-        }
         let keys = std::mem::take(&mut self.browser_keys);
         for action in self.browser.ui(ui.ctx(), &keys) {
             self.act(app, ui.ctx(), action);
@@ -565,36 +545,6 @@ impl Files {
         });
         if close || done {
             self.details = false;
-        }
-    }
-
-    /// The server's sign-in box (when it was started with a password).
-    fn login_ui(&mut self, ctx: &egui::Context) {
-        let mut go = false;
-        crate::house::dialog(ctx, "starsheets_login", 360.0, "Sign in to StarSheets", None, |ui| {
-            crate::house::note(ui, "This server keeps its spreadsheets behind a password.");
-            crate::house::gap(ui);
-            let r = ui.add(egui::TextEdit::singleline(&mut self.password).password(true).hint_text("Password").desired_width(f32::INFINITY).margin(vec2(crate::house::M, crate::house::S + 1.0)));
-            // Focus the box once (grabbing it every frame swallowed the Enter that signs in).
-            if !self.login_focused {
-                r.request_focus();
-                self.login_focused = true;
-            }
-            if (r.lost_focus() || r.has_focus()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                go = true;
-                r.request_focus();
-            }
-            if let Some(e) = &self.login_error {
-                ui.label(RichText::new(e).size(crate::house::NOTE).color(crate::house::ERROR));
-            }
-            if crate::house::actions(ui, &["Sign in"]).is_some() {
-                go = true;
-            }
-        });
-        if go && !self.password.is_empty() {
-            self.login_error = None;
-            let body = serde_json::to_vec(&json!({ "password": self.password })).unwrap_or_default();
-            send(Method::Post, "api/login".into(), Some(body), None, self.inbox.clone(), ctx.clone(), |_, _, _| Reply::SignedIn);
         }
     }
 
@@ -727,7 +677,7 @@ fn stem(name: &str) -> String {
     }
 }
 
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     js_sys::encode_uri_component(s).as_string().unwrap_or_default()
 }
 
@@ -811,6 +761,11 @@ fn take_flush_flag() -> bool {
 }
 
 /// Tells the page (index.html) whether leaving now would lose changes.
+/// After signing in or out the page reloads on purpose: nothing to warn about.
+pub(crate) fn clear_unsaved_flag() {
+    set_unsaved_flag(false);
+}
+
 fn set_unsaved_flag(on: bool) {
     if let Some(w) = web_sys::window() {
         let _ = js_sys::Reflect::set(&w, &"__ssUnsaved".into(), &on.into());
@@ -818,7 +773,7 @@ fn set_unsaved_flag(on: bool) {
 }
 
 #[derive(Clone, Copy)]
-enum Method {
+pub(crate) enum Method {
     Get,
     Post,
     Put,
@@ -854,7 +809,7 @@ pub(crate) async fn get_bytes(url: &str) -> Result<(u16, web_sys::Headers, Vec<u
     fetch(Method::Get, url, None, None).await
 }
 
-async fn fetch(method: Method, url: &str, body: Option<Vec<u8>>, if_match: Option<String>) -> Result<(u16, web_sys::Headers, Vec<u8>), String> {
+pub(crate) async fn fetch(method: Method, url: &str, body: Option<Vec<u8>>, if_match: Option<String>) -> Result<(u16, web_sys::Headers, Vec<u8>), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let init = web_sys::RequestInit::new();
     init.set_method(match method {

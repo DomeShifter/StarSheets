@@ -35,17 +35,19 @@ comments with mentions, add-ons, and desktop apps. See the [roadmap](ROADMAP.md)
 ## Try it with Docker
 
 ```sh
-docker run -d -p 8080:8080 -v starsheets:/data \
-  -e STARSHEETS_PASSWORD=choose-a-password \
-  ghcr.io/domeshifter/starsheets:latest
+docker run -d -p 8080:8080 -v starsheets:/data ghcr.io/domeshifter/starsheets:latest
+docker logs <container>   # shows the setup code
 ```
 
-Then open <http://localhost:8080>. Your spreadsheets are kept as `.xlsx` files in the `starsheets`
-volume. There's a ready-made [compose file](docker/compose.yml) too.
+Then open <http://localhost:8080> and make your account with the setup code from the log: you
+become the server's owner and can add other people (your avatar › People). Everyone signs in with
+a username and password kept on your server; there is no sign-in through other companies. Your
+spreadsheets are kept as `.xlsx` files in the `starsheets` volume. There's a ready-made
+[compose file](docker/compose.yml) too.
 
-- Without `STARSHEETS_PASSWORD`, a random password is made on first start and printed in the
-  container's log (`docker logs …`).
-- On a private network you trust, `STARSHEETS_AUTH=off` turns the login off.
+- Open the same spreadsheet in several tabs, or with other people, and everyone sees every change
+  as it happens, with each other's cursors.
+- On a private network you trust, `STARSHEETS_AUTH=off` turns sign-in off (everyone is a guest).
 - Copy and paste work best over HTTPS (browsers limit the clipboard on plain `http://`), so a
   reverse proxy with a certificate is a good idea if you use it from other machines.
 

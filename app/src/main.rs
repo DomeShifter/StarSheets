@@ -6,6 +6,8 @@
 #[cfg(target_arch = "wasm32")]
 mod prefs;
 mod protectpanel;
+#[cfg(target_arch = "wasm32")]
+mod account;
 mod autolink;
 mod calcpreview;
 mod bottom;

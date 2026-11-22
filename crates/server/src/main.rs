@@ -6,6 +6,7 @@
 //! LOCATION (how people are told where files are kept), STARSHEETS_AUTH (off = no login),
 //! STARSHEETS_PASSWORD, SITE (a built StarSheets site to serve).
 
+mod auth;
 mod live;
 mod store;
 
@@ -20,12 +21,10 @@ use axum::extract::State;
 use axum::http::{HeaderMap, Method, Response, Uri, header};
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 
-use store::{Bad, Reply, Store, now, random_hex};
+use store::{Bad, Reply, Store};
 
 const MAX_BYTES: u64 = 200 * 1024 * 1024;
-const SESSION_DAYS: u64 = 30;
 const COOKIE: &str = "starsheets_session";
 
 struct App {
@@ -95,73 +94,173 @@ fn reply(r: Result<Reply, Bad>) -> Response<Body> {
     }
 }
 
-// ---------------------------------------------------------------- login
+// ---------------------------------------------------------------- sign-in
 
-/// The password: STARSHEETS_PASSWORD, else one made (and kept) on first start.
-fn password(app: &App) -> String {
-    let given = env("STARSHEETS_PASSWORD", "");
-    if !given.is_empty() {
-        return given;
-    }
-    let path = app.store.meta().join("password");
-    if let Ok(s) = std::fs::read_to_string(&path) {
-        return s.trim().to_string();
-    }
-    let made = random_hex(9);
-    let _ = std::fs::create_dir_all(app.store.meta());
-    let _ = std::fs::write(&path, format!("{made}\n"));
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-    made
+fn cookie_token(headers: &HeaderMap) -> Option<String> {
+    let cookies = headers.get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()).collect::<Vec<_>>().join(";");
+    cookies.split(';').find_map(|part| {
+        let (name, value) = part.trim().split_once('=')?;
+        (name == COOKIE && !value.is_empty()).then(|| value.to_string())
+    })
 }
 
-fn token_hash(token: &str) -> String {
-    hex::encode(Sha256::digest(token.as_bytes()))
-}
-
-fn sessions_path(app: &App) -> PathBuf {
-    app.store.meta().join("sessions.json")
-}
-
-fn new_session(app: &App) -> std::io::Result<String> {
-    let token = random_hex(32);
-    let t = now();
-    let mut sessions = app.store.load_json(&sessions_path(app));
-    sessions.retain(|_, v| v.as_f64().unwrap_or(0.0) > t);
-    sessions.insert(token_hash(&token), json!(t + (SESSION_DAYS * 86400) as f64));
-    app.store.save_json(&sessions_path(app), &Value::Object(sessions))?;
-    Ok(token)
+/// Who is asking (`None`: not signed in, or sign-in is off).
+fn current_user(app: &App, headers: &HeaderMap) -> Option<auth::User> {
+    if !app.auth {
+        return None;
+    }
+    cookie_token(headers).and_then(|t| auth::session_user(&app.store, &t))
 }
 
 fn signed_in(app: &App, headers: &HeaderMap) -> bool {
-    if !app.auth {
-        return true;
-    }
-    let cookies = headers.get_all(header::COOKIE).iter().filter_map(|v| v.to_str().ok()).collect::<Vec<_>>().join(";");
-    for part in cookies.split(';') {
-        let (name, value) = part.trim().split_once('=').unwrap_or((part.trim(), ""));
-        if name == COOKIE && !value.is_empty() {
-            let sessions = app.store.load_json(&sessions_path(app));
-            return sessions.get(&token_hash(value)).and_then(Value::as_f64).unwrap_or(0.0) > now();
-        }
-    }
-    false
+    !app.auth || current_user(app, headers).is_some()
 }
 
 fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn cookie_reply(value: &str, max_age: u64, body: &'static str) -> Response<Body> {
+fn cookie_reply(value: &str, max_age: u64, body: Value) -> Response<Body> {
     Response::builder()
         .status(200)
         .header(header::CONTENT_TYPE, "application/json")
+        .header(header::CACHE_CONTROL, "no-store")
         .header(header::SET_COOKIE, format!("{COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict"))
-        .body(Body::from(body))
+        .body(Body::from(serde_json::to_vec(&body).unwrap_or_default()))
         .unwrap()
+}
+
+/// Runs account work (Argon2 is slow) off the async threads, under the store lock.
+async fn blocking<T: Send + 'static>(app: &Shared, f: impl FnOnce(&App) -> T + Send + 'static) -> Option<T> {
+    let app = app.clone();
+    tokio::task::spawn_blocking(move || {
+        let _g = app.lock.lock().unwrap_or_else(|e| e.into_inner());
+        f(&app)
+    })
+    .await
+    .ok()
+}
+
+fn field(body: &Value, key: &str) -> String {
+    body.get(key).and_then(Value::as_str).unwrap_or("").to_string()
+}
+
+fn opt_field(body: &Value, key: &str) -> Option<String> {
+    body.get(key).and_then(Value::as_str).map(str::to_string)
+}
+
+/// /api/info, /api/setup, /api/login, /api/logout, /api/me and /api/users; `None` for other paths.
+async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, String>, headers: &HeaderMap, body: &[u8]) -> Option<Response<Body>> {
+    let path: Vec<&str> = p.iter().map(String::as_str).collect();
+    let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let me = current_user(app, headers);
+    let on = app.auth;
+    let session = |app: &App, user: &auth::User| match auth::new_session(&app.store, &user.username) {
+        Ok(t) => cookie_reply(&t, auth::SESSION_DAYS * 86400, json!({ "ok": true, "user": user.json() })),
+        Err(_) => error(500, "storage error"),
+    };
+    Some(match (path.as_slice(), m) {
+        (["info"], "GET") => {
+            let setup = on && !auth::any_users(&app.store);
+            send_json(&json!({ "location": app.location, "auth": on, "signed_in": !on || me.is_some(), "setup": setup, "user": me.map(|u| u.json()) }), 200)
+        }
+        (["setup"], "POST") => {
+            if !on {
+                return Some(error(400, "Sign-in is off on this server."));
+            }
+            let r = blocking(app, move |app| {
+                if auth::any_users(&app.store) {
+                    return Err((400, "This server already has an owner. Sign in instead.".to_string()));
+                }
+                if !same(field(&json, "code").trim().as_bytes(), auth::setup_code(&app.store).as_bytes()) {
+                    return Err((401, "That setup code isn't right.".to_string()));
+                }
+                let user = auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map_err(|e| (400, e))?;
+                let _ = std::fs::remove_file(app.store.meta().join("setup-code"));
+                Ok(session(app, &user))
+            })
+            .await;
+            match r {
+                Some(Ok(resp)) => resp,
+                Some(Err((code, why))) => {
+                    if code == 401 {
+                        tokio::time::sleep(Duration::from_millis(1500)).await;
+                    }
+                    error(code, &why)
+                }
+                None => error(500, "server error"),
+            }
+        }
+        (["login"], "POST") => {
+            if !on {
+                return Some(send_json(&json!({ "ok": true }), 200));
+            }
+            let r = blocking(app, move |app| auth::check(&app.store, &field(&json, "username"), &field(&json, "password")).map(|u| session(app, &u))).await.flatten();
+            match r {
+                Some(resp) => resp,
+                None => {
+                    tokio::time::sleep(Duration::from_millis(1500)).await; // slows down guessing
+                    error(401, "That username or password isn't right.")
+                }
+            }
+        }
+        (["logout"], "POST") => {
+            if let Some(t) = cookie_token(headers) {
+                blocking(app, move |app| auth::end_session(&app.store, &t)).await;
+            }
+            cookie_reply("", 0, json!({ "ok": true }))
+        }
+        (["me"], "POST") => {
+            let Some(me) = me else { return Some(error(401, "please sign in")) };
+            let r = blocking(app, move |app| {
+                let new_password = opt_field(&json, "password");
+                if new_password.is_some() && auth::check(&app.store, &me.username, &field(&json, "current_password")).is_none() {
+                    return Err("Your current password isn't right.".to_string());
+                }
+                auth::update(&app.store, &me.username, opt_field(&json, "name").as_deref(), opt_field(&json, "colour").as_deref(), new_password.as_deref())
+                    .and_then(|u| if json.get("password").is_some() { auth::new_session(&app.store, &u.username).map(|t| (u, Some(t))).map_err(|e| e.to_string()) } else { Ok((u, None)) })
+            })
+            .await;
+            match r {
+                // A new password signs out everywhere else; this tab gets a new session.
+                Some(Ok((u, Some(t)))) => cookie_reply(&t, auth::SESSION_DAYS * 86400, json!({ "ok": true, "user": u.json() })),
+                Some(Ok((u, None))) => send_json(&json!({ "ok": true, "user": u.json() }), 200),
+                Some(Err(why)) => error(400, &why),
+                None => error(500, "server error"),
+            }
+        }
+        (["users"], "GET") => {
+            if !signed_in(app, headers) {
+                return Some(error(401, "please sign in"));
+            }
+            let list = blocking(app, |app| auth::users(&app.store)).await.unwrap_or_default();
+            send_json(&Value::Array(list.iter().map(auth::User::json).collect()), 200)
+        }
+        (["users"] | ["users", "password"], "POST" | "DELETE") => {
+            let Some(me) = me.filter(|u| u.owner) else { return Some(error(403, "Only the owner can do that.")) };
+            let (reset, deleting) = (path.len() == 2, m == "DELETE");
+            let who = q.get("username").cloned().unwrap_or_default();
+            let r = blocking(app, move |app| {
+                if deleting {
+                    if who == me.username {
+                        return Err("You can't remove your own account.".to_string());
+                    }
+                    auth::remove(&app.store, &who).map(|_| json!({ "ok": true }))
+                } else if reset {
+                    auth::update(&app.store, &field(&json, "username"), None, None, Some(&field(&json, "password"))).map(|u| u.json())
+                } else {
+                    auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map(|u| u.json())
+                }
+            })
+            .await;
+            match r {
+                Some(Ok(v)) => send_json(&v, 200),
+                Some(Err(why)) => error(400, &why),
+                None => error(500, "server error"),
+            }
+        }
+        _ => return None,
+    })
 }
 
 // ---------------------------------------------------------------- the web app's files
@@ -254,33 +353,8 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
         Err(_) => return error(413, "file too large"),
     };
     let m = method.as_str().to_string();
-    if p == ["info"] && m == "GET" {
-        return send_json(&json!({"location": app.location, "auth": app.auth, "signed_in": signed_in(&app, &headers)}), 200);
-    }
-    if p == ["login"] && m == "POST" {
-        let given = serde_json::from_slice::<Value>(&body)
-            .ok()
-            .and_then(|v| v.get("password").map(|p| p.as_str().map(str::to_string).unwrap_or_else(|| p.to_string())))
-            .unwrap_or_default();
-        let app2 = app.clone();
-        let good = tokio::task::spawn_blocking(move || same(given.as_bytes(), password(&app2).as_bytes())).await.unwrap_or(false);
-        if !good {
-            tokio::time::sleep(Duration::from_millis(1500)).await; // slows down guessing
-            return error(401, "wrong password");
-        }
-        let app2 = app.clone();
-        let token = tokio::task::spawn_blocking(move || {
-            let _g = app2.lock.lock().unwrap_or_else(|e| e.into_inner());
-            new_session(&app2)
-        })
-        .await;
-        return match token {
-            Ok(Ok(t)) => cookie_reply(&t, SESSION_DAYS * 86400, "{\"ok\": true}"),
-            _ => error(500, "storage error"),
-        };
-    }
-    if p == ["logout"] && m == "POST" {
-        return cookie_reply("", 0, "");
+    if let Some(resp) = accounts(&app, &m, &p, &q, &headers, &body).await {
+        return resp;
     }
     if !signed_in(&app, &headers) {
         return error(401, "please sign in");
@@ -353,11 +427,11 @@ async fn main() {
     }
     println!("StarSheets server {}: {} on :{port}, keeping {} versions", env!("CARGO_PKG_VERSION"), app.store.root.display(), app.store.keep);
     if !auth {
-        println!("Login is OFF (STARSHEETS_AUTH=off): anyone who can reach this port can read and change every file.");
-    } else if !env("STARSHEETS_PASSWORD", "").is_empty() {
-        println!("Login is on, with the password from STARSHEETS_PASSWORD.");
+        println!("Sign-in is OFF (STARSHEETS_AUTH=off): anyone who can reach this port can read and change every file.");
+    } else if !auth::any_users(&app.store) {
+        println!("No accounts yet. Open StarSheets and create the owner account with this setup code: {}", auth::setup_code(&app.store));
     } else {
-        println!("Login is on. Password (set STARSHEETS_PASSWORD to choose your own): {}", password(&app));
+        println!("Sign-in is on ({} accounts).", auth::users(&app.store).len());
     }
     let router = Router::new().route("/api/live", axum::routing::get(live::ws)).fallback(handle).with_state(app).layer(axum::extract::DefaultBodyLimit::disable());
     let listener = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {

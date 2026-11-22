@@ -21,7 +21,10 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
   says so instead of undoing over their work.
 - **NOW(), RAND() and similar** are worked out in each tab, as in Google Sheets.
 - **Accounts** are local to your server (username and password, hashed with Argon2). No sign-in
-  through Google or other companies.
+  through Google or other companies. The first account (the owner's) is made with a setup code
+  from the server's log, so nobody else can claim a new server first; the owner adds people.
+- **Presence:** each tab sends where it is (sheet and selection) a few times a second at most;
+  others draw it in that person's colour, with their name for a few seconds after it moves.
 - **Sharing** per file: owner, can edit, can view, and an optional "anyone with the link".
 - Changes from other people never go through the clipboard, files on their computer or macros:
   a paste carries its own contents, and the server only accepts commands on an allow-list.
@@ -36,5 +39,15 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
 | 3 | Undo of your own changes only | Undo never wipes someone else's change |
 | 4 | Share dialog, view-only mode | A viewer can't edit; the owner can change roles |
 | Later | Desktop apps run the same server for local files; changes kept while offline; comment threads | |
+
+## What we learnt building it
+
+- A replayed command is checked by a fingerprint of what it changed (formula *results* are left
+  out, since NOW() and RAND() differ). On a mismatch the server asks the tab for the finished
+  state of that change, so a command we didn't know reads outside state still ends up right.
+- GridCraft's active sheet is view state stored in the workbook without making a new version, so
+  switching sheets is never sent as a change.
+- Typed input depends on the person's date and number settings, so each command carries them.
+- Undo for now: your own latest change only, while nobody has changed the file since.
 
 Progress is ticked off in [ROADMAP.md](../ROADMAP.md).

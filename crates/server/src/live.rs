@@ -32,7 +32,7 @@ const CHECK_EVERY: u64 = 25;
 const HISTORY: usize = 200;
 
 enum RoomMsg {
-    Join { client: String, out: UnboundedSender<String> },
+    Join { client: String, user: Option<crate::auth::User>, out: UnboundedSender<String> },
     Leave { client: String },
     From { client: String, msg: ToServer },
     /// The file was replaced through the files API (a version restored): read it again.
@@ -76,14 +76,15 @@ pub async fn ws(State(app): State<Shared>, headers: HeaderMap, upgrade: WebSocke
     if !crate::signed_in(&app, &headers) {
         return crate::error(401, "please sign in").into_response();
     }
-    upgrade.max_message_size(crate::MAX_BYTES as usize).on_upgrade(move |socket| connection(app, socket))
+    let user = crate::current_user(&app, &headers);
+    upgrade.max_message_size(crate::MAX_BYTES as usize).on_upgrade(move |socket| connection(app, socket, user))
 }
 
 fn text(m: &ToClient) -> String {
     serde_json::to_string(m).unwrap_or_default()
 }
 
-async fn connection(app: Shared, mut socket: WebSocket) {
+async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth::User>) {
     // The first message says which file.
     let (file, client) = loop {
         match socket.recv().await {
@@ -102,7 +103,7 @@ async fn connection(app: Shared, mut socket: WebSocket) {
         }
     };
     let (out, mut outbox) = unbounded_channel::<String>();
-    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), out });
+    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), user, out });
     // A ping now and then keeps proxies from closing a quiet connection.
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     ping.tick().await;
@@ -140,6 +141,9 @@ async fn connection(app: Shared, mut socket: WebSocket) {
 
 struct Client {
     out: UnboundedSender<String>,
+    person: sync::Person,
+    /// Where the tab is (its last Presence), sent to people who join later.
+    presence: Option<(usize, gridcraft_engine::selection::Selection)>,
     /// Waiting for this change as its finished state (after NeedState); other changes from
     /// this tab are dropped until it comes, and the tab sends them again.
     blocked: Option<u64>,
@@ -168,6 +172,7 @@ struct Room {
     last_change: Instant,
     save_failed_at: Option<Instant>,
     empty_since: Option<Instant>,
+    guests: u32,
 }
 
 impl Room {
@@ -184,6 +189,7 @@ impl Room {
             last_change: Instant::now(),
             save_failed_at: None,
             empty_since: None,
+            guests: 0,
         };
         let opened = room.open();
         loop {
@@ -259,13 +265,29 @@ impl Room {
 
     fn handle(&mut self, msg: RoomMsg) {
         match msg {
-            RoomMsg::Join { client, out } => {
+            RoomMsg::Join { client, user, out } => {
                 let _ = out.send(text(&ToClient::Welcome { seq: self.seq, workbook: self.snapshot() }));
-                self.clients.insert(client, Client { out, blocked: None, redo: Vec::new() });
+                // Without sign-in (STARSHEETS_AUTH=off) people are guests, numbered as they come.
+                let person = match user {
+                    Some(u) => sync::Person { client: client.clone(), username: u.username, name: u.name, colour: u.colour },
+                    None => {
+                        self.guests += 1;
+                        let colour = crate::auth::COLOURS[(self.guests as usize - 1) % crate::auth::COLOURS.len()].to_string();
+                        sync::Person { client: client.clone(), username: String::new(), name: format!("Guest {}", self.guests), colour }
+                    }
+                };
+                for (other, c) in &self.clients {
+                    if let Some((sheet, sel)) = &c.presence {
+                        let _ = out.send(text(&ToClient::Presence { client: other.clone(), sheet: *sheet, sel: sel.clone() }));
+                    }
+                }
+                self.clients.insert(client, Client { out, person, presence: None, blocked: None, redo: Vec::new() });
                 self.empty_since = None;
+                self.people();
             }
             RoomMsg::Leave { client } => {
                 self.clients.remove(&client);
+                self.people();
                 if self.clients.is_empty() {
                     self.empty_since = Some(Instant::now());
                     self.save_if_due(true);
@@ -285,8 +307,28 @@ impl Room {
                 ToServer::Undo => self.undo(&client),
                 ToServer::Redo => self.redo(&client),
                 ToServer::Resync => self.to(&client, &ToClient::Reset { seq: self.seq, workbook: self.snapshot() }),
+                ToServer::Presence { sheet, sel } => {
+                    if let Some(c) = self.clients.get_mut(&client) {
+                        c.presence = Some((sheet, sel.clone()));
+                    }
+                    let m = text(&ToClient::Presence { client: client.clone(), sheet, sel });
+                    for (other, c) in &self.clients {
+                        if *other != client {
+                            let _ = c.out.send(m.clone());
+                        }
+                    }
+                }
                 ToServer::Hello { .. } => {}
             },
+        }
+    }
+
+    /// Tells everyone who has the file open (each tab learns which entry is its own).
+    fn people(&self) {
+        let mut people: Vec<sync::Person> = self.clients.values().map(|c| c.person.clone()).collect();
+        people.sort_by(|a, b| a.name.cmp(&b.name).then(a.client.cmp(&b.client)));
+        for (id, c) in &self.clients {
+            let _ = c.out.send(text(&ToClient::People { people: people.clone(), you: id.clone() }));
         }
     }
 
@@ -302,6 +344,12 @@ impl Room {
             if cseq != waiting || !matches!(change, Change::State { .. }) {
                 return;
             }
+        }
+        if let Change::Cmd { id, .. } = &change
+            && !sync::server_allows(id)
+        {
+            self.to(client, &ToClient::Rejected { cseq, why: format!("The server doesn't run \"{id}\" for a tab.") });
+            return;
         }
         let Some(before) = self.wb() else { return };
         if let Err(why) = sync::apply(&mut self.session, &change) {
@@ -441,6 +489,8 @@ mod tests {
         session: Session,
         seq: u64,
         cseq: u64,
+        /// Who-is-here messages, kept aside.
+        seen: Vec<ToClient>,
     }
 
     fn app() -> (Shared, String, std::path::PathBuf) {
@@ -456,7 +506,12 @@ mod tests {
     fn next(t: &mut Tab) -> ToClient {
         for _ in 0..400 {
             if let Ok(m) = t.rx.try_recv() {
-                return serde_json::from_str(&m).unwrap();
+                let m: ToClient = serde_json::from_str(&m).unwrap();
+                if matches!(m, ToClient::People { .. } | ToClient::Presence { .. }) {
+                    t.seen.push(m);
+                    continue;
+                }
+                return m;
             }
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -465,8 +520,8 @@ mod tests {
 
     fn join(app: &Shared, file: &str, name: &str) -> Tab {
         let (out, rx) = unbounded_channel();
-        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), out });
-        let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0 };
+        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), user: None, out });
+        let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
         match next(&mut t) {
             ToClient::Welcome { seq, workbook } => {
                 t.session.execute("file.new", json!({})).unwrap();
@@ -483,7 +538,7 @@ mod tests {
     fn edit(app: &Shared, file: &str, t: &mut Tab, id: &str, p: serde_json::Value) {
         t.session.execute(id, p).unwrap();
         for st in t.session.sync_log.replace(Vec::new()).unwrap() {
-            let change = if sync::replayable(&st.id) {
+            let change = if sync::replayable(&st.id) && sync::server_allows(&st.id) {
                 let fp = sync::change_fingerprint(&st.before, &st.after);
                 Change::Cmd { sheet: st.sheet, sel: st.selection, id: st.id, params: st.params, locale: sync::InputLocale::current(), fp }
             } else {
@@ -564,6 +619,27 @@ mod tests {
         let patch = sync::make_patch(&wb, &wb);
         app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Change { cseq: 1, base: 0, change: Change::State { patch } } });
         assert_eq!(take_applied(&mut a), ("a".into(), 1));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn people_and_where_they_are() {
+        let (app, file, dir) = app();
+        let mut a = join(&app, &file, "a");
+        let sel = gridcraft_engine::selection::Selection::default();
+        app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Presence { sheet: 0, sel: sel.clone() } });
+        let mut b = join(&app, &file, "b");
+        // b hears where a already is, and both hear that two people are here.
+        std::thread::sleep(Duration::from_millis(100));
+        while let Ok(m) = b.rx.try_recv() {
+            b.seen.push(serde_json::from_str(&m).unwrap());
+        }
+        assert!(b.seen.iter().any(|m| matches!(m, ToClient::Presence { client, .. } if client == "a")), "{:?}", b.seen.len());
+        assert!(b.seen.iter().any(|m| matches!(m, ToClient::People { people, you } if people.len() == 2 && you == "b")));
+        while let Ok(m) = a.rx.try_recv() {
+            a.seen.push(serde_json::from_str(&m).unwrap());
+        }
+        assert!(a.seen.iter().any(|m| matches!(m, ToClient::People { people, .. } if people.iter().any(|p| p.name == "Guest 2"))));
         let _ = std::fs::remove_dir_all(dir);
     }
 

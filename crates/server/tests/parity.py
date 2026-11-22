@@ -197,16 +197,6 @@ STEPS = [
     ("GET", "/build.json", None, None, None),
 ]
 
-LOGIN_STEPS = [
-    ("GET", "/api/info", None, None, None),
-    ("GET", "/api/files", None, None, None),
-    ("POST", "/api/login", b'{"password": "wrong"}', None, None),
-    ("POST", "/api/login", b'{"password": "pw"}', None, None),
-    ("GET", "/api/info", None, None, None),
-    ("GET", "/api/bin", None, None, None),
-]
-
-
 def compare(label, steps, auth):
     results, trees = [], []
     for cmd in ([sys.executable, "-u", PY], [RUST]):
@@ -226,6 +216,9 @@ def compare(label, steps, auth):
         # files.py sorted versions saved within one second at random (fixed in the Rust server).
         if "/versions" in a[1]:
             continue
+        # /api/info gained fields with accounts (setup, user): the old ones must still match.
+        if a[1] == "/api/info" and isinstance(b[3], dict):
+            b = (*b[:3], {k: v for k, v in b[3].items() if k in a[3]}, b[4])
         a_cmp, b_cmp = list(a), list(b)
         # Content types may be spelt differently (text/javascript vs application/javascript).
         for x in (a_cmp, b_cmp):
@@ -262,6 +255,42 @@ def version_order():
     return 0 if ok else 1
 
 
+def accounts():
+    """Rust only (files.py had one shared password): setup code, owner, people, sign in and out."""
+    base = tempfile.mkdtemp()
+    store = os.path.join(base, "store")
+    os.makedirs(store)
+    s = Server([RUST], store, seed(store), auth=True)
+    post = lambda path, body: s.call("POST", path, json.dumps(body).encode(), {"Content-Type": "application/json"})
+    got = []
+    try:
+        info = json.loads(s.call("GET", "/api/info")[2])
+        got.append(("new server asks for setup", info["setup"] and not info["signed_in"]))
+        got.append(("files need sign-in", s.call("GET", "/api/files")[0] == 401))
+        got.append(("wrong setup code", post("/api/setup", {"code": "nope", "username": "owner", "name": "O", "password": "longpassword"})[0] == 401))
+        got.append(("setup", post("/api/setup", {"code": "pw", "username": "Owner", "name": "The Owner", "password": "longpassword"})[0] == 200))
+        info = json.loads(s.call("GET", "/api/info")[2])
+        got.append(("signed in as owner", info["user"]["username"] == "owner" and info["user"]["owner"] and not info["setup"]))
+        got.append(("second setup refused", post("/api/setup", {"code": "pw", "username": "x2", "name": "X", "password": "longpassword"})[0] == 400))
+        got.append(("owner adds a person", post("/api/users", {"username": "bob", "name": "Bob", "password": "bobspassword"})[0] == 200))
+        got.append(("files open", s.call("GET", "/api/files")[0] == 200))
+        s.call("POST", "/api/logout")
+        s.cookie = ""
+        got.append(("signed out", s.call("GET", "/api/files")[0] == 401))
+        got.append(("wrong password", post("/api/login", {"username": "bob", "password": "nope"})[0] == 401))
+        got.append(("bob signs in", post("/api/login", {"username": "BOB", "password": "bobspassword"})[0] == 200))
+        got.append(("bob can't add people", post("/api/users", {"username": "eve", "name": "Eve", "password": "evespassword"})[0] == 403))
+        got.append(("bob renames himself", json.loads(post("/api/me", {"name": "Robert"})[2])["user"]["name"] == "Robert"))
+        got.append(("people list", [u["username"] for u in json.loads(s.call("GET", "/api/users")[2])] == ["owner", "bob"]))
+        got.append(("no password in the list", "hash" not in s.call("GET", "/api/users")[2].decode()))
+    finally:
+        s.stop()
+        shutil.rmtree(base)
+    bad = [name for name, ok in got if not ok]
+    print(f"accounts: {len(got)} checks, {'all right' if not bad else 'WRONG: ' + ', '.join(bad)}")
+    return 1 if bad else 0
+
+
 if __name__ == "__main__":
-    fails = compare("files", STEPS, auth=False) + compare("login", LOGIN_STEPS, auth=True) + version_order()
+    fails = compare("files", STEPS, auth=False) + version_order() + accounts()
     sys.exit(1 if fails else 0)

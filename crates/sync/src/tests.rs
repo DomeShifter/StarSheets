@@ -120,6 +120,16 @@ fn replaying_leaves_history_and_log_alone() {
 }
 
 #[test]
+fn the_server_runs_only_editing_commands() {
+    for id in ["cell.set", "home.bold", "home.insertRows", "edit.fillDown"] {
+        assert!(server_allows(id), "{id}");
+    }
+    for id in ["file.saveAs", "file.open", "macro.run", "automate.runScript", "no.such.command", "selection.set"] {
+        assert!(!server_allows(id), "{id}");
+    }
+}
+
+#[test]
 fn messages_round_trip() {
     let m = ToServer::Change { cseq: 3, base: 9, change: Change::State { patch: json!({"sheets": []}) } };
     let t = serde_json::to_string(&m).unwrap();

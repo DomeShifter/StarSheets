@@ -7,8 +7,8 @@ container (port 8080, files in `/data`). Settings:
 
 | Setting | What it does |
 |---|---|
-| `STARSHEETS_PASSWORD` | The password to sign in. Without it, a random one is made on first start and printed in the log |
-| `STARSHEETS_AUTH=off` | No login, for a private network you trust |
+| `STARSHEETS_PASSWORD` | The setup code for the first (owner's) account. Without it, a code is made on first start and printed in the log. Not needed once the owner's account exists |
+| `STARSHEETS_AUTH=off` | No sign-in, for a private network you trust: everyone is a guest |
 | `LOCATION` | How the app tells people where files are kept ("Saved to …") |
 | `KEEP` | How many earlier versions of each file to keep (default 6) |
 

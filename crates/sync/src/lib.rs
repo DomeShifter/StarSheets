@@ -34,6 +34,17 @@ pub enum ToServer {
     Redo,
     /// The tab's copy doesn't match the server's: send the whole file again.
     Resync,
+    /// Where this tab is (its sheet and selection), for other people's screens.
+    Presence { sheet: usize, sel: Selection },
+}
+
+/// Someone with the file open: one entry per tab.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Person {
+    pub client: String,
+    pub username: String,
+    pub name: String,
+    pub colour: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -58,6 +69,10 @@ pub enum ToClient {
     Message { text: String },
     /// The tab runs a different build than the server: reload the page.
     Reload,
+    /// Everyone who has the file open now (this tab included).
+    People { people: Vec<Person>, you: String },
+    /// Where someone is.
+    Presence { client: String, sheet: usize, sel: Selection },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -108,6 +123,15 @@ impl InputLocale {
 pub fn replayable(id: &str) -> bool {
     let id = id.to_ascii_lowercase();
     !["paste", "copied", "formatpainter", "autofit", "picture", "file.", "import", "fromtext", "script", "macro"].iter().any(|w| id.contains(w))
+}
+
+/// Whether the server may run this command for a tab: only undoable editing commands, and never
+/// one that reaches files, the network, macros, scripts or printing (a tab sends anything else as
+/// its finished state, which is only data).
+pub fn server_allows(id: &str) -> bool {
+    let lower = id.to_ascii_lowercase();
+    let denied = ["file.", "macro", "automate.", "script", "python", "control.", "app.", "window.", "print", "export", "link.open", "data.get", "data.refresh", "data.from", "data.query", "picture", "object", "addin", "options", "solver", "equation"];
+    gridcraft_engine::find_command(id).is_some_and(|spec| spec.undoable) && !denied.iter().any(|d| lower.contains(d))
 }
 
 // ---------------------------------------------------------------- applying changes
