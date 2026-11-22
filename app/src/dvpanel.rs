@@ -846,6 +846,21 @@ mod tests {
     }
 
     #[test]
+    fn the_fill_handle_carries_validation_on() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        let d = draft(Crit::TextContains, "cat", "");
+        for (cmd, p) in commands(&d).unwrap() {
+            s.execute(cmd, p).unwrap();
+        }
+        // The rule is on B2:B9; drag B9 down to B12.
+        s.execute("edit.autoFill", json!({ "source": "B9", "target": "B9:B12" })).unwrap();
+        let doc = s.active().unwrap();
+        assert!(gridcraft_engine::cmd::data::check_validation(&doc.wb, 0, CellRef::new(11, 1), "dog").is_some());
+        assert!(gridcraft_engine::cmd::data::check_validation(&doc.wb, 0, CellRef::new(11, 1), "cat").is_none());
+    }
+
+    #[test]
     fn criteria_check_input_like_sheets() {
         let d = draft(Crit::TextContains, "cat", "");
         assert!(accepts(&d, "Concatenate") && !accepts(&d, "dog"));

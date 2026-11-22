@@ -45,7 +45,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sep,
             Cmd("Version history", "panel:versions", ""),
             Sep,
-            Cmd("Details", "file.properties", ""),
+            Cmd("Details", "panel:details", ""),
             Cmd("Settings", "panel:settings", ""),
             Sep,
             Cmd("Print", "file.print", "Ctrl+P"),

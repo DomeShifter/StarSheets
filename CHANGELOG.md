@@ -7,6 +7,7 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- Dragging the fill handle from cells with data validation extends the rule to the new cells.
 - File › Settings: "Display language" is replaced by **how numbers are written** (1,234.56,
   1.234,56, 1 234,56 or 1'234.56), set by the locale; cells show and accept that format.
 - Enter accepts a highlighted function suggestion ("=lef" → "=LEFT(") and editing goes on.
@@ -39,6 +40,8 @@ new features and the last one for fixes.
   padding, pill-shaped buttons, 36 px fields, padded menus (docs/house-style.md).
 
 ### Added
+- File › Details: name, location, last saved, and how many sheets, filled cells, formulas,
+  charts and notes the spreadsheet has.
 - Format › Number › **Custom number formats**, after Google Sheets: a code box with Apply, a
   sample of the selected cell, and ready-made formats; the selection shows it as you type.
 - **Chart editor**, after Google Sheets: a side panel with Setup (chart type, stacking, data range,

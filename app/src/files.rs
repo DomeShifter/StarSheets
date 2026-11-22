@@ -89,6 +89,8 @@ pub struct Files {
     versions: Option<Vec<(String, i64)>>,
     /// A rename sent to the server and not answered yet.
     renaming: bool,
+    /// File › Details is showing.
+    details: bool,
 }
 
 impl Files {
@@ -188,6 +190,7 @@ impl Files {
                     Reply::Navigate(v["id"].as_str().unwrap_or("").to_string())
                 });
             }
+            "details" => self.details = true,
             "bin" => {
                 let Some(l) = self.link.clone() else {
                     app.message = Some(("Move to bin".into(), "This spreadsheet hasn't been saved yet.".into()));
@@ -427,6 +430,9 @@ impl Files {
         for action in self.browser.ui(ui.ctx(), &keys) {
             self.act(app, ui.ctx(), action);
         }
+        if self.details {
+            self.details_ui(app, ui.ctx());
+        }
         if let Some(vs) = self.versions.clone() {
             let mut open = true;
             let mut restore = None;
@@ -482,6 +488,66 @@ fn display_name(d: &gridcraft_engine::DocState) -> String {
 }
 
 impl Files {
+    /// File › Details, after Google Sheets: where the file is and when it was saved, and what it
+    /// holds.
+    fn details_ui(&mut self, app: &SheetApp, ctx: &egui::Context) {
+        let Some(d) = app.session.active() else {
+            self.details = false;
+            return;
+        };
+        let place = if self.location.is_empty() { "the server".to_string() } else { self.location.clone() };
+        let linked = self.link.as_ref().filter(|l| l.doc == d.uid);
+        let (location, saved) = match linked {
+            Some(l) => {
+                let mut parts = vec![place];
+                parts.extend(l.folder.split('/').filter(|p| !p.is_empty()).map(str::to_string));
+                (parts.join(" › "), format!("{} ({})", date_text(l.saved), ago(l.saved)))
+            }
+            None => ("Not saved yet".to_string(), "Not saved yet".to_string()),
+        };
+        let (mut cells, mut formulas, mut charts, mut notes) = (0usize, 0usize, 0usize, 0usize);
+        for sh in &d.wb.sheets {
+            for (_, c) in sh.cells.iter() {
+                if c.formula.is_some() {
+                    formulas += 1;
+                }
+                if c.formula.is_some() || !c.value.is_empty() {
+                    cells += 1;
+                }
+            }
+            charts += sh.charts.len();
+            notes += sh.comments.len();
+        }
+        let rows = [
+            ("Name", display_name(d)),
+            ("Location", location),
+            ("Last saved", saved),
+            ("Sheets", d.wb.sheets.len().to_string()),
+            ("Cells with data", cells.to_string()),
+            ("Formulas", formulas.to_string()),
+            ("Charts", charts.to_string()),
+            ("Notes", notes.to_string()),
+            ("StarSheets", env!("CARGO_PKG_VERSION").to_string()),
+        ];
+        let mut close = false;
+        let mut done = false;
+        crate::house::dialog(ctx, "starsheets_details", 440.0, "Document details", Some(&mut close), |ui| {
+            egui::Grid::new("starsheets_details_grid").num_columns(2).spacing(vec2(crate::house::L, crate::house::S)).show(ui, |ui| {
+                for (k, v) in &rows {
+                    ui.label(RichText::new(*k).size(crate::house::BODY).color(crate::theme::TEXT_DIM));
+                    ui.label(RichText::new(v).size(crate::house::BODY).color(crate::theme::TEXT));
+                    ui.end_row();
+                }
+            });
+            if crate::house::actions(ui, &["Close"]).is_some() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                done = true;
+            }
+        });
+        if close || done {
+            self.details = false;
+        }
+    }
+
     /// The server's sign-in box (when it was started with a password).
     fn login_ui(&mut self, ctx: &egui::Context) {
         let mut go = false;
