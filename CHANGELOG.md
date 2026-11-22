@@ -43,6 +43,9 @@ new features and the last one for fixes.
   padding, pill-shaped buttons, 36 px fields, padded menus (docs/house-style.md).
 
 ### Added
+- **Protect sheets and ranges** after Google Sheets (Data menu, and "Protect sheet" on a tab):
+  protect a range or a whole sheet (with "Except certain cells"), either restricted (edits are
+  refused, kept as Excel sheet protection) or with a "Heads up!" warning before editing.
 - **Find and replace** after Google Sheets: all sheets, this sheet or a range; match case, whole
   cell, regular expressions, within formulas; Find, Replace, Replace all.
 - **Named ranges** side panel after Google Sheets: a list, "Add a range", and a name + range

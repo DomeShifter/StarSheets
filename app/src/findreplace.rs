@@ -61,8 +61,8 @@ impl FindReplace {
         house::dialog(ctx, "starsheets_find_replace", 460.0, "Find and replace", Some(&mut closed), |ui| {
             let field = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                 ui.horizontal(|ui| {
-                    ui.add_sized([110.0, house::FIELD_HEIGHT], egui::Label::new(RichText::new(label).size(house::BODY)));
-                    ui.add(egui::TextEdit::singleline(text).desired_width(460.0 - 110.0 - house::S - 2.0 * house::M).margin(vec2(house::M, house::S + 1.0)).hint_text(hint))
+                    label_cell(ui, label);
+                    ui.add(egui::TextEdit::singleline(text).desired_width(460.0 - 110.0 - house::S).margin(vec2(house::M, house::S + 1.0)).hint_text(hint))
                 })
                 .inner
             };
@@ -76,7 +76,7 @@ impl FindReplace {
             }
             field(ui, "Replace with", &mut self.with, "");
             ui.horizontal(|ui| {
-                ui.add_sized([110.0, house::FIELD_HEIGHT], egui::Label::new(RichText::new("Search").size(house::BODY)));
+                label_cell(ui, "Search");
                 house::select(ui, "find_scope", 460.0 - 110.0 - house::S, &mut self.scope, SCOPES, &[]);
             });
             if self.scope == 2 {
@@ -261,6 +261,14 @@ impl FindReplace {
         }
         self.status = format!("Replaced {done} instance{} of \"{}\" with \"{}\".", if done == 1 { "" } else { "s" }, self.find, self.with);
     }
+}
+
+/// A field's label, left-aligned in a fixed 110 px column.
+fn label_cell(ui: &mut egui::Ui, label: &str) {
+    ui.allocate_ui_with_layout(vec2(110.0, house::FIELD_HEIGHT), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.set_min_width(110.0);
+        ui.label(RichText::new(label).size(house::BODY));
+    });
 }
 
 #[cfg(test)]

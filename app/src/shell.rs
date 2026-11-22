@@ -250,7 +250,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Create a filter", "data.filter", ""),
             Cmd("Add a slicer", "insert.slicer", ""),
             Sep,
-            Cmd("Protect sheets and ranges", "review.protectSheet", ""),
+            Cmd("Protect sheets and ranges", "panel:protect", ""),
             Cmd("Named ranges", "ui:nameManager", ""),
             Sep,
             Cmd("Data validation", "ui:dataValidation", ""),
@@ -982,6 +982,8 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::settings::REQUEST), true));
                     } else if *id == "panel:note" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::notes::REQUEST), true));
+                    } else if *id == "panel:protect" {
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::protectpanel::REQUEST), -1i64));
                     } else if *id == "panel:customnumber" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customnumber::REQUEST), true));
                     } else if *id == "panel:chart" {

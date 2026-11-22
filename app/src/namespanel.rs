@@ -109,7 +109,7 @@ impl NamesPanel {
         let names: Vec<(String, String)> = app
             .session
             .active()
-            .map(|d| d.wb.names.iter().filter(|n| !n.hidden).map(|n| (n.name.clone(), plain(&n.formula))).collect())
+            .map(|d| d.wb.names.iter().filter(|n| !n.hidden && !n.name.starts_with("_sc_") && !n.name.starts_with("_gc_")).map(|n| (n.name.clone(), plain(&n.formula))).collect())
             .unwrap_or_default();
         if ui.add(house::link("+ Add a range")).clicked() {
             self.add(app);

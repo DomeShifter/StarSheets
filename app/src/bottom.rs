@@ -365,6 +365,10 @@ impl Bottom {
         egui::containers::menu::SubMenuButton::from_button(colour).ui(ui, |ui| {
             crate::colourpicker::menu_for(app, ui, "sheet.tabColor", json!({ "sheet": s }), "none", now, false);
         });
+        if ui.add(row("Protect sheet")).clicked() {
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::protectpanel::REQUEST), s as i64));
+            ui.close();
+        }
         if ui.add_enabled(count > 1, row("Hide sheet")).clicked() {
             app.run_or_alert("sheet.hide", json!({ "sheet": s }));
             ui.close();

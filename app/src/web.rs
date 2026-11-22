@@ -86,7 +86,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default() }))
                 }),
             )
             .await;
@@ -112,6 +112,7 @@ struct WebShell {
     chart: crate::chartpanel::ChartPanel,
     names: crate::namespanel::NamesPanel,
     find: crate::findreplace::FindReplace,
+    protect: crate::protectpanel::ProtectPanel,
     link: crate::linkcard::LinkCard,
     autolink: crate::autolink::AutoLink,
     cf: crate::cfpanel::CfPanel,
@@ -145,23 +146,37 @@ impl WebShell {
         self.dv.intercept(&mut self.app, ctx);
         self.chart.intercept(&mut self.app, ctx);
         self.names.intercept(&mut self.app);
+        self.protect.intercept(&mut self.app, ctx);
         // Only one side panel at a time: the one that just opened wins.
-        if self.chart.just_opened {
-            self.cf.close(&mut self.app);
-            self.dv.close();
-            self.names.close();
+        let opened = if self.chart.just_opened {
+            "chart"
         } else if self.names.just_opened {
-            self.cf.close(&mut self.app);
-            self.dv.close();
-            self.chart.close();
+            "names"
+        } else if self.protect.just_opened {
+            "protect"
         } else if self.dv.just_opened {
-            self.cf.close(&mut self.app);
-            self.chart.close();
-            self.names.close();
+            "dv"
         } else if self.cf.open && !cf_was {
-            self.dv.close();
-            self.chart.close();
-            self.names.close();
+            "cf"
+        } else {
+            ""
+        };
+        if !opened.is_empty() {
+            if opened != "cf" {
+                self.cf.close(&mut self.app);
+            }
+            if opened != "dv" {
+                self.dv.close();
+            }
+            if opened != "chart" {
+                self.chart.close();
+            }
+            if opened != "names" {
+                self.names.close();
+            }
+            if opened != "protect" {
+                self.protect.close();
+            }
         }
     }
 }
@@ -223,6 +238,7 @@ impl eframe::App for WebShell {
         self.dv.ui(&mut self.app, ui);
         self.chart.ui(&mut self.app, ui);
         self.names.ui(&mut self.app, ui);
+        self.protect.ui(&mut self.app, ui);
         self.app.ui(ui);
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
