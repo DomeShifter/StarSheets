@@ -18,6 +18,7 @@ mod customdate;
 mod customnumber;
 mod datepicker;
 mod dvpanel;
+mod errortip;
 #[cfg(target_arch = "wasm32")]
 mod filebrowser;
 #[cfg(target_arch = "wasm32")]

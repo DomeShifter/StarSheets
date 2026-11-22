@@ -437,7 +437,7 @@ impl Live {
             }
             let Some(at) = crate::linkcard::cell_rect(app, sel.active) else { continue };
             painter.rect_stroke(at, 0.0, egui::Stroke::new(2.0, colour), egui::StrokeKind::Inside);
-            let recent = now - moved < 3000.0;
+            let recent = now - moved < 5000.0;
             fading |= recent;
             if recent || hover.is_some_and(|h| at.contains(h)) {
                 let galley = painter.layout_no_wrap(p.name.clone(), egui::FontId::proportional(11.0), egui::Color32::WHITE);

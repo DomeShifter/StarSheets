@@ -57,6 +57,7 @@
 - [ ] QUERY: check every case against answers recorded from Google Sheets; dates shown as dates in results
 - [ ] Data validation later: chip display style, "Allow multiple selections", hover text on invalid cells
 - [ ] Dark mode palette
+- [x] Plain-language explanation when hovering over an error cell
 
 ## Live editing checklist ([plan](docs/live-editing.md))
 - [x] Step 0: Rust server (`crates/server`) replaces server/files.py, same API and same files on disk; checked against the old server request by request (`crates/server/tests/parity.py`)

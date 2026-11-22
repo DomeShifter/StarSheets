@@ -1,0 +1,39 @@
+diff --git a/crates/ui-egui/src/grid/interact.rs b/crates/ui-egui/src/grid/interact.rs
+index fb846fa..748e0bc 100644
+--- a/crates/ui-egui/src/grid/interact.rs
++++ b/crates/ui-egui/src/grid/interact.rs
+@@ -526,7 +526,12 @@ fn handle_press(app: &mut SheetApp, input: &InteractionInput<'_>) {
+     } else {
+         note_selecting_press(app);
+         let _ = app.session.run("selection.set", json!({"cell": c.a1()}));
+-        if acts && wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox" {
++        // Only a click on the box itself (with a little slack) toggles it; the rest of the
++        // cell just selects, as in Sheets.
++        if acts
++            && wb.styles.get(sh.style_id(c)).num_fmt.as_str() == "checkbox"
++            && super::quadrant::checkbox_rect(geo.cell_rect(sh, c), geo.z).expand(3.0).contains(p)
++        {
+             let _ = app.run("cell.toggleCheckbox", json!({"cell": c.a1()}));
+         }
+         // A click on a hyperlink's text follows it (like Excel); elsewhere in the cell selects.
+diff --git a/crates/ui-egui/src/grid/quadrant.rs b/crates/ui-egui/src/grid/quadrant.rs
+index e71265c..3061f63 100644
+--- a/crates/ui-egui/src/grid/quadrant.rs
++++ b/crates/ui-egui/src/grid/quadrant.rs
+@@ -291,9 +291,14 @@ fn paint_data_bar(p: &egui::Painter, rect: Rect, frac: f32, rgb: [u8; 3], gradie
+     }
+ }
+ 
+-fn paint_checkbox(p: &egui::Painter, rect: Rect, z: f32, on: bool) {
++/// Where a checkbox cell draws its box: centred, sized with the zoom.
++pub(crate) fn checkbox_rect(cell: Rect, z: f32) -> Rect {
+     let s = (11.0 * z * 1.2).clamp(8.0, 24.0);
+-    let b = Rect::from_center_size(rect.center(), vec2(s, s));
++    Rect::from_center_size(cell.center(), vec2(s, s))
++}
++
++fn paint_checkbox(p: &egui::Painter, rect: Rect, z: f32, on: bool) {
++    let b = checkbox_rect(rect, z);
+     let color = if on { Color32::from_rgb(0x10, 0x7C, 0x41) } else { Color32::WHITE };
+     p.rect_filled(b, 2.0, color);
+     p.rect_stroke(b, 2.0, Stroke::new(1.0, if on { color } else { Color32::from_gray(110) }), StrokeKind::Inside);

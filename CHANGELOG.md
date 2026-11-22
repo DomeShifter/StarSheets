@@ -20,6 +20,16 @@ new features and the last one for fixes.
   (docs/deploy.md); without one the app saves the usual way.
 
 ### Changed
+- Hovering over a cell with an error (#VALUE!, #DIV/0! …) explains it in plain words, and names
+  the cell to fix first when the error comes from another cell.
+- A checkbox cell toggles only when you click the box itself; the rest of the cell just selects.
+- The formula suggestion list never covers the cell you're typing in (it opens above when there
+  isn't room below); no suggestions inside quoted text, and quoted text shows in green.
+- A formula with a bracket or quotation mark missing explains what's wrong, as Sheets does, and
+  offers to enter it as text (Add "'") or to keep working on it.
+- Formula problems in conditional formatting and data validation are explained in plain words.
+- The rename box in File › Open uses the house style.
+- People's colours no longer include blue, which is how your own selection looks.
 - The server is now one Rust program (`starsheets-server`) instead of a Python script, the first
   step towards live editing ([docs/live-editing.md](docs/live-editing.md)). Same files, folders,
   versions and bin; nothing to move. Versions saved within the same second are now kept in the

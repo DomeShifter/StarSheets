@@ -387,7 +387,7 @@ impl CfPanel {
                 true
             }
             Err(e) => {
-                self.error = Some(gridcraft_ui_egui::clean_error(&e));
+                self.error = Some(crate::messages::plain_error(&gridcraft_ui_egui::clean_error(&e)));
                 false
             }
         }

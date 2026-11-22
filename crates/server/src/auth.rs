@@ -14,8 +14,9 @@ use crate::store::{Store, now, random_hex};
 
 pub const SESSION_DAYS: u64 = 30;
 
-/// Colours given to people in turn (cursors and avatars), readable on white.
-pub const COLOURS: [&str; 10] = ["#1A73E8", "#D93025", "#188038", "#E37400", "#9334E6", "#007B83", "#E52592", "#B06000", "#3367D6", "#5F6368"];
+/// Colours given to people in turn (cursors and avatars), readable on white. No blues: blue is
+/// how your own selection looks.
+pub const COLOURS: [&str; 8] = ["#D93025", "#188038", "#E37400", "#9334E6", "#007B83", "#E52592", "#B06000", "#5F6368"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct User {

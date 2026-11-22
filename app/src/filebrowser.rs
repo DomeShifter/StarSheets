@@ -313,8 +313,15 @@ impl Browser {
                 let cut = self.clipboard.as_ref().is_some_and(|(c, cut)| *cut && c.contains(item));
                 let colour = if cut { theme::TEXT_DIM } else { theme::TEXT };
                 if let Some((ritem, text, focus)) = self.renaming.as_mut().filter(|(r, ..)| r == item) {
-                    let edit_rect = egui::Rect::from_min_size(r.min + vec2(40.0, 4.0), vec2(W - 360.0, ROW - 8.0));
-                    let te = ui.put(edit_rect, egui::TextEdit::singleline(text).margin(vec2(6.0, 4.0)));
+                    // The house text field: white, grey outline, blue when typing, 14 px text.
+                    let edit_rect = egui::Rect::from_min_size(r.min + vec2(40.0, 3.0), vec2(W - 360.0, ROW - 6.0));
+                    let te = ui
+                        .scope_builder(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
+                            crate::house::form_style(ui);
+                            ui.spacing_mut().interact_size.y = ROW - 6.0;
+                            ui.add_sized(edit_rect.size(), egui::TextEdit::singleline(text).font(FontId::proportional(crate::house::BODY)).text_color(theme::TEXT).margin(vec2(crate::house::S, crate::house::XS)))
+                        })
+                        .inner;
                     if *focus {
                         te.request_focus();
                         *focus = false;
