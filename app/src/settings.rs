@@ -222,6 +222,7 @@ mod tests {
         set_number_separators(',', '.');
         assert_eq!(parse_input("1.234,5", DateSystem::default()).value.as_f64(), Some(1234.5));
         assert_eq!(parse_input("2,25", DateSystem::default()).value.as_f64(), Some(2.25));
+        assert_eq!(parse_input("1,5E+20", DateSystem::default()).value.as_f64(), Some(1.5e20));
         assert_eq!(localize_number_text("1,234.50"), "1.234,50");
         set_number_separators('.', ',');
         assert_eq!(localize_number_text("1,234.50"), "1,234.50");

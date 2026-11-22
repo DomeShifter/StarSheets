@@ -42,6 +42,8 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0034-engine-fill-extends-validation | `edit.autoFill` (fill handle): a data-validation rule covering every source cell is extended to the target, as Google Sheets does (not for Fill Without Formatting) | could help upstream |
 | 0035-model-xlsx-chart-pie-slice-colours | `Chart::point_colors`: a colour per pie/doughnut slice, read and written as `c:dPt`, drawn through the per-point palette; `chart.formatSelection {point}`; `chart.changeColors` colours every slice of a pie | could help upstream |
 | 0036-ui-egui-spell-check-hook | `spelling::set`: a host word check; the cell editor underlines unknown words in red while editing plain text (not formulas, not the word being typed) | could help upstream |
+| 0037-core-number-separators-exponent | Follow-up to 0033: a number typed with the host decimal mark may have an exponent ("1,5E+20") | with 0033 |
+| 0038-core-number-separators-per-thread | Follow-up to 0033: the separators are per thread (one in the web app; parallel tests stay independent) | with 0033 |
 | 0002-ui-egui-theme-token-override | `Tokens::install` / `Tokens::for_mode`: a host can replace the colour palettes | to offer as a PR |
 | 0003-ui-egui-chrome-sheet-tabs-switch | `Chrome.sheet_tabs: bool`: a host can hide the sheet tabs and status bar | to offer as a PR |
 | 0004-ui-egui-sheets-cell-keys | `UiState.sheets_keys`: Enter edits (and is consumed so the new editor doesn't commit at once), Backspace only clears, no Enter-paste, static copy outline | to offer as a PR (as an option) |

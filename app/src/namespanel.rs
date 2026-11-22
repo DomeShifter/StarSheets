@@ -37,6 +37,13 @@ pub(crate) fn absolute(range: &str) -> String {
         Some((s, b)) => (Some(s), b),
         None => (None, range),
     };
+    // Only cell references: a constant or formula (=0.2, =A1*2) is kept as written.
+    let plain = body.replace('$', "");
+    let is_ref = gridcraft_engine::core::RangeRef::parse(&plain).is_some()
+        || plain.split(':').count() == 2 && plain.split(':').all(|p| !p.is_empty() && (p.chars().all(|c| c.is_ascii_alphabetic()) || p.chars().all(|c| c.is_ascii_digit())));
+    if !is_ref {
+        return range.to_string();
+    }
     let fix = |part: &str| -> String {
         let p = part.trim().replace('$', "");
         let letters: String = p.chars().take_while(char::is_ascii_alphabetic).collect();
@@ -214,6 +221,8 @@ mod tests {
         assert_eq!(super::absolute("Sheet1!B2:C4"), "Sheet1!$B$2:$C$4");
         assert_eq!(super::absolute("'My sheet'!$A1"), "'My sheet'!$A$1");
         assert_eq!(super::absolute("A:A"), "$A:$A");
+        assert_eq!(super::absolute("0.2"), "0.2");
+        assert_eq!(super::absolute("Sheet1!A1*2"), "Sheet1!A1*2");
     }
 
     #[test]

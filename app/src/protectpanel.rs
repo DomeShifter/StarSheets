@@ -65,6 +65,8 @@ pub struct ProtectPanel {
     draft: Option<Draft>,
     /// A warned edit waiting for "OK", and the time the warning may show again.
     asking: Option<CellRef>,
+    /// The warned cell the current edit was allowed on (asked once per edit).
+    allowed: Option<CellRef>,
     quiet_until: f64,
     dont_ask: bool,
 }
@@ -328,8 +330,13 @@ impl ProtectPanel {
     /// Google's "Heads up!" before an edit in a warned range.
     fn warn(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         let now = ctx.input(|i| i.time);
+        let editing = app.editor.as_ref().map(|e| e.cell);
+        if editing.is_none() {
+            self.allowed = None;
+        }
         if self.asking.is_none()
             && now >= self.quiet_until
+            && editing != self.allowed
             && let Some(cell) = app.editor.as_ref().map(|e| e.cell)
             && let Some(sheet) = app.session.active().map(|d| d.wb.active_sheet())
             && entries(app).iter().any(|e| e.meta.warn && e.sheet == sheet && e.range.contains(cell) && !except_contains(&e.meta.except, cell))
@@ -338,7 +345,7 @@ impl ProtectPanel {
             self.asking = Some(cell);
             self.dont_ask = false;
         }
-        let Some(_) = self.asking else { return };
+        let Some(asked) = self.asking else { return };
         let mut answer = None;
         let mut closed = false;
         house::dialog(ctx, "starsheets_protect_warning", 460.0, "Heads up!", Some(&mut closed), |ui| {
@@ -356,8 +363,11 @@ impl ProtectPanel {
         match answer {
             Some(true) => {
                 // Allowed: the edit starts again, and the warning rests for a moment (or 5 min).
-                self.quiet_until = now + if self.dont_ask { 300.0 } else { 1.0 };
+                if self.dont_ask {
+                    self.quiet_until = now + 300.0;
+                }
                 self.asking = None;
+                self.allowed = Some(asked);
                 app.begin_edit(None, false);
             }
             Some(false) => self.asking = None,
