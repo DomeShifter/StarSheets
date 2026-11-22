@@ -104,6 +104,7 @@ const ICONS: &[(&str, &[u8])] = &[
     ("width", include_bytes!("../icons/width.svg")),
     ("wrap_text", include_bytes!("../icons/wrap_text.svg")),
     ("zoom_in", include_bytes!("../icons/zoom_in.svg")),
+    ("drive_file_move", include_bytes!("../icons/drive_file_move.svg")),
     ("arrow_back", include_bytes!("../icons/arrow_back.svg")),
     ("arrow_forward", include_bytes!("../icons/arrow_forward.svg")),
     ("create_new_folder", include_bytes!("../icons/create_new_folder.svg")),

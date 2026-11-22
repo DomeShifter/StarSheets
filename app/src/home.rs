@@ -107,6 +107,13 @@ enum Thumb {
     None,
 }
 
+/// The Move to… picker: what's being moved, the folder picked, and which tree rows are open.
+struct MoveTo {
+    items: Vec<Item>,
+    target: Option<String>,
+    expanded: HashSet<String>,
+}
+
 /// A move that hands things to someone else, waiting for "Move" in the question.
 struct PendingMove {
     items: Vec<Item>,
@@ -147,6 +154,8 @@ pub struct Home {
     dragging: Option<Vec<Item>>,
     confirm_purge: Option<Option<String>>,
     pending_move: Option<PendingMove>,
+    /// Move to…: the folder picker, open for these items.
+    move_to: Option<MoveTo>,
     thumbs: HashMap<String, (String, Thumb)>,
     fetching: usize,
     error: Option<String>,
@@ -582,6 +591,7 @@ impl Home {
         egui::Panel::left("home_left").show_separator_line(false).exact_size(LEFT).resizable(false).frame(egui::Frame::NONE.fill(theme::PAGE).inner_margin(egui::Margin { left: 12, right: 12, top: 8, bottom: 8 })).show(ui, |ui| self.left_ui(ui));
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::WHITE).corner_radius(egui::CornerRadius { nw: 16, ..Default::default() }).inner_margin(egui::Margin { left: 24, right: 16, top: 16, bottom: 0 })).show(ui, |ui| self.main_ui(ui));
         self.drag_ui(&ctx);
+        self.move_to_ui(&ctx);
         self.pending_move_ui(&ctx);
         self.keys(&ctx);
     }
@@ -813,13 +823,13 @@ impl Home {
                 };
                 ui.add_enabled(enabled, b.frame(false).min_size(vec2(36.0, 36.0)).corner_radius(18)).on_hover_text(tip).on_disabled_hover_text(tip).clicked()
             };
-            if nav(ui, "arrow_back", !self.back.is_empty(), "Back") {
+            if nav(ui, "arrow_back", !self.back.is_empty(), "Back (your mouse's back button)") {
                 self.go_back();
             }
             if nav(ui, "arrow_forward", !self.forward.is_empty(), "Forward") {
                 self.go_forward();
             }
-            if nav(ui, "arrow_upward", self.up_view().is_some(), "Up one folder (Backspace, or your mouse's back button)") {
+            if nav(ui, "arrow_upward", self.up_view().is_some(), "Up one folder (Backspace)") {
                 self.go_up();
             }
             ui.add_space(house::S);
@@ -1025,7 +1035,7 @@ impl Home {
         let (r, resp) = ui.allocate_exact_size(vec2(CARD_W, CHIP_H), Sense::click_and_drag());
         let sel = self.selected.contains(&item);
         let p = ui.painter().clone();
-        p.rect_filled(r, 12, if sel { house::SELECTED } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
+        p.rect_filled(r, 12, if sel { theme::SHARE } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
         folder_icon(ui, f, Rect::from_center_size(r.left_center() + vec2(24.0, 0.0), vec2(22.0, 22.0)));
         if f.shared
             && f.colour.is_some()
@@ -1055,7 +1065,7 @@ impl Home {
         }
         let sel = self.selected.contains(&item);
         let p = ui.painter().clone();
-        p.rect_filled(r, 12, if sel { house::SELECTED } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
+        p.rect_filled(r, 12, if sel { theme::SHARE } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
         // The picture, on white, in the top part.
         let pic = Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(CARD_W - 16.0, PIC_H - 8.0));
         p.rect_filled(pic, 6, Color32::WHITE);
@@ -1284,6 +1294,23 @@ impl Home {
             self.clipboard = Some((targets.clone(), false));
             ui.close();
         }
+        if row(ui, "drive_file_move", "Move to…", "", can_edit && !is_space) {
+            // Start in the folder they're in now, opened up to it.
+            let here = match item {
+                Item::File(id) => self.file(id).map(|f| f.folder.clone()),
+                Item::Folder(p) => Some(parent_of(p).to_string()),
+            };
+            let mut expanded = HashSet::new();
+            if let Some(h) = &here {
+                let mut p = h.clone();
+                while !p.is_empty() {
+                    expanded.insert(p.clone());
+                    p = parent_of(&p).to_string();
+                }
+            }
+            self.move_to = Some(MoveTo { items: targets.clone(), target: None, expanded });
+            ui.close();
+        }
         if row(ui, "content_cut", "Cut", "Ctrl+X", can_edit && !is_space) {
             self.clipboard = Some((targets.clone(), true));
             ui.close();
@@ -1404,6 +1431,110 @@ impl Home {
         }
     }
 
+    /// Move to…: a folder tree (your folders, folders shared with you that you can edit, and for
+    /// the server's owner everyone's), pick one, Move here.
+    fn move_to_ui(&mut self, ctx: &egui::Context) {
+        let Some(mv) = self.move_to.as_ref() else { return };
+        let (items, mut target, mut expanded) = (mv.items.clone(), mv.target.clone(), mv.expanded.clone());
+        let what = if items.len() == 1 {
+            let label = match &items[0] {
+                Item::Folder(f) => name_of(f).to_string(),
+                Item::File(id) => self.files.iter().find(|f| f.id == *id).map_or_else(String::new, |f| f.name.clone()),
+            };
+            format!("Move \u{201c}{label}\u{201d}")
+        } else {
+            format!("Move {} items", items.len())
+        };
+        // Where things can go: folders you can edit, not into a folder being moved.
+        let moving: Vec<String> = items.iter().filter_map(|i| if let Item::Folder(p) = i { Some(p.clone()) } else { None }).collect();
+        let ok = |path: &str, role: &str| role != "view" && !moving.iter().any(|m| under(path, m));
+        let mut tops: Vec<(String, String)> = vec![(self.space.clone(), if self.accounts { "My files".into() } else { "All files".into() })];
+        for t in &self.shared_folders {
+            if self.folder(t).is_some_and(|f| f.role != "view") {
+                tops.push((t.clone(), format!("{} (shared by {})", name_of(t), self.person(space_of(t)))));
+            }
+        }
+        if self.accounts && self.admin {
+            for f in self.folders.iter().filter(|f| !f.path.contains('/') && f.path != self.space && !f.path.is_empty()) {
+                tops.push((f.path.clone(), format!("{}'s files", self.person(&f.path))));
+            }
+        }
+        let folders = self.folders.clone();
+        let mut close = false;
+        let mut choice = None;
+        house::dialog(ctx, "home_move_to", 460.0, &what, Some(&mut close), |ui| {
+            house::note(ui, "Pick the folder to move to.");
+            ui.add_space(house::S);
+            egui::Frame::NONE.stroke(Stroke::new(1.0, theme::DIVIDER)).corner_radius(8).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(320.0).min_scrolled_height(320.0).auto_shrink([false, false]).show(ui, |ui| {
+                    fn rows(ui: &mut Ui, folders: &[FolderRow], path: &str, label: &str, depth: usize, ok: &dyn Fn(&str, &str) -> bool, target: &mut Option<String>, expanded: &mut HashSet<String>) {
+                        let role = folders.iter().find(|f| f.path == path).map_or("owner", |f| f.role.as_str());
+                        let allowed = ok(path, role);
+                        let mut kids: Vec<&FolderRow> = folders.iter().filter(|f| parent_of(&f.path) == path && f.path != path).collect();
+                        kids.sort_by_key(|f| name_of(&f.path).to_lowercase());
+                        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+                        let p = ui.painter().clone();
+                        let picked = target.as_deref() == Some(path);
+                        if picked {
+                            p.rect_filled(r, 6, theme::SHARE);
+                        } else if resp.hovered() && allowed {
+                            p.rect_filled(r, 6, theme::MENU_HOVER);
+                        }
+                        let x = r.left() + 4.0 + depth as f32 * 18.0;
+                        let arrow = Rect::from_center_size(egui::pos2(x + 10.0, r.center().y), vec2(20.0, 20.0));
+                        let open = expanded.contains(path);
+                        let mut toggled = false;
+                        if !kids.is_empty() {
+                            if let Some(img) = crate::icons::icon(if open { "expand_more" } else { "chevron_right" }) {
+                                img.paint_at(ui, arrow);
+                            }
+                            if resp.clicked() && ui.input(|i| i.pointer.interact_pos().is_some_and(|q| arrow.expand(4.0).contains(q))) {
+                                toggled = true;
+                                if open {
+                                    expanded.remove(path);
+                                } else {
+                                    expanded.insert(path.to_string());
+                                }
+                            }
+                        }
+                        let f = folders.iter().find(|f| f.path == path).cloned().unwrap_or_default();
+                        folder_icon(ui, &f, Rect::from_center_size(egui::pos2(x + 34.0, r.center().y), vec2(20.0, 20.0)));
+                        p.text(egui::pos2(x + 52.0, r.center().y), Align2::LEFT_CENTER, label, FontId::proportional(14.0), if allowed { theme::TEXT } else { theme::DIVIDER });
+                        if resp.clicked() && !toggled && allowed {
+                            *target = Some(path.to_string());
+                        }
+                        if resp.double_clicked() && !kids.is_empty() {
+                            expanded.insert(path.to_string());
+                        }
+                        if expanded.contains(path) {
+                            for k in kids {
+                                rows(ui, folders, &k.path, name_of(&k.path), depth + 1, ok, target, expanded);
+                            }
+                        }
+                    }
+                    for (path, label) in &tops {
+                        rows(ui, &folders, path, label, 0, &ok, &mut target, &mut expanded);
+                    }
+                });
+            });
+            choice = house::actions(ui, &["Cancel", "Move here"]);
+        });
+        let mv = self.move_to.as_mut().expect("open");
+        mv.target = target.clone();
+        mv.expanded = expanded;
+        if close || choice == Some(0) || ctx.input(|i| i.key_pressed(Key::Escape)) {
+            self.move_to = None;
+        } else if choice == Some(1) {
+            match target {
+                Some(to) => {
+                    let items = self.move_to.take().map(|m| m.items).unwrap_or_default();
+                    self.send_to(ctx, items, to, true);
+                }
+                None => self.error = Some("Pick a folder to move to first.".into()),
+            }
+        }
+    }
+
     fn pending_move_ui(&mut self, ctx: &egui::Context) {
         let Some(pm) = &self.pending_move else { return };
         let who = self.person(&pm.owner);
@@ -1449,10 +1580,11 @@ impl Home {
         }
     }
 
-    /// The mouse's back button goes up a folder and its forward button forward, instead of the
-    /// browser leaving the page: index.html stops the browser's own handling while the home
-    /// screen is up (`__ssHomeActive`) and counts the presses (`__ssHomeUp`, `__ssHomeFwd`);
-    /// `__ssAtTop` lets the browser's back button leave when there's nowhere to go up to.
+    /// The mouse's back and forward buttons go Back and Forward through the places you visited
+    /// (not Up: Up is the parent folder, Back is where you came from), instead of the browser
+    /// leaving the page: index.html stops the browser's own handling while the home screen is up
+    /// (`__ssHomeActive`) and counts the presses (`__ssHomeUp` = back, `__ssHomeFwd`);
+    /// `__ssAtTop` (nothing to go back to) lets the browser's back button leave.
     fn mouse_buttons(&mut self) {
         let Some(w) = web_sys::window() else { return };
         let get = |k: &str| js_sys::Reflect::get(&w, &k.into()).ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as usize;
@@ -1464,7 +1596,7 @@ impl Home {
         if up > 0 {
             set("__ssHomeUp", 0.into());
             for _ in 0..up {
-                self.go_up();
+                self.go_back();
             }
         }
         if fwd > 0 {
@@ -1473,7 +1605,7 @@ impl Home {
                 self.go_forward();
             }
         }
-        set("__ssAtTop", self.up_view().is_none().into());
+        set("__ssAtTop", self.back.is_empty().into());
     }
 
     /// A browser that still went back (the history fallback in index.html) gives no input event,
@@ -1485,7 +1617,7 @@ impl Home {
     fn keys(&mut self, ctx: &egui::Context) {
         self.mouse_buttons();
         Self::keep_listening(ctx);
-        if self.renaming.is_some() || ctx.memory(|m| m.focused()).is_some() || self.pending_move.is_some() {
+        if self.renaming.is_some() || ctx.memory(|m| m.focused()).is_some() || self.pending_move.is_some() || self.move_to.is_some() {
             return;
         }
         let events = ctx.input(|i| i.events.clone());

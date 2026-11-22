@@ -68,11 +68,12 @@
         if (k.length === 1 && (e.shiftKey ? shifted : plain).indexOf(k) >= 0) e.preventDefault();
       }, true);
     })();
-    // Home screen (home.rs): the mouse's back and forward buttons move up and forward through
-    // folders instead of leaving the page. While the home screen is up (__ssHomeActive) the
-    // browser's own handling is stopped and the presses are counted for the app. A history entry
-    // catches browsers that still go back: that becomes "up" too, except at the top of My files
-    // (__ssAtTop), where Back leaves as usual.
+    // Home screen (home.rs): the mouse's back and forward buttons go back and forward through the
+    // folders you visited (like a browser, but inside StarSheets) instead of leaving the page.
+    // While the home screen is up (__ssHomeActive) the browser's own handling is stopped and the
+    // presses are counted for the app. A history entry catches browsers that still go back: that
+    // becomes Back in StarSheets too, unless there's nowhere to go back to (__ssAtTop), where
+    // Back leaves as usual.
     (function () {
       window.__ssHomeUp = 0; window.__ssHomeFwd = 0; window.__ssAtTop = true; window.__ssHomeActive = false;
       var lastPress = 0, guarded = false;
