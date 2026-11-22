@@ -150,7 +150,7 @@ fn opt_field(body: &Value, key: &str) -> Option<String> {
     body.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
-/// /api/info, /api/setup, /api/login, /api/logout, /api/me and /api/users; `None` for other paths.
+/// /api/info, /api/setup, /api/signup, /api/login, /api/logout, /api/me and /api/users; `None` for other paths.
 async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, String>, headers: &HeaderMap, body: &[u8]) -> Option<Response<Body>> {
     let path: Vec<&str> = p.iter().map(String::as_str).collect();
     let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
@@ -163,7 +163,9 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
     Some(match (path.as_slice(), m) {
         (["info"], "GET") => {
             let setup = on && !auth::any_users(&app.store);
-            send_json(&json!({ "location": app.location, "auth": on, "signed_in": !on || me.is_some(), "setup": setup, "user": me.map(|u| u.json()) }), 200)
+            let s = auth::signup(&app.store);
+            let signup = on && !setup && s.on;
+            send_json(&json!({ "location": app.location, "auth": on, "signed_in": !on || me.is_some(), "setup": setup, "signup": signup, "signup_code": signup && !s.code.is_empty(), "user": me.map(|u| u.json()) }), 200)
         }
         (["setup"], "POST") => {
             if !on {
@@ -189,6 +191,41 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
                     }
                     error(code, &why)
                 }
+                None => error(500, "server error"),
+            }
+        }
+        (["signup"], "POST") => {
+            if !on {
+                return Some(error(400, "Sign-in is off on this server."));
+            }
+            let r = blocking(app, move |app| {
+                let user = auth::sign_up(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password"), &field(&json, "code"))?;
+                Ok(session(app, &user))
+            })
+            .await;
+            match r {
+                Some(Ok(resp)) => resp,
+                Some(Err((code, why))) => {
+                    if code == 401 {
+                        tokio::time::sleep(Duration::from_millis(1500)).await; // slows down guessing
+                    }
+                    error(code, &why)
+                }
+                None => error(500, "server error"),
+            }
+        }
+        (["signup", "settings"], "GET" | "POST") => {
+            if me.as_ref().is_none_or(|u| !u.owner) {
+                return Some(error(403, "Only the owner can do that."));
+            }
+            let posting = m == "POST";
+            let r = blocking(app, move |app| {
+                if posting { auth::set_signup(&app.store, json.get("on").and_then(Value::as_bool).unwrap_or(false), &field(&json, "code")) } else { Ok(auth::signup(&app.store)) }
+            })
+            .await;
+            match r {
+                Some(Ok(s)) => send_json(&json!({ "on": s.on, "code": s.code }), 200),
+                Some(Err(why)) => error(400, &why),
                 None => error(500, "server error"),
             }
         }

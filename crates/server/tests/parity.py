@@ -304,6 +304,22 @@ def accounts():
         got.append(("bob sees who has access", sharing["you"] == "view" and [p["role"] for p in sharing["people"]] == ["owner", "view"]))
         made = json.loads(s.call("POST", "/api/files?name=Bobs", b"bob's")[2])
         got.append(("bob's own file is his", json.loads(s.call("GET", f"/api/files/{made['id']}/sharing")[2])["you"] == "owner"))
+        # Sign-up: off until the owner turns it on; the code when one is set; only the owner sets it.
+        s.call("POST", "/api/logout"); s.cookie = ""
+        info = json.loads(s.call("GET", "/api/info")[2])
+        got.append(("sign-up off by default", not info["signup"] and post("/api/signup", {"username": "cat", "name": "Cat", "password": "catspassword"})[0] == 403))
+        post("/api/login", {"username": "bob", "password": "bobspassword"})
+        got.append(("bob can't turn sign-up on", post("/api/signup/settings", {"on": True})[0] == 403))
+        s.call("POST", "/api/logout"); s.cookie = ""
+        post("/api/login", {"username": "owner", "password": "longpassword"})
+        got.append(("owner turns sign-up on with a code", json.loads(post("/api/signup/settings", {"on": True, "code": "joinus"})[2]) == {"on": True, "code": "joinus"}))
+        s.call("POST", "/api/logout"); s.cookie = ""
+        info = json.loads(s.call("GET", "/api/info")[2])
+        got.append(("sign-in box offers sign-up", info["signup"] and info["signup_code"] and "joinus" not in json.dumps(info)))
+        got.append(("wrong sign-up code", post("/api/signup", {"username": "cat", "name": "Cat", "password": "catspassword", "code": "nope"})[0] == 401))
+        r = post("/api/signup", {"username": "Cat", "name": "Cat", "password": "catspassword", "code": "joinus"})
+        got.append(("cat signs up and is signed in", r[0] == 200 and not json.loads(r[2])["user"]["owner"] and json.loads(s.call("GET", "/api/info")[2])["user"]["username"] == "cat"))
+        got.append(("cat sees no one else's files", listed() == []))
     finally:
         s.stop()
         shutil.rmtree(base)

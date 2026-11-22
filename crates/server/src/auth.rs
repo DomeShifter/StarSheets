@@ -3,7 +3,8 @@
 //!
 //! The first account is the owner's. It is made in the app with a setup code from the server's
 //! log (or STARSHEETS_PASSWORD when set), so nobody else can claim a new server first. The owner
-//! adds other people; everyone can change their own name, colour and password.
+//! adds other people, or lets them make their own account (sign-up, off unless the owner turns
+//! it on, optionally with a code). Everyone can change their own name, colour and password.
 
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
@@ -45,7 +46,47 @@ fn load(store: &Store) -> Vec<Map<String, Value>> {
 }
 
 fn save(store: &Store, users: &[Map<String, Value>]) -> std::io::Result<()> {
-    store.save_json(&users_path(store), &json!({ "users": users }))
+    let mut all = store.load_json(&users_path(store));
+    all.insert("users".into(), json!(users));
+    store.save_json(&users_path(store), &Value::Object(all))
+}
+
+// ---------------------------------------------------------------- sign-up
+
+/// Whether people may make their own account, and the code they need ("" = none).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Signup {
+    pub on: bool,
+    pub code: String,
+}
+
+pub fn signup(store: &Store) -> Signup {
+    let all = store.load_json(&users_path(store));
+    let s = all.get("signup");
+    Signup {
+        on: s.and_then(|s| s.get("on")).and_then(Value::as_bool).unwrap_or(false),
+        code: s.and_then(|s| s.get("code")).and_then(Value::as_str).unwrap_or("").to_string(),
+    }
+}
+
+pub fn set_signup(store: &Store, on: bool, code: &str) -> Result<Signup, String> {
+    let code: String = code.trim().chars().filter(|c| !c.is_control()).take(64).collect();
+    let mut all = store.load_json(&users_path(store));
+    all.insert("signup".into(), json!({ "on": on, "code": code }));
+    store.save_json(&users_path(store), &Value::Object(all)).map_err(|e| e.to_string())?;
+    Ok(Signup { on, code })
+}
+
+/// Makes an account through sign-up: only when the owner allows it (never the owner's account).
+pub fn sign_up(store: &Store, username: &str, name: &str, password: &str, code: &str) -> Result<User, (u16, String)> {
+    let s = signup(store);
+    if !any_users(store) || !s.on {
+        return Err((403, "This server doesn't let people make their own account. Ask the person who runs it to add you.".into()));
+    }
+    if !s.code.is_empty() && code.trim() != s.code {
+        return Err((401, "That sign-up code isn't right.".into()));
+    }
+    add(store, username, name, password).map_err(|e| (400, e))
 }
 
 fn to_user(u: &Map<String, Value>) -> User {
@@ -265,6 +306,17 @@ mod tests {
         assert!(remove(&s, "james").is_err(), "the owner stays");
         remove(&s, "aurelie").unwrap();
         assert_eq!(users(&s).len(), 1);
+        // Sign-up: off by default, the code when one is set, never touching the people list.
+        assert_eq!(sign_up(&s, "newbie", "New", "long enough", "").unwrap_err().0, 403);
+        set_signup(&s, true, " letmein ").unwrap();
+        assert_eq!(sign_up(&s, "newbie", "New", "long enough", "wrong").unwrap_err().0, 401);
+        let n = sign_up(&s, "newbie", "New", "long enough", "letmein").unwrap();
+        assert!(!n.owner);
+        assert_eq!(signup(&s), Signup { on: true, code: "letmein".into() });
+        set_signup(&s, true, "").unwrap();
+        sign_up(&s, "second", "Two", "long enough", "").unwrap();
+        assert_eq!(users(&s).len(), 3, "saving people keeps the sign-up setting and vice versa");
+        assert!(signup(&s).on);
         let _ = std::fs::remove_dir_all(&s.root);
     }
 }

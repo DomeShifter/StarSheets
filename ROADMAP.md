@@ -1,13 +1,13 @@
 # StarSheets roadmap
 
-> **Last updated:** 2026-11-22 · **Now:** live editing, step 0 (Rust server); phase 1 extras continue alongside
+> **Last updated:** 2026-11-22 · **Now:** live editing and accounts released in 0.2.0; phase 1 extras and live-editing follow-ups continue
 
 | Phase | Goal | Done when | Status |
 |---|---|---|---|
 | 0 Test build | Our app with a Sheets menu bar and toolbar instead of GridCraft's ribbon, Sheets colours | Opens and edits an xlsx in the browser with no ribbon; list of what can't be restyled | **in progress** |
 | 1 Look and feel | Sheets menus, toolbar with icons, bottom bar (+, sheet list, tabs, quick sum), blue selection, side panels instead of dialogs, Sheets shortcuts | Side-by-side screenshots match closely | next |
 | 2 Saving like Drive | Small server: file list home page, saving after every change (no Save button), version history | Close the tab, reopen, nothing lost; restore an older version | |
-| 3 Live editing and sharing | The same file open in several tabs or by several people, all seeing each other's changes as they happen; accounts; sharing like Google (owner, can edit, can view, link) | Two browsers edit together and stay identical; a viewer can't edit | **started** ([plan](docs/live-editing.md)) |
+| 3 Live editing and sharing | The same file open in several tabs or by several people, all seeing each other's changes as they happen; accounts; sharing like Google (owner, can edit, can view, link) | Two browsers edit together and stay identical; a viewer can't edit | **done in 0.2.0** ([plan](docs/live-editing.md)); follow-ups below |
 | 5 Extras | Sheets-only functions (QUERY, SPLIT…), phone layout | as needed | |
 
 ## Phase 0 checklist
@@ -66,5 +66,6 @@
 - [x] Step 2: accounts (local, username and password; owner set up with a code from the log, owner adds people) and seeing other people's cursors and avatars
 - [x] Step 3: undo that only undoes your own changes (cell by cell; refused when someone changed those cells since)
 - [x] Step 4: share dialog (owner, editors, viewers; anyone signed in with the link) and view-only mode
+- [x] Sign-up: people make their own account when the owner allows it (optional sign-up code)
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).

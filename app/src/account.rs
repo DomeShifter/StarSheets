@@ -1,6 +1,7 @@
 //! Accounts (live editing step 2): signing in with a username and password kept on the
 //! StarSheets server, the first-time setup of the owner's account, your avatar menu (name and
-//! colour, password, people, sign out), and the owner's list of people.
+//! colour, password, people, sign out), the owner's list of people, and sign-up (people making
+//! their own account, when the owner allows it).
 //! No sign-in through other companies (docs/decisions.md).
 
 use std::cell::RefCell;
@@ -101,7 +102,8 @@ pub fn others_ui(ui: &mut Ui) {
 }
 
 enum Reply {
-    Info { auth: bool, setup: bool, signed_in: bool, user: Option<Me> },
+    Info { auth: bool, setup: bool, signup: bool, signup_code: bool, signed_in: bool, user: Option<Me> },
+    Signup { on: bool, code: String },
     /// Signed in or out, or the password changed: start the page again.
     Reload,
     Saved(Me),
@@ -115,6 +117,7 @@ enum Dialog {
     #[default]
     None,
     SignIn,
+    SignUp,
     Setup,
     Profile,
     Password,
@@ -126,6 +129,12 @@ pub struct Account {
     inbox: Rc<RefCell<Vec<Reply>>>,
     booted: bool,
     auth: bool,
+    /// The server lets people make their own account (and whether that needs a code).
+    signup: bool,
+    signup_code: bool,
+    /// The owner's sign-up setting, as shown in People.
+    signup_on: bool,
+    signup_secret: String,
     dialog: Dialog,
     busy: bool,
     error: Option<String>,
@@ -166,6 +175,10 @@ fn call(inbox: &Rc<RefCell<Vec<Reply>>>, ctx: &egui::Context, method: Method, ur
     });
 }
 
+fn signup_reply(v: Json) -> Reply {
+    Reply::Signup { on: v["on"].as_bool().unwrap_or(false), code: v["code"].as_str().unwrap_or("").to_string() }
+}
+
 fn reload() {
     crate::files::clear_unsaved_flag();
     if let Some(w) = web_sys::window() {
@@ -180,6 +193,8 @@ impl Account {
             call(&self.inbox, ctx, Method::Get, "api/info", None, |v| Reply::Info {
                 auth: v["auth"].as_bool().unwrap_or(false),
                 setup: v["setup"].as_bool().unwrap_or(false),
+                signup: v["signup"].as_bool().unwrap_or(false),
+                signup_code: v["signup_code"].as_bool().unwrap_or(false),
                 signed_in: v["signed_in"].as_bool().unwrap_or(true),
                 user: me_from(&v["user"]),
             });
@@ -188,8 +203,10 @@ impl Account {
         for r in replies {
             self.busy = false;
             match r {
-                Reply::Info { auth, setup, signed_in, user } => {
+                Reply::Info { auth, setup, signup, signup_code, signed_in, user } => {
                     self.auth = auth;
+                    self.signup = signup;
+                    self.signup_code = signup_code;
                     ME.with(|m| *m.borrow_mut() = user);
                     if auth && !signed_in {
                         self.open(if setup { Dialog::Setup } else { Dialog::SignIn });
@@ -201,6 +218,10 @@ impl Account {
                     self.dialog = Dialog::None;
                 }
                 Reply::People(p) => self.people = p,
+                Reply::Signup { on, code } => {
+                    self.signup_on = on;
+                    self.signup_secret = code;
+                }
                 Reply::Error(e) => self.error = Some(e),
                 Reply::Done(msg) => {
                     self.done = Some(msg);
@@ -219,19 +240,20 @@ impl Account {
                 "people" => {
                     self.open(Dialog::People);
                     call(&self.inbox, ctx, Method::Get, "api/users", None, |v| Reply::People(v.as_array().into_iter().flatten().filter_map(me_from).collect()));
+                    call(&self.inbox, ctx, Method::Get, "api/signup/settings", None, signup_reply);
                 }
                 "signout" => call(&self.inbox, ctx, Method::Post, "api/logout", None, |_| Reply::Reload),
                 _ => {}
             }
         }
-        if SIGN_IN.with(|s| std::mem::take(&mut *s.borrow_mut())) && self.dialog != Dialog::Setup {
+        if SIGN_IN.with(|s| std::mem::take(&mut *s.borrow_mut())) && !matches!(self.dialog, Dialog::Setup | Dialog::SignUp) {
             self.open(Dialog::SignIn);
         }
     }
 
     /// Whether a sign-in or setup box is up (the rest of the app waits).
     pub fn blocking(&self) -> bool {
-        matches!(self.dialog, Dialog::SignIn | Dialog::Setup)
+        matches!(self.dialog, Dialog::SignIn | Dialog::SignUp | Dialog::Setup)
     }
 
     fn open(&mut self, d: Dialog) {
@@ -281,6 +303,7 @@ impl Account {
         match self.dialog {
             Dialog::None => {}
             Dialog::SignIn => self.sign_in(ctx),
+            Dialog::SignUp => self.sign_up(ctx),
             Dialog::Setup => self.setup(ctx),
             Dialog::Profile => self.profile(ctx),
             Dialog::Password => self.change_password(ctx),
@@ -290,6 +313,7 @@ impl Account {
 
     fn sign_in(&mut self, ctx: &egui::Context) {
         let mut go = false;
+        let mut create = false;
         house::dialog(ctx, "starsheets_sign_in", 360.0, "Sign in to StarSheets", None, |ui| {
             let r = Self::field(ui, &mut self.username, "Username", false);
             self.first(&r);
@@ -299,8 +323,15 @@ impl Account {
             go |= Self::enter(ui, &r);
             self.messages(ui);
             house::note(ui, "Forgotten your password? The person who runs this server can set a new one.");
+            if self.signup && ui.add(house::link("New here? Create an account")).clicked() {
+                create = true;
+            }
             go |= house::actions(ui, &["Sign in"]).is_some();
         });
+        if create {
+            self.open(Dialog::SignUp);
+            return;
+        }
         if go && !self.busy && !self.username.is_empty() && !self.password.is_empty() {
             self.busy = true;
             self.error = None;
@@ -308,11 +339,53 @@ impl Account {
         }
     }
 
+    /// Making your own account (only offered when the owner allows sign-up).
+    fn sign_up(&mut self, ctx: &egui::Context) {
+        let mut go = false;
+        let mut back = false;
+        house::dialog(ctx, "starsheets_sign_up", 400.0, "Create an account", None, |ui| {
+            house::label(ui, "Your name", "What other people see next to your cursor.");
+            let r = Self::field(ui, &mut self.name, "Name", false);
+            self.first(&r);
+            ui.add_space(house::S);
+            house::label(ui, "Username and password", "For signing in. The username is letters and numbers.");
+            Self::field(ui, &mut self.username, "Username", false);
+            ui.add_space(house::S);
+            Self::field(ui, &mut self.password, "Password (8 characters or more)", true);
+            ui.add_space(house::S);
+            let r = Self::field(ui, &mut self.password2, "Password again", true);
+            go |= Self::enter(ui, &r);
+            if self.signup_code {
+                house::gap(ui);
+                house::label(ui, "Sign-up code", "The person who runs this server gives you this.");
+                let r = Self::field(ui, &mut self.code, "Sign-up code", false);
+                go |= Self::enter(ui, &r);
+            }
+            self.messages(ui);
+            if ui.add(house::link("Already have an account? Sign in")).clicked() {
+                back = true;
+            }
+            go |= house::actions(ui, &["Create account"]).is_some();
+        });
+        if back {
+            self.open(Dialog::SignIn);
+        } else if go && !self.busy {
+            if self.password != self.password2 {
+                self.error = Some("The two passwords are different.".into());
+                return;
+            }
+            self.busy = true;
+            self.error = None;
+            let body = json!({ "code": self.code.trim(), "name": self.name, "username": self.username, "password": self.password });
+            call(&self.inbox, ctx, Method::Post, "api/signup", Some(body), |_| Reply::Reload);
+        }
+    }
+
     fn setup(&mut self, ctx: &egui::Context) {
         let mut go = false;
         house::dialog(ctx, "starsheets_setup", 400.0, "Welcome to StarSheets", None, |ui| {
             house::note(ui, "This server has no accounts yet. Make yours: you'll be its owner and can add other people afterwards.");
-            house::note(ui, "The setup code is in the server's log (or is the STARSHEETS_PASSWORD it was started with).");
+            house::note(ui, "The setup code is printed in the server's log when it starts (with Docker: docker logs followed by the container's name). If the server was started with STARSHEETS_PASSWORD, that is the code.");
             house::gap(ui);
             house::label(ui, "Setup code", "");
             let r = Self::field(ui, &mut self.code, "From the server's log", false);
@@ -425,9 +498,10 @@ impl Account {
         let mut cancel = false;
         let mut add = false;
         let mut remove = None;
+        let mut save_signup = false;
         let me = me().unwrap_or_default();
         house::dialog(ctx, "starsheets_people", 460.0, "People", Some(&mut close), |ui| {
-            house::note(ui, "Everyone with an account on this server. Sharing per file comes next; for now everyone can open every file.");
+            house::note(ui, "Everyone with an account on this server. Each person sees only their own files and the ones shared with them.");
             house::gap(ui);
             for p in self.people.clone() {
                 ui.horizontal(|ui| {
@@ -453,6 +527,17 @@ impl Account {
                 ui.add_space(house::XS);
             }
             house::gap(ui);
+            house::label(ui, "Sign-up", "Let people make their own account from the sign-in box. Only turn this on if strangers can't reach your server, or set a code.");
+            let mut changed = ui.checkbox(&mut self.signup_on, "Let people make their own account").changed();
+            if self.signup_on {
+                ui.add_space(house::S);
+                let r = Self::field(ui, &mut self.signup_secret, "Sign-up code (optional, you give it out)", false);
+                changed |= r.lost_focus();
+            }
+            if changed {
+                save_signup = true;
+            }
+            house::gap(ui);
             house::label(ui, "Add someone", "Give them their username and this password; they can change the password after signing in.");
             Self::field(ui, &mut self.name, "Their name", false);
             ui.add_space(house::S);
@@ -472,6 +557,12 @@ impl Account {
             self.busy = true;
             let who = self.username.clone();
             call(&self.inbox, ctx, Method::Post, "api/users", Some(json!({ "name": self.name, "username": self.username, "password": self.password })), move |_| Reply::Done(format!("Added {who}.")));
+        } else if save_signup {
+            let body = json!({ "on": self.signup_on, "code": self.signup_secret.trim() });
+            let on = self.signup_on;
+            call(&self.inbox, ctx, Method::Post, "api/signup/settings", Some(body), move |_| {
+                Reply::Done(if on { "Sign-up is on.".into() } else { "Sign-up is off.".into() })
+            });
         } else if let Some(who) = remove {
             self.remove_armed = None;
             let url = format!("api/users?username={}", crate::files::enc(&who));

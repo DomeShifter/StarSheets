@@ -6,7 +6,12 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-22
+
 ### Added
+- **Create an account:** the owner can let people make their own account from the sign-in box
+  (People › Sign-up), with an optional sign-up code to give out. It's off unless the owner turns
+  it on.
 - **Share** a spreadsheet like in Google Sheets: add people as viewers or editors, or let anyone
   signed in to your server open it with the link. Viewers see live changes but can't edit. Other
   people's files only show up once they're shared with you.
@@ -152,5 +157,6 @@ about them.
 - One Docker image (`ghcr.io/domeshifter/starsheets`) with the app and its file storage.
 - A password login, on by default (a random password is printed on first start if you don't set one).
 
-[Unreleased]: https://github.com/DomeShifter/StarSheets/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/DomeShifter/StarSheets/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.2.0
 [0.1.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.1.0

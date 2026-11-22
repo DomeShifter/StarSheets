@@ -35,12 +35,13 @@ comments with mentions, add-ons, and desktop apps. See the [roadmap](ROADMAP.md)
 ## Try it with Docker
 
 ```sh
-docker run -d -p 8080:8080 -v starsheets:/data ghcr.io/domeshifter/starsheets:latest
-docker logs <container>   # shows the setup code
+docker run -d --name starsheets -p 8080:8080 -v starsheets:/data ghcr.io/domeshifter/starsheets:latest
+docker logs starsheets   # shows the setup code
 ```
 
 Then open <http://localhost:8080> and make your account with the setup code from the log: you
-become the server's owner and can add other people (your avatar › People). Everyone signs in with
+become the server's owner and can add other people (your avatar › People), or turn on sign-up so
+they can make their own account, with a code you give out if you like. Everyone signs in with
 a username and password kept on your server; there is no sign-in through other companies. Your
 spreadsheets are kept as `.xlsx` files in the `starsheets` volume. There's a ready-made
 [compose file](docker/compose.yml) too.
