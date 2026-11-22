@@ -36,6 +36,7 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0028-ui-egui-kept-font-families | `fonts::keep_families`: families a host keeps bound in every font set (the font menu draws each name in its own font) | could help upstream |
 | 0029-ui-egui-sheets-chart-menu | Sheets mode: a chart's right-click menu is "Edit chart" (opens the host's chart editor) and "Delete chart" | Sheets-specific |
 | 0030-ui-egui-sheets-dialog-titles | Sheets mode: dialogs have no title band; the title sits top left (22 px) with ✕ at the right, as in Google Sheets | Sheets-specific |
+| 0031-ui-egui-sheets-formula-bar-one-line | Sheets mode: the formula bar stays one line until the chevron expands it (long text runs on, no wrap), and fx is drawn larger; `widgets::icon_button_sized` | Sheets-specific |
 | 0002-ui-egui-theme-token-override | `Tokens::install` / `Tokens::for_mode`: a host can replace the colour palettes | to offer as a PR |
 | 0003-ui-egui-chrome-sheet-tabs-switch | `Chrome.sheet_tabs: bool`: a host can hide the sheet tabs and status bar | to offer as a PR |
 | 0004-ui-egui-sheets-cell-keys | `UiState.sheets_keys`: Enter edits (and is consumed so the new editor doesn't commit at once), Backspace only clears, no Enter-paste, static copy outline | to offer as a PR (as an option) |

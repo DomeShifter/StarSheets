@@ -225,6 +225,7 @@ impl eframe::App for WebShell {
         self.calc.ui(&self.app, ui);
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);
+        crate::house::style_tooltips(&ctx);
         copy_without_https(ui.ctx());
     }
 }

@@ -89,6 +89,49 @@ pub fn keep(ctx: &egui::Context) {
     }
 }
 
+/// Tooltips: dark grey with white text (Google's look). egui draws them in the menu frame, so the
+/// tooltip layer is restyled after the frame is painted: call once per frame, after all UI.
+pub const TIP_BG: Color32 = Color32::from_rgb(0x3C, 0x40, 0x43);
+
+pub fn style_tooltips(ctx: &egui::Context) {
+    let layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().filter(|l| l.order == egui::Order::Tooltip).collect());
+    if layers.is_empty() {
+        return;
+    }
+    let fill = ctx.global_style().visuals.window_fill;
+    ctx.graphics_mut(|g| {
+        for l in layers {
+            let Some(list) = g.get_mut(l) else { continue };
+            for i in 0..list.next_idx().0 {
+                list.mutate_shape(egui::layers::ShapeIdx(i), |cs| {
+                    if restyle_tip(&mut cs.shape, fill) {
+                        cs.clip_rect = cs.clip_rect.expand2(vec2(S, XS));
+                    }
+                });
+            }
+        }
+    });
+}
+
+/// Restyles one tooltip shape; true when it grew (the background, given side padding).
+fn restyle_tip(shape: &mut egui::Shape, fill: Color32) -> bool {
+    match shape {
+        egui::Shape::Rect(r) if r.fill == fill => {
+            r.fill = TIP_BG;
+            r.stroke = Stroke::NONE;
+            r.corner_radius = CornerRadius::same(FIELD_RADIUS);
+            r.rect = r.rect.expand2(vec2(S, 0.0));
+            true
+        }
+        egui::Shape::Text(t) => {
+            t.override_text_color = Some(Color32::WHITE);
+            false
+        }
+        egui::Shape::Vec(v) => v.iter_mut().fold(false, |grew, s| restyle_tip(s, fill) | grew),
+        _ => false,
+    }
+}
+
 /// The frame of every dialog: white, 24 px padding, 8 px corners, a soft shadow.
 pub fn dialog_frame() -> Frame {
     Frame::NONE

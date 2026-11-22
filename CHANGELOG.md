@@ -7,6 +7,10 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Changed
+- Tooltips in the house style: dark grey with white text.
+- The formula bar stays one line (long text runs on) until you expand it; bigger fx icon.
+- No lines above and below the toolbar.
+- Merging cells where only one holds a value keeps that value, with no warning.
 - GridCraft's own dialogs (Insert link, Paste special, Find and replace…) have Sheets-style titles:
   top left with ✕, no grey title band.
 - Dragging a sheet tab: the tab follows the pointer, the others slide aside, and it springs into

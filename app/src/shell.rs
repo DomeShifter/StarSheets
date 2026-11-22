@@ -488,12 +488,15 @@ impl Shell {
             self.compact = !self.compact;
         }
         if !self.compact {
+            // No separator lines: Sheets' title, menus and toolbar sit on one plain background.
             egui::Panel::top("starsheets_title")
+                .show_separator_line(false)
                 .exact_size(64.0)
                 .frame(Frame::NONE.fill(theme::PAGE).inner_margin(Margin { left: 12, right: 16, top: 6, bottom: 0 }))
                 .show(ui, |ui| title_and_menus(app, ui, &mut self.title_draft));
         }
         egui::Panel::top("starsheets_toolbar")
+            .show_separator_line(false)
             .exact_size(48.0)
             .frame(Frame::NONE.fill(theme::PAGE).inner_margin(Margin { left: 12, right: 12, top: 4, bottom: 6 }))
             .show(ui, |ui| self.toolbar(app, ui));

@@ -39,24 +39,62 @@ fn blocks(r: RangeRef, cmd: &str) -> Vec<RangeRef> {
     }
 }
 
-/// Whether merging would drop a value: some block has something besides its top-left cell.
+/// The filled cells of a block (a value or a formula).
+fn filled(sh: &gridcraft_engine::model::Sheet, b: RangeRef) -> Vec<CellRef> {
+    sh.cells.iter_range(b).filter(|(_, cell)| cell.formula.is_some() || !cell.value.is_empty()).map(|(c, _)| c).collect()
+}
+
+/// Whether merging would drop a value: some block has more than one filled cell. A block with a
+/// single value keeps it, wherever it is (Sheets moves it to the merged cell).
 fn loses_data(app: &SheetApp, cmd: &str) -> bool {
     let Some(d) = app.session.active() else { return false };
     let Some(sh) = d.wb.active() else { return false };
-    d.selection.ranges.iter().flat_map(|r| blocks(*r, cmd)).any(|b| {
-        sh.cells.iter_range(b).any(|(c, cell)| c != b.start && (cell.formula.is_some() || !cell.value.is_empty()))
-    })
+    d.selection.ranges.iter().flat_map(|r| blocks(*r, cmd)).any(|b| filled(sh, b).len() > 1)
+}
+
+/// Merges the selection the Sheets way: a block whose only value isn't in its top-left cell has
+/// that value moved there first, so the merged cell shows it.
+fn merge(app: &mut SheetApp, cmd: &str) {
+    let moves: Vec<(CellRef, CellRef)> = app
+        .session
+        .active()
+        .and_then(|d| {
+            let sh = d.wb.active()?;
+            Some(
+                d.selection
+                    .ranges
+                    .iter()
+                    .flat_map(|r| blocks(*r, cmd))
+                    .filter_map(|b| match filled(sh, b).as_slice() {
+                        [only] if *only != b.start => Some((*only, b.start)),
+                        _ => None,
+                    })
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+    let selection = app.session.active().map(|d| d.selection.clone());
+    for (from, to) in moves {
+        app.run_or_alert("range.move", json!({ "range": from.a1(), "to": to.a1(), "overwrite": true }));
+    }
+    // Moving changes the selection; merge what was selected.
+    if let (Some(sel), Some(d)) = (selection, app.session.active_mut()) {
+        d.selection = sel;
+    }
+    app.run_or_alert(cmd, json!({}));
 }
 
 impl MergeGuard {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         if let Some(cmd) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::new(REQUEST))) {
             let now = ctx.input(|i| i.time);
-            if cmd != "home.unmergeCells" && now >= self.quiet_until && loses_data(app, &cmd) {
+            if cmd == "home.unmergeCells" {
+                app.run_or_alert(&cmd, json!({}));
+            } else if now >= self.quiet_until && loses_data(app, &cmd) {
                 self.pending = Some(cmd);
                 self.dont_ask = false;
             } else {
-                app.run_or_alert(&cmd, json!({}));
+                merge(app, &cmd);
             }
         }
         let Some(cmd) = self.pending.clone() else { return };
@@ -83,7 +121,7 @@ impl MergeGuard {
                     self.quiet_until = ctx.input(|i| i.time) + 300.0;
                 }
                 self.pending = None;
-                app.run_or_alert(&cmd, json!({}));
+                merge(app, &cmd);
             }
             Some(false) => self.pending = None,
             None => {}
@@ -96,6 +134,19 @@ mod tests {
     use gridcraft_engine::Session;
     use gridcraft_engine::core::{CellRef, RangeRef, Value};
     use serde_json::json;
+
+    #[test]
+    fn a_single_value_moves_to_the_merged_cell() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        s.execute("cell.set", json!({ "cell": "B1", "input": "kept" })).unwrap();
+        // What merge() does for A1:B1 with only B1 filled.
+        s.execute("range.move", json!({ "range": "B1", "to": "A1", "overwrite": true })).unwrap();
+        s.execute("home.mergeCells", json!({ "range": "A1:B1" })).unwrap();
+        let sh = s.active().unwrap().wb.active().unwrap();
+        assert_eq!(sh.value(CellRef::parse("A1").unwrap()), Value::text("kept"));
+        assert_eq!(sh.merges.len(), 1);
+    }
 
     #[test]
     fn merge_vertically_makes_one_block_per_column() {
