@@ -254,6 +254,11 @@ impl Bottom {
                 let moved = p.x - o.x;
                 let centre = lefts[fp] + ws[fp] / 2.0 + moved;
                 let to = (0..visible.len()).filter(|k| *k != fp && lefts[*k] + ws[*k] / 2.0 < centre).count();
+                #[cfg(target_arch = "wasm32")]
+                if let Some(w) = web_sys::window() {
+                    let dbg = format!("fp={fp} to={to} moved={moved:.0} p={:.0} o={:.0} centre={centre:.0} lefts={lefts:?} ws={ws:?}", p.x, o.x);
+                    let _ = js_sys::Reflect::set(&w, &"__ssTabDbg".into(), &dbg.into());
+                }
                 Some((fp, moved, to))
             }
             _ => None,
