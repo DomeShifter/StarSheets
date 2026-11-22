@@ -30,6 +30,31 @@ fn plain(formula: &str) -> String {
     formula.trim_start_matches('=').replace('$', "")
 }
 
+/// A range made absolute for a name (`Sheet1!B2:C4` → `Sheet1!$B$2:$C$4`): a name's relative
+/// references move with the cell they're used from, which a named range must not.
+pub(crate) fn absolute(range: &str) -> String {
+    let (sheet, body) = match range.rsplit_once('!') {
+        Some((s, b)) => (Some(s), b),
+        None => (None, range),
+    };
+    let fix = |part: &str| -> String {
+        let p = part.trim().replace('$', "");
+        let letters: String = p.chars().take_while(char::is_ascii_alphabetic).collect();
+        let digits = &p[letters.len()..];
+        match (letters.is_empty(), digits.is_empty()) {
+            (false, false) => format!("${letters}${digits}"),
+            (false, true) => format!("${letters}"),
+            (true, false) => format!("${digits}"),
+            _ => p,
+        }
+    };
+    let body: String = body.split(':').map(fix).collect::<Vec<_>>().join(":");
+    match sheet {
+        Some(s) => format!("{s}!{body}"),
+        None => body,
+    }
+}
+
 /// The selection as a range with its sheet (`Sheet1!A1:B10`).
 fn selection(app: &SheetApp) -> String {
     let Some(d) = app.session.active() else { return String::new() };
@@ -165,7 +190,7 @@ impl NamesPanel {
             Some("Done") => {
                 let name = d.name.trim().to_string();
                 let range = d.range.trim().trim_start_matches('=').to_string();
-                let mut p = json!({ "name": name, "refersTo": format!("={range}") });
+                let mut p = json!({ "name": name, "refersTo": format!("={}", absolute(&range)) });
                 if let Some(old) = &d.old {
                     p["oldName"] = json!(old);
                 }
@@ -183,6 +208,13 @@ impl NamesPanel {
 mod tests {
     use gridcraft_engine::Session;
     use serde_json::json;
+
+    #[test]
+    fn ranges_are_made_absolute() {
+        assert_eq!(super::absolute("Sheet1!B2:C4"), "Sheet1!$B$2:$C$4");
+        assert_eq!(super::absolute("'My sheet'!$A1"), "'My sheet'!$A$1");
+        assert_eq!(super::absolute("A:A"), "$A:$A");
+    }
 
     #[test]
     fn a_name_is_added_renamed_and_removed_like_the_panel_does() {
