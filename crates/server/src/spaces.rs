@@ -176,6 +176,26 @@ pub fn set_star(store: &Store, user: &User, item: &str, on: bool) -> io::Result<
     save_prefs(store, &user.username, &p)
 }
 
+/// Folder colours `user` picked (folder id → "#RRGGBB"). Personal, as in Drive: they only change
+/// how the folders look to that person.
+pub fn colours(store: &Store, user: &User) -> Map<String, Value> {
+    prefs(store, &user.username).get("colours").and_then(Value::as_object).cloned().unwrap_or_default()
+}
+
+/// Sets (or with "" clears) a folder's colour for `user`. Only "#RRGGBB" is kept.
+pub fn set_colour(store: &Store, user: &User, folder: &str, colour: &str) -> io::Result<()> {
+    let mut p = prefs(store, &user.username);
+    let mut all = colours(store, user);
+    let ok = colour.len() == 7 && colour.starts_with('#') && colour[1..].chars().all(|c| c.is_ascii_hexdigit());
+    if ok {
+        all.insert(folder.to_string(), json!(colour.to_uppercase()));
+    } else {
+        all.remove(folder);
+    }
+    p.insert("colours".into(), Value::Object(all));
+    save_prefs(store, &user.username, &p)
+}
+
 /// When `user` last opened each file (file id → Unix seconds), newest kept to 100.
 pub fn opened(store: &Store, user: &User) -> Map<String, Value> {
     prefs(store, &user.username).get("opened").and_then(Value::as_object).cloned().unwrap_or_default()

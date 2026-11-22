@@ -181,7 +181,15 @@ impl Files {
             "new" => {
                 open_url(&format!("{}?new=1", page_url("")));
             }
-            "home" => go_to(""),
+            // The home screen, in this file's folder.
+            "home" => match self.link.as_ref().filter(|l| !l.folder.is_empty()) {
+                Some(l) => {
+                    if let Some(w) = web_sys::window() {
+                        let _ = w.location().set_href(&format!("{}?dir={}", page_url(""), enc(&l.folder)));
+                    }
+                }
+                None => go_to(""),
+            },
             "versions" => {
                 if let Some(l) = &self.link {
                     self.versions = Some(vec![]);

@@ -55,6 +55,36 @@ Everything sits on a 4 px scale.
 - **Other buttons:** white pill, grey outline, green text, to the left of the main one, 8 px apart.
 - **Buttons inside a list** ("Restore"): green text, no outline.
 
+## Menus
+
+Every menu (menu bar, right-click menus, the New button, the avatar menu) uses `house::menu(ui, width)`
+first thing: flat full-width rows, **16 px from the sides**, **32 px tall**, grey on hover, no
+rounded rows, 8 px above the first row and below the last. Rows are `house::menu_row` (an icon,
+the label, a grey shortcut at the right); a row without an icon in a menu that has icons passes
+`Some("")` so the labels line up. Dividers are `house::menu_sep` (a light line with 8 px above and
+below). Menus are 220 px plain, 260–320 px with icons or shortcuts. Anything that isn't a row
+(a palette, a heading) sits inside `house::menu_inset`.
+
+## Folder colours
+
+Folders can be given one of 14 colours (`house::FOLDER_COLOURS`), chosen to be muted, easy to tell
+apart, readable on white and on the light card fill, and never a plain primary:
+
+| Name | Hex | Name | Hex |
+|---|---|---|---|
+| Slate | #5B6B7F | Coral | #E07A5F |
+| Ink | #34495E | Terracotta | #B5523B |
+| Ocean | #2E7DA3 | Sand | #B08D57 |
+| Periwinkle | #6C7FD1 | Mustard | #C9A227 |
+| Lavender | #8E7CC3 | Olive | #8A9A3B |
+| Plum | #8E4A87 | Sage | #6E9E75 |
+| Rose | #C2577A | Teal | #2A9D8F |
+
+A coloured folder is drawn as a filled folder in its colour (`folder_fill`, white in the file so
+it takes the tint); a folder without one is the grey outline. Swatches are 22 px circles on a
+32 px grid, 7 to a row, with a dark ring round the current one. The colour is personal, as in
+Drive: it only changes how the folder looks to the person who picked it.
+
 ## Selection and hover
 
 | State | Look |

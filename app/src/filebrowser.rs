@@ -390,6 +390,7 @@ impl Browser {
                     self.selected.clear();
                 }
                 r.context_menu(|ui| {
+                    crate::house::menu(ui, 240.0);
                     if ui.button("New folder").clicked() {
                         out.push(Action::NewFolder(self.cwd.clone()));
                         ui.close();
@@ -464,7 +465,7 @@ impl Browser {
     }
 
     fn item_menu(&mut self, ui: &mut Ui, item: &Item, out: &mut Vec<Action>) {
-        ui.set_min_width(200.0);
+        crate::house::menu(ui, 260.0);
         let targets = if self.selected.contains(item) { self.selected.clone() } else { vec![item.clone()] };
         let single = targets.len() == 1;
         let mut row = |ui: &mut Ui, label: &str, keys: &str, enabled: bool| ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked();
@@ -486,7 +487,7 @@ impl Browser {
                 }
             }
         }
-        ui.separator();
+        crate::house::menu_sep(ui);
         if row(ui, "Rename", "F2", single) {
             self.start_rename(item);
             ui.close();
@@ -503,7 +504,7 @@ impl Browser {
             out.push(Action::Download(id.clone(), self.label_of(item)));
             ui.close();
         }
-        ui.separator();
+        crate::house::menu_sep(ui);
         if row(ui, "Copy", "Ctrl+C", true) {
             self.clipboard = Some((targets.clone(), false));
             ui.close();
@@ -518,7 +519,7 @@ impl Browser {
             self.paste_into(f.clone(), out);
             ui.close();
         }
-        ui.separator();
+        crate::house::menu_sep(ui);
         if row(ui, "Move to bin", "Delete", true) {
             out.push(Action::Delete(targets));
             self.selected.clear();

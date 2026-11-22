@@ -67,23 +67,23 @@ pub fn me_ui(ui: &mut Ui) {
     let r = avatar(ui, &me.name, &me.colour, 32.0).on_hover_text(format!("{} ({})", me.name, me.username));
     let ask = |ui: &Ui, what: &str| ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(REQUEST), what.to_string()));
     egui::Popup::menu(&r).show(|ui| {
-        ui.set_min_width(220.0);
+        house::menu(ui, 260.0);
         house::menu_inset(ui, |ui| {
             ui.label(RichText::new(&me.name).size(house::BODY).strong().color(theme::TEXT));
             house::note(ui, &me.username);
         });
-        ui.separator();
-        if ui.button("Your name and colour…").clicked() {
+        house::menu_sep(ui);
+        if house::menu_row(ui, Some("edit"), "Your name and colour…", "", true) {
             ask(ui, "profile");
         }
-        if ui.button("Change password…").clicked() {
+        if house::menu_row(ui, Some("lock"), "Change password…", "", true) {
             ask(ui, "password");
         }
-        if me.owner && ui.button("People…").clicked() {
+        if me.owner && house::menu_row(ui, Some("group"), "People…", "", true) {
             ask(ui, "people");
         }
-        ui.separator();
-        if ui.button("Sign out").clicked() {
+        house::menu_sep(ui);
+        if house::menu_row(ui, Some(""), "Sign out", "", true) {
             ask(ui, "signout");
         }
     });

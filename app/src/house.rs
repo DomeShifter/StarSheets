@@ -2,7 +2,7 @@
 //! that every dialog, menu, card and panel uses (docs/house-style.md explains each choice).
 //! Build new UI from these helpers rather than with numbers of its own.
 
-use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Stroke, Ui, vec2};
+use egui::{Align, Color32, CornerRadius, Frame, Layout, Margin, RichText, Sense, Stroke, Ui, vec2};
 
 use crate::theme;
 
@@ -57,6 +57,81 @@ pub fn panel_scroll_height(ui: &Ui) -> f32 {
 
 /// The space between a menu's edge and anything in it that isn't a row (palettes, headings).
 pub const MENU_INSET: i8 = 16;
+
+// ---------------------------------------------------------------- menus
+
+/// Every menu (menu bar, right-click, the New button, the avatar menu…) the Sheets way: flat
+/// full-width rows, 16 px from the sides, 32 px tall, grey on hover, no corners on the rows.
+/// Call first thing inside the menu's closure; `width` is the menu's width (220 plain, 320 with
+/// shortcuts or icons).
+pub fn menu(ui: &mut Ui, width: f32) {
+    ui.set_min_width(width);
+    ui.set_max_width(width);
+    let st = ui.style_mut();
+    st.spacing.button_padding = vec2(f32::from(MENU_INSET), 7.0);
+    st.spacing.item_spacing = vec2(14.0, 0.0);
+    st.spacing.icon_width = 10.0;
+    let w = &mut st.visuals.widgets;
+    for (state, fill) in [(&mut w.inactive, Color32::TRANSPARENT), (&mut w.hovered, theme::MENU_HOVER), (&mut w.active, theme::HOVER), (&mut w.open, theme::MENU_HOVER)] {
+        state.bg_stroke = Stroke::NONE;
+        state.weak_bg_fill = fill;
+        state.corner_radius = CornerRadius::ZERO;
+        state.expansion = 0.0;
+    }
+}
+
+/// A menu row: an icon (Material Symbols name, or none), the label, and a grey shortcut at the
+/// right. Returns true when clicked.
+pub fn menu_row(ui: &mut Ui, icon: Option<&str>, label: &str, keys: &str, enabled: bool) -> bool {
+    let text = RichText::new(label).size(BODY).color(theme::TEXT);
+    let b = match icon.and_then(crate::icons::icon) {
+        Some(img) => egui::Button::image_and_text(img.fit_to_exact_size(vec2(20.0, 20.0)), text),
+        None if icon.is_some() => egui::Button::new(RichText::new(format!("       {label}")).size(BODY).color(theme::TEXT)),
+        None => egui::Button::new(text),
+    };
+    let b = if keys.is_empty() { b } else { b.shortcut_text(RichText::new(keys).size(NOTE).color(theme::TEXT_DIM)) };
+    ui.add_enabled(enabled, b.min_size(vec2(ui.available_width(), 32.0))).clicked()
+}
+
+/// A menu divider: a light line with 8 px above and below.
+pub fn menu_sep(ui: &mut Ui) {
+    ui.add_space(S);
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, theme::DIVIDER));
+    ui.add_space(S);
+}
+
+// ---------------------------------------------------------------- folder colours
+
+/// The colours a folder can have (right-click › Folder colour). Muted, distinct from each other,
+/// readable on white and on the light card fill; no plain primaries. A folder without a colour
+/// is drawn as an outline in the text grey.
+pub const FOLDER_COLOURS: [(&str, Color32); 14] = [
+    ("Slate", Color32::from_rgb(0x5B, 0x6B, 0x7F)),
+    ("Ink", Color32::from_rgb(0x34, 0x49, 0x5E)),
+    ("Ocean", Color32::from_rgb(0x2E, 0x7D, 0xA3)),
+    ("Periwinkle", Color32::from_rgb(0x6C, 0x7F, 0xD1)),
+    ("Lavender", Color32::from_rgb(0x8E, 0x7C, 0xC3)),
+    ("Plum", Color32::from_rgb(0x8E, 0x4A, 0x87)),
+    ("Rose", Color32::from_rgb(0xC2, 0x57, 0x7A)),
+    ("Coral", Color32::from_rgb(0xE0, 0x7A, 0x5F)),
+    ("Terracotta", Color32::from_rgb(0xB5, 0x52, 0x3B)),
+    ("Sand", Color32::from_rgb(0xB0, 0x8D, 0x57)),
+    ("Mustard", Color32::from_rgb(0xC9, 0xA2, 0x27)),
+    ("Olive", Color32::from_rgb(0x8A, 0x9A, 0x3B)),
+    ("Sage", Color32::from_rgb(0x6E, 0x9E, 0x75)),
+    ("Teal", Color32::from_rgb(0x2A, 0x9D, 0x8F)),
+];
+
+/// "#RRGGBB" for a colour (how folder colours are stored).
+pub fn hex(c: Color32) -> String {
+    format!("#{:02X}{:02X}{:02X}", c.r(), c.g(), c.b())
+}
+
+/// A stored folder colour, if it is one of FOLDER_COLOURS.
+pub fn folder_colour(hex_text: &str) -> Option<Color32> {
+    FOLDER_COLOURS.iter().map(|(_, c)| *c).find(|c| hex(*c).eq_ignore_ascii_case(hex_text))
+}
 
 /// Applies the parts of the house style that egui can carry for everything at once, including
 /// GridCraft's own windows: window padding, corners and shadows.

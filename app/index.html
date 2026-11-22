@@ -68,6 +68,32 @@
         if (k.length === 1 && (e.shiftKey ? shifted : plain).indexOf(k) >= 0) e.preventDefault();
       }, true);
     })();
+    // Home screen (home.rs): the mouse's back and forward buttons move up and forward through
+    // folders instead of leaving the page. While the home screen is up (__ssHomeActive) the
+    // browser's own handling is stopped and the presses are counted for the app. A history entry
+    // catches browsers that still go back: that becomes "up" too, except at the top of My files
+    // (__ssAtTop), where Back leaves as usual.
+    (function () {
+      window.__ssHomeUp = 0; window.__ssHomeFwd = 0; window.__ssAtTop = true; window.__ssHomeActive = false;
+      var lastPress = 0, guarded = false;
+      function guard() { if (!guarded) { history.pushState({ ssGuard: 1 }, ''); guarded = true; } }
+      ['mousedown', 'mouseup', 'pointerdown', 'pointerup', 'auxclick'].forEach(function (t) {
+        window.addEventListener(t, function (e) {
+          if (!window.__ssHomeActive || (e.button !== 3 && e.button !== 4)) return;
+          e.preventDefault();
+          if (t === 'mouseup') { lastPress = Date.now(); if (e.button === 3) window.__ssHomeUp++; else window.__ssHomeFwd++; window.dispatchEvent(new Event('resize')); }
+        }, true);
+      });
+      window.addEventListener('popstate', function () {
+        if (!window.__ssHomeActive || !guarded) return;
+        guarded = false;
+        if (Date.now() - lastPress < 600) { guard(); return; }
+        if (window.__ssAtTop) { history.back(); return; }
+        window.__ssHomeUp++; guard();
+        window.dispatchEvent(new Event('resize'));  // wakes the app to act on it
+      });
+      setInterval(function () { if (window.__ssHomeActive && !window.__ssAtTop) guard(); }, 300);
+    })();
   </script>
 </body>
 </html>

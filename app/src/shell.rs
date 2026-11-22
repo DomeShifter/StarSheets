@@ -750,6 +750,20 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
                 ui.add_space(8.0);
             }
             let share = Button::new(RichText::new("Share").size(14.0).color(theme::TEXT)).fill(theme::SHARE).corner_radius(18.0).min_size(vec2(84.0, 36.0));
+            // Files: back to the home screen (the file organiser), in this file's folder. The
+            // logo at the left does the same.
+            #[cfg(target_arch = "wasm32")]
+            let files_button = {
+                let label = RichText::new("Files").size(14.0).color(theme::TEXT);
+                match icons::icon("folder") {
+                    Some(img) => Button::image_and_text(img.fit_to_exact_size(vec2(20.0, 20.0)), label),
+                    None => Button::new(label),
+                }
+                .fill(egui::Color32::WHITE)
+                .stroke(Stroke::new(1.0, theme::BOX))
+                .corner_radius(18.0)
+                .min_size(vec2(92.0, 36.0))
+            };
             #[cfg(target_arch = "wasm32")]
             let can = crate::share::can_share();
             #[cfg(not(target_arch = "wasm32"))]
@@ -760,6 +774,10 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             }
             #[cfg(target_arch = "wasm32")]
             {
+                ui.add_space(8.0);
+                if ui.add(files_button).on_hover_text("Your files and folders").clicked() {
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "home".to_string()));
+                }
                 ui.add_space(8.0);
                 crate::account::others_ui(ui);
             }
@@ -899,19 +917,7 @@ pub fn menu_style(ui: &mut Ui, with_icons: bool) -> f32 {
 
 /// The Sheets menu look for a menu of any width (house.rs: 16 px side padding, 32 px rows).
 pub fn menu_style_width(ui: &mut Ui, width: f32) {
-    ui.set_min_width(width);
-    ui.set_max_width(width);
-    let st = ui.style_mut();
-    st.spacing.button_padding = vec2(f32::from(crate::house::MENU_INSET), 7.0);
-    st.spacing.item_spacing = vec2(14.0, 0.0);
-    st.spacing.icon_width = 10.0;
-    let w = &mut st.visuals.widgets;
-    for (state, fill) in [(&mut w.inactive, egui::Color32::TRANSPARENT), (&mut w.hovered, theme::MENU_HOVER), (&mut w.active, theme::HOVER), (&mut w.open, theme::MENU_HOVER)] {
-        state.bg_stroke = Stroke::NONE;
-        state.weak_bg_fill = fill;
-        state.corner_radius = egui::CornerRadius::ZERO;
-        state.expansion = 0.0;
-    }
+    crate::house::menu(ui, width);
 }
 
 /// A Sheets menu divider: a light line with 8 px above and below.

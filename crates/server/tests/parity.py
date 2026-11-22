@@ -333,6 +333,7 @@ def accounts():
         team = json.loads(post("/api/folders?path=cat/X&name=Team", {})[2])["path"]
         s.call("POST", f"/api/files?name=Inside&folder={team}", b"i")
         got.append(("cat shares a folder with bob", post(f"/api/folders/sharing?path={team}", {"people": {"bob": "edit"}})[0] == 200))
+        got.append(("cat colours a folder (only for cat)", post(f"/api/folders/colour?path={team}", {"colour": "#2a9d8f"})[0] == 200 and json.loads(s.call("GET", "/api/files")[2])["folder_info"][team]["colour"] == "#2A9D8F"))
         got.append(("a person's own folder can't be shared", post("/api/folders/sharing?path=cat", {"link": "view"})[0] == 400))
         s.call("POST", "/api/logout"); s.cookie = ""
         post("/api/login", {"username": "bob", "password": "bobspassword"})

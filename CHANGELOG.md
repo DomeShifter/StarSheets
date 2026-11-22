@@ -18,6 +18,12 @@ new features and the last one for fixes.
   shared folder is shared too, also what's added later. Moving something into another person's
   folder makes it theirs, so StarSheets asks first.
 - **Stars and Recent:** star files and folders to find them quickly; Recent lists what you opened.
+- **Getting around:** Back, Forward and Up buttons above your files; the mouse's back button
+  (and Backspace) goes up a folder instead of leaving the page. A **Files** button next to Share
+  in every spreadsheet (and the StarSheets logo) opens your files at that spreadsheet's folder.
+- **Folder colours:** right-click a folder › Folder colour, 14 colours to choose from. Only you
+  see the colours you pick, as in Drive.
+- Right-click any empty space on the home screen for New spreadsheet, New folder and Paste.
 - **Your own bin:** each person's deleted things go to their own bin, and are deleted for good
   after 30 days. Restoring a file brings back its earlier versions and who it was shared with.
 

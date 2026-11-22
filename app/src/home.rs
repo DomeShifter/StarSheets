@@ -60,6 +60,8 @@ struct FolderRow {
     role: String,
     starred: bool,
     shared: bool,
+    /// The colour you gave it (house::FOLDER_COLOURS), if any.
+    colour: Option<Color32>,
 }
 
 #[derive(Clone, Debug)]
@@ -131,6 +133,9 @@ pub struct Home {
     shared_files: Vec<String>,
     people: HashMap<String, Person>,
     view: Option<View>,
+    /// Where you were before (Back) and where Back came from (Forward).
+    back: Vec<View>,
+    forward: Vec<View>,
     expanded: HashSet<String>,
     list: bool,
     by_date: bool,
@@ -298,7 +303,14 @@ impl Home {
             .filter_map(|f| f.as_str())
             .map(|p| {
                 let i = info.get(p).cloned().unwrap_or_default();
-                FolderRow { path: p.into(), owner: s(&i, "owner"), role: i["role"].as_str().unwrap_or("owner").into(), starred: i["starred"].as_bool().unwrap_or(false), shared: i["shared"].as_bool().unwrap_or(false) }
+                FolderRow {
+                    path: p.into(),
+                    owner: s(&i, "owner"),
+                    role: i["role"].as_str().unwrap_or("owner").into(),
+                    starred: i["starred"].as_bool().unwrap_or(false),
+                    shared: i["shared"].as_bool().unwrap_or(false),
+                    colour: house::folder_colour(i["colour"].as_str().unwrap_or("")),
+                }
             })
             .collect();
         let list = |k: &str| v["shared"][k].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect::<Vec<_>>();
@@ -332,11 +344,61 @@ impl Home {
         self.files.iter().find(|f| f.id == id)
     }
 
-    /// Shows a folder in the right place: mine, shared with me, or (the server's owner) anyone's.
-    fn go_folder(&mut self, path: &str) {
+    /// Goes somewhere, remembering where you were for Back.
+    fn navigate(&mut self, v: View) {
+        if self.view.as_ref() == Some(&v) {
+            return;
+        }
+        if let Some(old) = self.view.take() {
+            self.back.push(old);
+        }
+        self.forward.clear();
+        self.view = Some(v);
         self.selected.clear();
         self.search.clear();
-        self.view = Some(if !self.accounts || under(path, &self.space) {
+        self.renaming = None;
+    }
+
+    fn go_back(&mut self) {
+        if let Some(v) = self.back.pop() {
+            if let Some(old) = self.view.take() {
+                self.forward.push(old);
+            }
+            self.view = Some(v);
+            self.selected.clear();
+        }
+    }
+
+    fn go_forward(&mut self) {
+        if let Some(v) = self.forward.pop() {
+            if let Some(old) = self.view.take() {
+                self.back.push(old);
+            }
+            self.view = Some(v);
+            self.selected.clear();
+        }
+    }
+
+    /// The folder above this one, if there is one to go up to.
+    fn up_view(&self) -> Option<View> {
+        match self.view.clone()? {
+            View::Mine(p) if p != self.space => Some(View::Mine(parent_of(&p).to_string())),
+            View::Shared(Some(p)) if self.shared_folders.contains(&p) => Some(View::Shared(None)),
+            View::Shared(Some(p)) => Some(View::Shared(Some(parent_of(&p).to_string()))),
+            View::Everyone(p) if !p.is_empty() => Some(View::Everyone(parent_of(&p).to_string())),
+            _ => None,
+        }
+    }
+
+    fn go_up(&mut self) {
+        if let Some(v) = self.up_view() {
+            self.navigate(v);
+        }
+    }
+
+    /// Shows a folder in the right place: mine, shared with me, or (the server's owner) anyone's.
+    fn go_folder(&mut self, path: &str) {
+        let v = if !self.accounts || under(path, &self.space) {
             View::Mine(path.to_string())
         } else if self.shared_folders.iter().any(|top| under(path, top)) {
             View::Shared(Some(path.to_string()))
@@ -344,7 +406,8 @@ impl Home {
             View::Everyone(path.to_string())
         } else {
             View::Shared(None)
-        });
+        };
+        self.navigate(v);
     }
 
     /// The folder new things go into from here (None: nowhere here, e.g. Recent).
@@ -535,14 +598,16 @@ impl Home {
                 .id(egui::Id::new("home_search"))
                 .hint_text("Search in StarSheets")
                 .font(FontId::proportional(16.0))
-                .desired_width((ui.available_width() - 140.0).clamp(200.0, 700.0))
-                .margin(vec2(20.0, 12.0));
+                .frame(egui::Frame::NONE)
+                .desired_width((ui.available_width() - 140.0).clamp(200.0, 700.0));
             let w = (ui.available_width() - 100.0).clamp(220.0, 740.0);
             ui.allocate_ui_with_layout(vec2(w, 48.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                egui::Frame::NONE.fill(theme::TOOLBAR).corner_radius(24).show(ui, |ui| {
-                    ui.visuals_mut().extreme_bg_color = theme::TOOLBAR;
-                    ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
-                    ui.visuals_mut().widgets.hovered.bg_stroke = Stroke::NONE;
+                // One rounded box: the field itself draws no frame of its own.
+                egui::Frame::NONE.fill(theme::TOOLBAR).corner_radius(24).inner_margin(egui::Margin::symmetric(20, 12)).show(ui, |ui| {
+                    if let Some(img) = crate::icons::icon("search") {
+                        ui.add(img.fit_to_exact_size(vec2(20.0, 20.0)));
+                    }
+                    ui.add_space(house::S);
                     ui.add(search);
                 });
             });
@@ -555,25 +620,37 @@ impl Home {
     fn left_ui(&mut self, ui: &mut Ui) {
         // New: a spreadsheet, a folder, or files from this computer.
         let here = self.here();
-        let new = ui.add(egui::Button::new(RichText::new("+   New").size(15.0).color(theme::TEXT)).fill(Color32::WHITE).corner_radius(16).min_size(vec2(108.0, 52.0)).stroke(Stroke::NONE));
-        ui.painter().rect_stroke(new.rect, 16, Stroke::new(1.0, theme::DIVIDER), egui::StrokeKind::Inside);
+        // The house's raised button: white, 16 px corners, a soft shadow, the + icon.
+        let label = RichText::new("New").size(15.0).color(theme::TEXT);
+        let button = match crate::icons::icon("add") {
+            Some(img) => egui::Button::image_and_text(img.fit_to_exact_size(vec2(24.0, 24.0)), label),
+            None => egui::Button::new(label),
+        };
+        let new = egui::Frame::NONE
+            .corner_radius(16)
+            .shadow(egui::epaint::Shadow { offset: [0, 1], blur: 6, spread: 0, color: Color32::from_black_alpha(50) })
+            .show(ui, |ui| {
+                ui.spacing_mut().button_padding = vec2(house::L, house::M);
+                ui.add(button.fill(Color32::WHITE).corner_radius(16).min_size(vec2(112.0, 56.0)).stroke(Stroke::NONE))
+            })
+            .inner;
         egui::Popup::menu(&new).show(|ui| {
-            ui.set_min_width(220.0);
+            house::menu(ui, 260.0);
             let folder = here.clone().unwrap_or_else(|| self.space.clone());
-            if ui.button("New spreadsheet").clicked() {
+            if house::menu_row(ui, Some("note_add"), "New spreadsheet", "", true) {
                 go(&page(&format!("?folder={}", enc(&folder))));
             }
-            if ui.button("New folder").clicked() {
+            if house::menu_row(ui, Some("create_new_folder"), "New folder", "", true) {
                 call(&self.inbox, ui.ctx(), Method::Post, format!("api/folders?path={}&name=New%20folder", enc(&folder)), None, |b| {
                     let v: Json = serde_json::from_slice(&b).unwrap_or_default();
                     Reply::NewFolder(v["path"].as_str().unwrap_or("").to_string())
                 });
                 if here.is_none() {
-                    self.view = Some(View::Mine(self.space.clone()));
+                    self.navigate(View::Mine(self.space.clone()));
                 }
             }
-            ui.separator();
-            if ui.button("Upload files…").clicked() {
+            house::menu_sep(ui);
+            if house::menu_row(ui, Some("upload"), "Upload files…", "", true) {
                 let (inbox, ctx) = (self.inbox.clone(), ui.ctx().clone());
                 wasm_bindgen_futures::spawn_local(async move {
                     let Some(picked) = rfd::AsyncFileDialog::new().add_filter("Spreadsheets", &["xlsx", "xlsm", "xls", "csv", "ods"]).pick_files().await else { return };
@@ -620,10 +697,10 @@ impl Home {
             _ => false,
         };
         let current = view.is_some() && self.view == view;
-        if self.row(ui, label, icon, 0, current, has_children, &key, folder.map(str::to_string)) {
-            self.view = view;
-            self.selected.clear();
-            self.search.clear();
+        if self.row(ui, label, icon, None, 0, current, has_children, &key, folder.map(str::to_string)) {
+            if let Some(v) = view {
+                self.navigate(v);
+            }
             if self.view == Some(View::Bin) {
                 self.loading = true;
                 self.load_bin(ui.ctx());
@@ -665,10 +742,10 @@ impl Home {
             name_of(path).to_string()
         };
         let current = self.view.as_ref() == Some(&view);
-        if self.row(ui, &label, "folder", depth, current, !kids.is_empty(), &key, Some(path.to_string())) {
-            self.view = Some(view);
-            self.selected.clear();
-            self.search.clear();
+        let colour = self.folder(path).and_then(|f| f.colour);
+        let icon = if colour.is_some() { "folder_fill" } else { "folder" };
+        if self.row(ui, &label, icon, colour, depth, current, !kids.is_empty(), &key, Some(path.to_string())) {
+            self.navigate(view);
         }
         if self.expanded.contains(&key) {
             for k in kids {
@@ -679,7 +756,7 @@ impl Home {
 
     /// Draws one tree row; returns true when it was clicked (not on its arrow).
     #[allow(clippy::too_many_arguments)]
-    fn row(&mut self, ui: &mut Ui, label: &str, icon: &str, depth: usize, current: bool, has_children: bool, key: &str, folder: Option<String>) -> bool {
+    fn row(&mut self, ui: &mut Ui, label: &str, icon: &str, tint: Option<Color32>, depth: usize, current: bool, has_children: bool, key: &str, folder: Option<String>) -> bool {
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
         let p = ui.painter().clone();
         let dropping = self.dragging.is_some() && folder.is_some() && resp.contains_pointer();
@@ -710,6 +787,10 @@ impl Home {
             }
         }
         if let Some(img) = crate::icons::icon(icon) {
+            let img = match tint {
+                Some(c) => img.tint(c),
+                None => img,
+            };
             img.paint_at(ui, Rect::from_center_size(egui::pos2(x + 34.0, r.center().y), vec2(20.0, 20.0)));
         }
         let font = FontId::proportional(14.0);
@@ -720,8 +801,28 @@ impl Home {
 
     fn main_ui(&mut self, ui: &mut Ui) {
         // Path (each part clickable and a drop target), view switch.
+        // Anywhere empty in this area: right-click for New (items drawn later sit on top of it).
+        let bg = ui.interact(ui.max_rect(), egui::Id::new("home_bg"), Sense::click());
         let crumbs = self.title();
         ui.horizontal(|ui| {
+            // Back, forward and up (the mouse's back button goes up too).
+            let nav = |ui: &mut Ui, icon: &str, enabled: bool, tip: &str| {
+                let b = match crate::icons::icon(icon) {
+                    Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(22.0, 22.0))),
+                    None => egui::Button::new(tip),
+                };
+                ui.add_enabled(enabled, b.frame(false).min_size(vec2(36.0, 36.0)).corner_radius(18)).on_hover_text(tip).on_disabled_hover_text(tip).clicked()
+            };
+            if nav(ui, "arrow_back", !self.back.is_empty(), "Back") {
+                self.go_back();
+            }
+            if nav(ui, "arrow_forward", !self.forward.is_empty(), "Forward") {
+                self.go_forward();
+            }
+            if nav(ui, "arrow_upward", self.up_view().is_some(), "Up one folder (Backspace, or your mouse's back button)") {
+                self.go_up();
+            }
+            ui.add_space(house::S);
             let last = crumbs.len().saturating_sub(1);
             for (i, (label, view)) in crumbs.into_iter().enumerate() {
                 if i > 0 {
@@ -743,9 +844,7 @@ impl Home {
                 if r.clicked()
                     && let Some(v) = view
                 {
-                    self.view = Some(v);
-                    self.selected.clear();
-                    self.search.clear();
+                    self.navigate(v);
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -829,31 +928,37 @@ impl Home {
                     });
                 }
             }
-            // Empty space: a click clears the selection; a right-click offers New and Paste.
-            let rest = ui.available_rect_before_wrap();
-            let r = ui.interact(rest.with_min_y(rest.min.y).with_max_y(rest.max.y.max(rest.min.y + 200.0)), ui.id().with("home_blank"), Sense::click());
-            if r.clicked() && !clicked_item {
-                self.selected.clear();
-            }
-            if let Some(here) = self.here() {
-                r.context_menu(|ui| {
-                    if ui.button("New folder").clicked() {
-                        call(&self.inbox, ui.ctx(), Method::Post, format!("api/folders?path={}&name=New%20folder", enc(&here)), None, |b| {
-                            let v: Json = serde_json::from_slice(&b).unwrap_or_default();
-                            Reply::NewFolder(v["path"].as_str().unwrap_or("").to_string())
-                        });
-                        ui.close();
-                    }
-                    if ui.button("New spreadsheet").clicked() {
-                        go(&page(&format!("?folder={}", enc(&here))));
-                    }
-                    if ui.add_enabled(self.clipboard.is_some(), egui::Button::new("Paste")).clicked() {
-                        self.paste_into(ui.ctx(), here.clone());
-                        ui.close();
-                    }
-                });
-            }
         });
+        // Empty space: a click clears the selection; a right-click offers New and Paste (into the
+        // folder shown, or your own folder where nothing can be made, e.g. Recent).
+        if bg.clicked() && !clicked_item {
+            self.selected.clear();
+        }
+        if !clicked_item {
+            bg.context_menu(|ui| {
+                house::menu(ui, 260.0);
+                let here = self.here();
+                let into = here.clone().unwrap_or_else(|| self.space.clone());
+                if house::menu_row(ui, Some("note_add"), "New spreadsheet", "", true) {
+                    go(&page(&format!("?folder={}", enc(&into))));
+                }
+                if house::menu_row(ui, Some("create_new_folder"), "New folder", "", true) {
+                    if here.is_none() {
+                        self.navigate(View::Mine(self.space.clone()));
+                    }
+                    call(&self.inbox, ui.ctx(), Method::Post, format!("api/folders?path={}&name=New%20folder", enc(&into)), None, |b| {
+                        let v: Json = serde_json::from_slice(&b).unwrap_or_default();
+                        Reply::NewFolder(v["path"].as_str().unwrap_or("").to_string())
+                    });
+                    ui.close();
+                }
+                house::menu_sep(ui);
+                if house::menu_row(ui, Some("content_paste"), "Paste", "Ctrl+V", self.clipboard.is_some() && here.is_some()) {
+                    self.paste_into(ui.ctx(), into.clone());
+                    ui.close();
+                }
+            });
+        }
     }
 
     fn select_click(&mut self, ui: &Ui, item: &Item, resp: &egui::Response, order: &[Item]) {
@@ -921,8 +1026,12 @@ impl Home {
         let sel = self.selected.contains(&item);
         let p = ui.painter().clone();
         p.rect_filled(r, 12, if sel { house::SELECTED } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
-        if let Some(img) = crate::icons::icon(if f.shared { "folder_shared" } else { "folder" }) {
-            img.paint_at(ui, Rect::from_center_size(r.left_center() + vec2(24.0, 0.0), vec2(22.0, 22.0)));
+        folder_icon(ui, f, Rect::from_center_size(r.left_center() + vec2(24.0, 0.0), vec2(22.0, 22.0)));
+        if f.shared
+            && f.colour.is_some()
+            && let Some(img) = crate::icons::icon("group")
+        {
+            img.paint_at(ui, Rect::from_center_size(r.right_center() - vec2(if f.starred { 40.0 } else { 18.0 }, 0.0), vec2(16.0, 16.0)));
         }
         if !self.renaming_ui(ui, &item, Rect::from_min_max(r.min + vec2(44.0, 8.0), r.max - vec2(8.0, 8.0))) {
             let galley = p.layout(self.folder_label(&f.path), FontId::proportional(14.0), theme::TEXT, CARD_W - 76.0);
@@ -1016,8 +1125,14 @@ impl Home {
             } else if resp.hovered() {
                 p.rect_filled(r, 6, theme::MENU_HOVER);
             }
-            if let Some(img) = crate::icons::icon(&icon) {
-                img.paint_at(ui, Rect::from_center_size(r.left_center() + vec2(20.0, 0.0), vec2(20.0, 20.0)));
+            let icon_rect = Rect::from_center_size(r.left_center() + vec2(20.0, 0.0), vec2(20.0, 20.0));
+            match &item {
+                Item::Folder(p) if let Some(f) = self.folder(p).cloned() => folder_icon(ui, &f, icon_rect),
+                _ => {
+                    if let Some(img) = crate::icons::icon(&icon) {
+                        img.paint_at(ui, icon_rect);
+                    }
+                }
             }
             if !self.renaming_ui(ui, &item, Rect::from_min_size(r.min + vec2(40.0, 5.0), vec2(w * 0.5 - 48.0, ROW - 10.0))) {
                 let mut shown = name.clone();
@@ -1104,25 +1219,25 @@ impl Home {
     }
 
     fn item_menu(&mut self, ui: &mut Ui, item: &Item) {
-        ui.set_min_width(220.0);
+        house::menu(ui, 280.0);
         let targets = if self.selected.contains(item) { self.selected.clone() } else { vec![item.clone()] };
         let single = targets.len() == 1;
         let role = self.role_of(item).to_string();
         let can_edit = role != "view";
         let is_space = matches!(item, Item::Folder(f) if !f.contains('/') && self.accounts);
-        let row = |ui: &mut Ui, label: &str, keys: &str, enabled: bool| ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked();
-        if row(ui, "Open", "Enter", single) {
+        let row = |ui: &mut Ui, icon: &str, label: &str, keys: &str, enabled: bool| house::menu_row(ui, Some(icon), label, keys, enabled);
+        if row(ui, "", "Open", "Enter", single) {
             self.activate(item, false);
             ui.close();
         }
         if let Item::File(_) = item
-            && row(ui, "Open in new tab", "", single)
+            && row(ui, "", "Open in new tab", "Ctrl+Enter", single)
         {
             self.activate(item, true);
             ui.close();
         }
-        ui.separator();
-        if self.accounts && row(ui, "Share…", "", single && !is_space) {
+        house::menu_sep(ui);
+        if self.accounts && row(ui, "person_add", "Share…", "", single && !is_space) {
             let (folder, key) = match item {
                 Item::Folder(p) => (true, p.clone()),
                 Item::File(id) => (false, id.clone()),
@@ -1134,7 +1249,7 @@ impl Home {
             Item::Folder(f) => self.folder(f).is_some_and(|f| f.starred),
             Item::File(id) => self.file(id).is_some_and(|f| f.starred),
         };
-        if self.accounts && row(ui, if starred { "Remove star" } else { "Star" }, "", true) {
+        if self.accounts && row(ui, if starred { "star_fill" } else { "star" }, if starred { "Remove star" } else { "Star" }, "", true) {
             for t in &targets {
                 let url = match t {
                     Item::File(id) => format!("api/files/{id}/star"),
@@ -1144,39 +1259,95 @@ impl Home {
             }
             ui.close();
         }
-        if row(ui, "Rename", "F2", single && can_edit && !is_space) {
+        if let Item::Folder(path) = item
+            && self.accounts
+        {
+            self.colour_menu(ui, path, &targets);
+        }
+        if row(ui, "edit", "Rename", "F2", single && can_edit && !is_space) {
             self.start_rename(item);
             ui.close();
         }
         if let Item::File(id) = item {
-            if row(ui, "Make a copy", "", single) {
+            if row(ui, "content_copy", "Make a copy", "", single) {
                 call(&self.inbox, ui.ctx(), Method::Post, format!("api/files/{id}/copy"), None, refresh_after);
                 ui.close();
             }
-            if row(ui, "Download", "", single) {
+            if row(ui, "download", "Download", "", single) {
                 let name = self.label_of(item);
                 call(&self.inbox, ui.ctx(), Method::Get, format!("api/files/{id}"), None, move |b| Reply::Download(name, b));
                 ui.close();
             }
         }
-        ui.separator();
-        if row(ui, "Copy", "Ctrl+C", !is_space) {
+        house::menu_sep(ui);
+        if row(ui, "content_copy", "Copy", "Ctrl+C", !is_space) {
             self.clipboard = Some((targets.clone(), false));
             ui.close();
         }
-        if row(ui, "Cut", "Ctrl+X", can_edit && !is_space) {
+        if row(ui, "content_cut", "Cut", "Ctrl+X", can_edit && !is_space) {
             self.clipboard = Some((targets.clone(), true));
             ui.close();
         }
         if let Item::Folder(f) = item
-            && row(ui, "Paste into folder", "", self.clipboard.is_some() && single && can_edit)
+            && row(ui, "content_paste", "Paste into folder", "Ctrl+V", self.clipboard.is_some() && single && can_edit)
         {
             self.paste_into(ui.ctx(), f.clone());
             ui.close();
         }
-        ui.separator();
-        if row(ui, "Move to bin", "Delete", can_edit && !is_space) {
+        house::menu_sep(ui);
+        if row(ui, "delete", "Move to bin", "Delete", can_edit && !is_space) {
             self.delete(ui.ctx(), targets);
+            ui.close();
+        }
+    }
+
+    /// Folder colour ▸ : the house's folder colours as swatches (name on hover), and No colour.
+    /// Personal: only you see the colours you pick.
+    fn colour_menu(&mut self, ui: &mut Ui, path: &str, targets: &[Item]) {
+        let current = self.folder(path).and_then(|f| f.colour);
+        let text = RichText::new("Folder colour").size(house::BODY).color(theme::TEXT);
+        let b = match crate::icons::icon("palette") {
+            Some(img) => egui::Button::image_and_text(img.fit_to_exact_size(vec2(20.0, 20.0)), text),
+            None => egui::Button::new(text),
+        };
+        let b = b.min_size(vec2(ui.available_width(), 32.0)).right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(theme::TEXT_DIM)));
+        let mut pick: Option<Option<Color32>> = None;
+        egui::containers::menu::SubMenuButton::from_button(b).ui(ui, |ui| {
+            house::menu(ui, 7.0 * 32.0 + 2.0 * f32::from(house::MENU_INSET));
+            house::menu_inset(ui, |ui| {
+                house::note(ui, "Only you see the colours you pick.");
+                ui.add_space(house::S);
+                for chunk in house::FOLDER_COLOURS.chunks(7) {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        for (name, c) in chunk {
+                            let (r, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
+                            let p = ui.painter();
+                            p.circle_filled(r.center(), 11.0, *c);
+                            if current == Some(*c) {
+                                p.circle_stroke(r.center(), 14.0, Stroke::new(2.0, theme::TEXT));
+                            } else if resp.hovered() {
+                                p.circle_stroke(r.center(), 14.0, Stroke::new(2.0, theme::DIVIDER));
+                            }
+                            if resp.on_hover_text(*name).clicked() {
+                                pick = Some(Some(*c));
+                            }
+                        }
+                    });
+                }
+                ui.add_space(house::S);
+            });
+            if house::menu_row(ui, Some(""), "No colour", "", current.is_some()) {
+                pick = Some(None);
+            }
+        });
+        if let Some(choice) = pick {
+            let colour = choice.map(house::hex).unwrap_or_default();
+            for t in targets {
+                if let Item::Folder(p) = t {
+                    call(&self.inbox, ui.ctx(), Method::Post, format!("api/folders/colour?path={}", enc(p)), Some(format!("{{\"colour\":\"{colour}\"}}").into_bytes()), refresh_after);
+                }
+            }
             ui.close();
         }
     }
@@ -1278,7 +1449,42 @@ impl Home {
         }
     }
 
+    /// The mouse's back button goes up a folder and its forward button forward, instead of the
+    /// browser leaving the page: index.html stops the browser's own handling while the home
+    /// screen is up (`__ssHomeActive`) and counts the presses (`__ssHomeUp`, `__ssHomeFwd`);
+    /// `__ssAtTop` lets the browser's back button leave when there's nowhere to go up to.
+    fn mouse_buttons(&mut self) {
+        let Some(w) = web_sys::window() else { return };
+        let get = |k: &str| js_sys::Reflect::get(&w, &k.into()).ok().and_then(|v| v.as_f64()).unwrap_or(0.0) as usize;
+        let set = |k: &str, v: wasm_bindgen::JsValue| {
+            let _ = js_sys::Reflect::set(&w, &k.into(), &v);
+        };
+        set("__ssHomeActive", true.into());
+        let (up, fwd) = (get("__ssHomeUp"), get("__ssHomeFwd"));
+        if up > 0 {
+            set("__ssHomeUp", 0.into());
+            for _ in 0..up {
+                self.go_up();
+            }
+        }
+        if fwd > 0 {
+            set("__ssHomeFwd", 0.into());
+            for _ in 0..fwd {
+                self.go_forward();
+            }
+        }
+        set("__ssAtTop", self.up_view().is_none().into());
+    }
+
+    /// A browser that still went back (the history fallback in index.html) gives no input event,
+    /// so the home screen looks once a second; a real button press wakes it at once.
+    fn keep_listening(ctx: &egui::Context) {
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+    }
+
     fn keys(&mut self, ctx: &egui::Context) {
+        self.mouse_buttons();
+        Self::keep_listening(ctx);
         if self.renaming.is_some() || ctx.memory(|m| m.focused()).is_some() || self.pending_move.is_some() {
             return;
         }
@@ -1307,17 +1513,7 @@ impl Home {
                         let items = std::mem::take(&mut self.selected);
                         self.delete(ctx, items);
                     }
-                    Key::Backspace => {
-                        if let Some(View::Mine(p) | View::Everyone(p) | View::Shared(Some(p))) = self.view.clone() {
-                            let up = parent_of(&p).to_string();
-                            let top_of_shared = self.shared_folders.contains(&p);
-                            if matches!(self.view, Some(View::Shared(_))) && top_of_shared {
-                                self.view = Some(View::Shared(None));
-                            } else if !(matches!(self.view, Some(View::Mine(_))) && p == self.space) && !p.is_empty() {
-                                self.go_folder(&up);
-                            }
-                        }
-                    }
+                    Key::Backspace => self.go_up(),
                     Key::A if modifiers.command => self.selected = self.order(),
                     _ => {}
                 },
@@ -1375,6 +1571,18 @@ impl Home {
                 }
             }
         });
+    }
+}
+
+/// A folder's icon: filled in its colour if it has one, else the grey outline (with people on it
+/// when it's shared).
+fn folder_icon(ui: &Ui, f: &FolderRow, rect: Rect) {
+    let img = match f.colour {
+        Some(c) => crate::icons::icon("folder_fill").map(|i| i.tint(c)),
+        None => crate::icons::icon(if f.shared { "folder_shared" } else { "folder" }),
+    };
+    if let Some(img) = img {
+        img.paint_at(ui, rect);
     }
 }
 

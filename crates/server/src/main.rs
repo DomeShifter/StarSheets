@@ -422,10 +422,10 @@ async fn gate(app: &Shared, m: &str, p: &[String], mut q: HashMap<String, String
                         }
                         need(a.folder_role(&path_q(&q, "to")?), Role::Edit)?;
                     }
-                    (["sharing" | "star"], _) => {
+                    (["sharing" | "star" | "colour"], _) => {
                         let role = a.folder_role(&path);
                         let Some(id) = a.folder_ids.get(&path).cloned() else { return Err(error(404, "no such folder")) };
-                        if path == home || (!path.contains('/') && !path.is_empty()) {
+                        if sub == ["sharing"] && (path == home || (!path.contains('/') && !path.is_empty())) {
                             return Err(error(400, "Share the folders inside it instead."));
                         }
                         return Err(match (sub, m.as_str()) {
@@ -438,6 +438,13 @@ async fn gate(app: &Shared, m: &str, p: &[String], mut q: HashMap<String, String
                                 match sharing::update(store, Item::Folder(&id), &path, &json) {
                                     Ok(()) => send_json(&sharing::describe(store, Item::Folder(&id), &path, role), 200),
                                     Err(why) => error(400, &why),
+                                }
+                            }
+                            (["colour"], "POST") => {
+                                need(role, Role::View)?;
+                                match spaces::set_colour(store, &me, &id, json.get("colour").and_then(Value::as_str).unwrap_or("")) {
+                                    Ok(()) => send_json(&json!({ "ok": true }), 200),
+                                    Err(e) => error(500, &e.to_string()),
                                 }
                             }
                             (["star"], "POST") => {
@@ -532,6 +539,7 @@ fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Repl
     let a = sharing::Access::new(&app.store, true, Some(me));
     let starred = spaces::starred(&app.store, me);
     let opened = spaces::opened(&app.store, me);
+    let colours = spaces::colours(&app.store, me);
     let files: Vec<Value> = v["files"]
         .as_array()
         .cloned()
@@ -558,7 +566,7 @@ fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Repl
         .iter()
         .map(|f| {
             let id = a.folder_ids.get(f).cloned().unwrap_or_default();
-            (f.clone(), json!({ "id": id, "owner": store::space_of(f), "role": a.folder_role(f).name(), "shared": a.folder_shared(f), "starred": starred.contains(&format!("d:{id}")) }))
+            (f.clone(), json!({ "id": id, "owner": store::space_of(f), "role": a.folder_role(f).name(), "shared": a.folder_shared(f), "starred": starred.contains(&format!("d:{id}")), "colour": colours.get(&id).cloned().unwrap_or(json!("")) }))
         })
         .collect();
     let (shared_folders, shared_files) = a.shared_roots();
