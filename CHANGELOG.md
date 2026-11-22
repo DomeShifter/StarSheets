@@ -13,6 +13,10 @@ new features and the last one for fixes.
   outside StarSheets and failed saves, one line each with the time, in
   `.starsheets/log.txt` next to your files (and in the server's output).
 
+### Changed
+- **File › Open:** renaming now opens a small Rename dialog (as in Drive) instead of a box squeezed
+  into the list, and the buttons above the list have the same padding as everywhere else.
+
 ### Fixed
 - Text being typed in a cell was thrown away when the connection to the server dropped and came
   back (for example when the server restarted, or a tab had been open a long time), or when

@@ -174,6 +174,7 @@ impl Browser {
                 ui.label(RichText::new(e).size(crate::house::NOTE).color(crate::house::ERROR));
             }
         });
+        self.rename_ui(ctx, &mut out);
         // A click outside the window closes it, as with a menu (not while one of its own menus
         // is open, or a rename or drag is under way).
         if let Some(rect) = shown.map(|r| r.response.rect)
@@ -243,10 +244,13 @@ impl Browser {
         // Toolbar.
         let pasteable = self.clipboard.is_some();
         ui.horizontal(|ui| {
-            if ui.add(egui::Button::new(RichText::new("+  New spreadsheet").color(Color32::WHITE)).fill(GREEN).corner_radius(18.0).min_size(vec2(150.0, 34.0))).clicked() {
+            // House buttons: their text kept clear of the edges.
+            ui.spacing_mut().button_padding = vec2(crate::house::M, crate::house::S);
+            ui.spacing_mut().item_spacing.x = crate::house::S;
+            if ui.add(crate::house::primary("+  New spreadsheet")).clicked() {
                 out.push(Action::NewSheet(self.cwd.clone()));
             }
-            let plain = |t: &str| egui::Button::new(RichText::new(t).color(GREEN)).fill(Color32::WHITE).stroke(Stroke::new(1.0, theme::BOX)).corner_radius(18.0).min_size(vec2(0.0, 34.0));
+            let plain = crate::house::secondary;
             if ui.add(plain("New folder")).clicked() {
                 out.push(Action::NewFolder(self.cwd.clone()));
             }
@@ -254,7 +258,7 @@ impl Browser {
                 self.paste_into(self.cwd.clone(), out);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add(plain("🗑  Bin")).clicked() {
+                if ui.add(plain("Bin")).clicked() {
                     self.in_bin = true;
                     self.selected.clear();
                     out.push(Action::ShowBin);
@@ -312,34 +316,10 @@ impl Browser {
                 }
                 let cut = self.clipboard.as_ref().is_some_and(|(c, cut)| *cut && c.contains(item));
                 let colour = if cut { theme::TEXT_DIM } else { theme::TEXT };
-                if let Some((ritem, text, focus)) = self.renaming.as_mut().filter(|(r, ..)| r == item) {
-                    // The house text field: white, grey outline, blue when typing, 14 px text.
-                    // House field, inset from the row's edges so there is white space round it.
-                    let edit_rect = egui::Rect::from_min_size(r.min + vec2(40.0, 4.0), vec2(W - 380.0, ROW - 8.0));
-                    let te = ui
-                        .scope_builder(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
-                            crate::house::form_style(ui);
-                            ui.spacing_mut().interact_size.y = ROW - 6.0;
-                            ui.add_sized(edit_rect.size(), crate::house::field(text, crate::house::BODY).text_color(theme::TEXT))
-                        })
-                        .inner;
-                    if *focus {
-                        te.request_focus();
-                        *focus = false;
-                    }
-                    if te.lost_focus() {
-                        let (ritem, text) = (ritem.clone(), text.clone());
-                        let commit = !ui.input(|i| i.key_pressed(Key::Escape));
-                        self.renaming = None;
-                        if commit && !text.trim().is_empty() && text.trim() != name {
-                            out.push(Action::Rename(ritem, text.trim().to_string()));
-                        }
-                    }
-                } else {
-                    p.text(r.left_center() + vec2(44.0, if searching && !folder.is_empty() { -7.0 } else { 0.0 }), Align2::LEFT_CENTER, name, FontId::proportional(14.0), colour);
-                    if searching && !folder.is_empty() {
-                        p.text(r.left_center() + vec2(44.0, 9.0), Align2::LEFT_CENTER, format!("in {folder}"), FontId::proportional(11.0), theme::TEXT_DIM);
-                    }
+                // Renaming happens in its own dialog (rename_ui), as in Drive.
+                p.text(r.left_center() + vec2(44.0, if searching && !folder.is_empty() { -7.0 } else { 0.0 }), Align2::LEFT_CENTER, name, FontId::proportional(14.0), colour);
+                if searching && !folder.is_empty() {
+                    p.text(r.left_center() + vec2(44.0, 9.0), Align2::LEFT_CENTER, format!("in {folder}"), FontId::proportional(11.0), theme::TEXT_DIM);
                 }
                 if *modified > 0 {
                     p.text(r.left_center() + vec2(W - 300.0, 0.0), Align2::LEFT_CENTER, crate::files::date_text(*modified), FontId::proportional(13.0), theme::TEXT_DIM);
@@ -443,6 +423,45 @@ impl Browser {
                 self.search.clear();
             }
             Item::File(id) => out.push(Action::Open(id.clone(), new_tab)),
+        }
+    }
+
+    /// The Rename dialog (house style, like Drive's): the name, then Cancel and OK. Enter is OK,
+    /// Esc or ✕ is Cancel.
+    fn rename_ui(&mut self, ctx: &egui::Context, out: &mut Vec<Action>) {
+        let Some((item, _, _)) = self.renaming.clone() else { return };
+        let old = self.label_of(&item);
+        let old = if matches!(item, Item::File(_)) { old.rsplit_once('.').map_or(old.clone(), |(s, _)| s.to_string()) } else { old };
+        let mut close = false;
+        let mut ok = false;
+        let mut cancel = false;
+        let Some((_, text, focus)) = self.renaming.as_mut() else { return };
+        crate::house::dialog(ctx, "starsheets_files_rename", 380.0, "Rename", Some(&mut close), |ui| {
+            let te = ui.add_sized(vec2(ui.available_width(), 36.0), crate::house::field(text, crate::house::BODY).text_color(theme::TEXT));
+            if *focus {
+                te.request_focus();
+                *focus = false;
+            }
+            if te.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                ok = true;
+            }
+            match crate::house::actions(ui, &["Cancel", "OK"]) {
+                Some(0) => cancel = true,
+                Some(_) => ok = true,
+                None => {}
+            }
+        });
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            close = true;
+        }
+        if ok {
+            let t = text.trim().to_string();
+            if !t.is_empty() && t != old {
+                out.push(Action::Rename(item, t));
+            }
+            self.renaming = None;
+        } else if close || cancel {
+            self.renaming = None;
         }
     }
 
