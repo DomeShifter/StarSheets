@@ -169,6 +169,8 @@ pub struct DvPanel {
     preview: Option<(String, usize, usize)>,
     /// Set on the frame the panel opened, so the other side panel can close.
     pub just_opened: bool,
+    /// Done was pressed on this draft: only then does an incomplete rule say what's missing.
+    tried: bool,
 }
 
 impl DvPanel {
@@ -177,6 +179,7 @@ impl DvPanel {
         self.open = true;
         self.just_opened = true;
         self.error = None;
+        self.tried = false;
         let has_rules = app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| !sh.validations.is_empty());
         self.draft = if has_rules && !dropdown { None } else { Some(Draft::new(selection_text(app))) };
     }
@@ -220,15 +223,18 @@ impl DvPanel {
                 });
                 ui.add_space(8.0);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(crate::house::panel_scroll_height(ui)).show(ui, |ui| {
+                    crate::house::form_style(ui);
                     ui.set_width(PANEL_W);
                     if let Some(mut d) = self.draft.take() {
                         self.adopt_if_edited(app, &mut d);
                         match self.editor(ui, &mut d) {
                             // Done: keep what is applied, back to the list.
                             Some(true) => {
+                                self.tried = true;
                                 self.update_preview(app, &d);
                                 if self.error.is_none() {
                                     self.preview = None;
+                                    self.tried = false;
                                 } else {
                                     self.draft = Some(d);
                                 }
@@ -285,6 +291,7 @@ impl DvPanel {
             }
             if resp.clicked() {
                 self.draft = Some(d);
+                self.tried = false;
             }
             ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, theme::DIVIDER));
         }
@@ -294,6 +301,7 @@ impl DvPanel {
         ui.add_space(12.0);
         if ui.add(egui::Button::new(RichText::new("+  Add rule").size(14.0).color(GREEN)).frame(false)).clicked() {
             self.draft = Some(Draft::new(selection_text(app)));
+            self.tried = false;
         }
     }
 
@@ -330,9 +338,10 @@ impl DvPanel {
             }
         });
 
-        if let Some(e) = &self.error {
+        // What's missing shows once Done is pressed (not while the rule is being filled in).
+        if let Some(e) = self.error.as_ref().filter(|_| self.tried) {
             ui.add_space(6.0);
-            ui.label(RichText::new(e).color(Color32::from_rgb(0xC5, 0x39, 0x29)));
+            ui.label(RichText::new(e).size(crate::house::NOTE).color(crate::house::ERROR));
         }
         ui.add_space(14.0);
         let mut out = None;
