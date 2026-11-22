@@ -299,6 +299,14 @@ impl Bottom {
             moving |= off != target || vel != 0.0;
             self.slide.insert(tab.name.clone(), (off, vel));
             let rect = slot.translate(vec2(off, 0.0));
+            #[cfg(target_arch = "wasm32")]
+            if drag.is_some()
+                && let Some(w) = web_sys::window()
+            {
+                let prev = js_sys::Reflect::get(&w, &"__ssTabDbg2".into()).ok().and_then(|v| v.as_string()).unwrap_or_default();
+                let prev = if k == 0 { String::new() } else { prev };
+                let _ = js_sys::Reflect::set(&w, &"__ssTabDbg2".into(), &format!("{prev} | {} slot={:.0} off={off:.0} tgt={target:.0}", tab.name, slot.left()).into());
+            }
             if drag.is_some_and(|(fp, ..)| fp == k) {
                 deferred = Some((tab, rect));
             } else {
