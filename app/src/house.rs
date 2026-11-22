@@ -92,6 +92,10 @@ pub fn keep(ctx: &egui::Context) {
 /// Tooltips: dark grey with white text (Google's look). egui draws them in the menu frame, so the
 /// tooltip layer is restyled after the frame is painted: call once per frame, after all UI.
 pub const TIP_BG: Color32 = Color32::from_rgb(0x3C, 0x40, 0x43);
+/// The picked row in a dark popup (white text stays readable on it).
+pub const TIP_PICKED: Color32 = Color32::from_rgb(0x0B, 0x57, 0xD0);
+/// A hovered row in a dark popup.
+pub const TIP_HOVER: Color32 = Color32::from_rgb(0x5F, 0x63, 0x68);
 
 pub fn style_tooltips(ctx: &egui::Context) {
     let layers: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().filter(|l| l.order == egui::Order::Tooltip).collect());
@@ -122,6 +126,14 @@ fn restyle_tip(shape: &mut egui::Shape, fill: Color32) -> bool {
             r.corner_radius = CornerRadius::same(FIELD_RADIUS);
             r.rect = r.rect.expand2(vec2(S, 0.0));
             true
+        }
+        // Rows inside dark popups (GridCraft's formula suggestions share the tooltip layer): a
+        // light highlight under white text can't be read, so a picked row turns strong blue and
+        // a hovered one mid grey.
+        egui::Shape::Rect(r) if r.fill.a() > 0 && u16::from(r.fill.r()) + u16::from(r.fill.g()) + u16::from(r.fill.b()) > 540 => {
+            let bluish = r.fill.b() > r.fill.r().saturating_add(20);
+            r.fill = if bluish { TIP_PICKED } else { TIP_HOVER };
+            false
         }
         egui::Shape::Text(t) => {
             t.override_text_color = Some(Color32::WHITE);

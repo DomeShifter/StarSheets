@@ -234,7 +234,8 @@ impl Bottom {
         if name.drag_started() {
             self.dragging = Some(tab.index);
         }
-        if (name.clicked() || arrow.clicked()) && !active {
+        // The release that ends a drag isn't a click: dropping a tab doesn't switch to it.
+        if (name.clicked() || arrow.clicked()) && !active && self.dragging.is_none() && self.drag_origin.is_none() {
             switch_to(app, tab.index);
         }
         if name.double_clicked() {
@@ -343,7 +344,15 @@ impl Bottom {
                 }
                 self.settle = Some((tab.name.clone(), lefts[fp] + moved));
                 if to != fp {
+                    // Moving a sheet makes it the current one in GridCraft; Sheets stays where you were.
+                    let current = app.session.active().and_then(|d| d.wb.active().map(|sh| sh.name.clone()));
                     app.run_or_alert("sheet.move", json!({ "sheet": tab.index, "to": visible[to].index }));
+                    if let Some(name) = current
+                        && let Some(i) = app.session.active().and_then(|d| d.wb.sheet_index(&name))
+                        && app.session.active().is_some_and(|d| d.wb.active_sheet() != i)
+                    {
+                        app.run_or_alert("sheet.activate", json!({ "sheet": i }));
+                    }
                 }
             }
             self.dragging = None;
