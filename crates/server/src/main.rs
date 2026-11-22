@@ -8,6 +8,7 @@
 
 mod auth;
 mod live;
+mod sharing;
 mod store;
 
 use std::collections::HashMap;
@@ -263,6 +264,79 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
     })
 }
 
+// ---------------------------------------------------------------- sharing
+
+/// Checks a files/folders/bin request against the person's role, and answers the sharing
+/// endpoints (/api/files/ID/sharing). `None`: go ahead.
+async fn sharing_gate(app: &Shared, m: &str, p: &[String], me: Option<auth::User>, body: &[u8]) -> Option<Response<Body>> {
+    if !app.auth {
+        return None;
+    }
+    let admin = me.as_ref().is_some_and(|u| u.owner);
+    match p.first().map(String::as_str) {
+        Some("folders" | "bin") if !admin && !(p[0] == "folders" && m == "POST" && p.len() == 1) => {
+            return Some(error(403, "Only the owner of this server can change folders and the bin."));
+        }
+        Some("files") if p.len() >= 2 => {}
+        _ => return None,
+    }
+    let (file, rest, m) = (p[1].clone(), p[2..].to_vec(), m.to_string());
+    let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let r = blocking(app, move |app| {
+        let role = sharing::role(&app.store, app.auth, me.as_ref(), &file);
+        let rest: Vec<&str> = rest.iter().map(String::as_str).collect();
+        let need = match (rest.as_slice(), m.as_str()) {
+            (["sharing"], "GET") | ([], "GET") | (["versions", ..], "GET") | (["copy"], "POST") => sharing::Role::View,
+            ([], "PUT") | (["rename"], "POST") => sharing::Role::Edit,
+            _ => sharing::Role::Owner,
+        };
+        if role < need {
+            let why = if role == sharing::Role::None { "You don't have access to this file." } else { "You can only view this file." };
+            return Some(error(403, why));
+        }
+        match (rest.as_slice(), m.as_str()) {
+            (["sharing"], "GET") => Some(send_json(&sharing::describe(&app.store, &file, role), 200)),
+            (["sharing"], "POST") => Some(match sharing::update(&app.store, &file, &json) {
+                Ok(()) => send_json(&sharing::describe(&app.store, &file, role), 200),
+                Err(why) => error(400, &why),
+            }),
+            _ => None,
+        }
+    })
+    .await;
+    r.unwrap_or_else(|| Some(error(500, "server error")))
+}
+
+/// After a files request: new files and copies belong to whoever made them, and the file list
+/// shows only what the person may see (with the folders on the way to it).
+fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Reply, Bad>) -> Result<Reply, Bad> {
+    let Ok(Reply::Json(mut v, code)) = r else { return r };
+    let path: Vec<&str> = p.iter().map(String::as_str).collect();
+    match (path.as_slice(), m) {
+        (["files"], "POST") | (["files", _, "copy"], "POST") if code < 300 => {
+            if let Some(id) = v.get("id").and_then(Value::as_str) {
+                let _ = sharing::new_file(&app.store, id, me);
+            }
+        }
+        (["files"], "GET") if !me.owner => {
+            let files: Vec<Value> = v["files"].as_array().cloned().unwrap_or_default().into_iter().filter(|f| f["id"].as_str().is_some_and(|id| sharing::listed(&app.store, true, Some(me), id))).collect();
+            let mut folders: Vec<String> = Vec::new();
+            for f in &files {
+                let mut path = String::new();
+                for part in f["folder"].as_str().unwrap_or("").split('/').filter(|x| !x.is_empty()) {
+                    path = if path.is_empty() { part.to_string() } else { format!("{path}/{part}") };
+                    if !folders.contains(&path) {
+                        folders.push(path.clone());
+                    }
+                }
+            }
+            v = json!({ "files": files, "folders": folders });
+        }
+        _ => {}
+    }
+    Ok(Reply::Json(v, code))
+}
+
 // ---------------------------------------------------------------- the web app's files
 
 fn is_hashed(name: &str) -> bool {
@@ -359,9 +433,14 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     if !signed_in(&app, &headers) {
         return error(401, "please sign in");
     }
+    let me = current_user(&app, &headers);
+    if let Some(resp) = sharing_gate(&app, &m, &p, me.clone(), &body).await {
+        return resp;
+    }
     let if_match = headers.get(header::IF_MATCH).and_then(|v| v.to_str().ok()).map(str::to_string);
     // A file replaced through the API (a version restored) is read again by its live room.
     let replaced = (m == "PUT" && p.len() == 2 && p[0] == "files").then(|| p[1].clone());
+    let (m2, p2) = (m.clone(), p.clone());
     let app2 = app.clone();
     let out = tokio::task::spawn_blocking(move || {
         let _g = app2.lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -369,9 +448,12 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     })
     .await;
     match out {
-        Ok(r) => {
+        Ok(mut r) => {
             if let (Some(id), Ok(Reply::Json(_, 200))) = (&replaced, &r) {
                 app.rooms.replaced(id);
+            }
+            if app.auth && let Some(me) = me {
+                r = blocking(&app, move |app| after_files(app, &me, &m2, &p2, r)).await.unwrap_or(Err(Bad::new(500, "server error")));
             }
             reply(r)
         }

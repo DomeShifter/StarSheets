@@ -7,6 +7,9 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Added
+- **Share** a spreadsheet like in Google Sheets: add people as viewers or editors, or let anyone
+  signed in to your server open it with the link. Viewers see live changes but can't edit. Other
+  people's files only show up once they're shared with you.
 - **Accounts:** everyone signs in with a username and password kept on your server (no sign-in
   through other companies). The first visit makes the owner's account with a setup code from the
   server's log; the owner adds other people. Your avatar (top right) changes your name, colour and

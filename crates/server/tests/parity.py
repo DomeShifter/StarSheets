@@ -283,6 +283,27 @@ def accounts():
         got.append(("bob renames himself", json.loads(post("/api/me", {"name": "Robert"})[2])["user"]["name"] == "Robert"))
         got.append(("people list", [u["username"] for u in json.loads(s.call("GET", "/api/users")[2])] == ["owner", "bob"]))
         got.append(("no password in the list", "hash" not in s.call("GET", "/api/users")[2].decode()))
+        # Sharing: bob (signed in) can't see the owner's files until they're shared with him.
+        listed = lambda: [f["name"] for f in json.loads(s.call("GET", "/api/files")[2])["files"]]
+        got.append(("bob sees no one else's files", listed() == []))
+        budget_id = None
+        s.call("POST", "/api/logout"); s.cookie = ""
+        post("/api/login", {"username": "owner", "password": "longpassword"})
+        files = json.loads(s.call("GET", "/api/files")[2])["files"]
+        budget_id = [f["id"] for f in files if f["name"] == "Budget.xlsx"][0]
+        got.append(("the server's owner sees every file", len(files) == 3))
+        got.append(("owner shares with bob to view", post(f"/api/files/{budget_id}/sharing", {"people": {"bob": "view"}})[0] == 200))
+        s.call("POST", "/api/logout"); s.cookie = ""
+        post("/api/login", {"username": "bob", "password": "bobspassword"})
+        got.append(("bob sees the shared file", listed() == ["Budget.xlsx"]))
+        got.append(("bob can open it", s.call("GET", f"/api/files/{budget_id}")[0] == 200))
+        got.append(("bob can't save it", s.call("PUT", f"/api/files/{budget_id}", b"x")[0] == 403))
+        got.append(("bob can't share it", post(f"/api/files/{budget_id}/sharing", {"link": "edit"})[0] == 403))
+        got.append(("bob can't touch folders", post("/api/folders/rename?path=Work&name=X", {})[0] == 403))
+        sharing = json.loads(s.call("GET", f"/api/files/{budget_id}/sharing")[2])
+        got.append(("bob sees who has access", sharing["you"] == "view" and [p["role"] for p in sharing["people"]] == ["owner", "view"]))
+        made = json.loads(s.call("POST", "/api/files?name=Bobs", b"bob's")[2])
+        got.append(("bob's own file is his", json.loads(s.call("GET", f"/api/files/{made['id']}/sharing")[2])["you"] == "owner"))
     finally:
         s.stop()
         shutil.rmtree(base)

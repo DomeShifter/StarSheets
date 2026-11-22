@@ -51,7 +51,13 @@ pub struct Person {
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum ToClient {
     /// The file as the server has it, at revision `seq`.
-    Welcome { seq: u64, workbook: Json },
+    Welcome {
+        seq: u64,
+        workbook: Json,
+        /// False for someone who may only view the file.
+        #[serde(default = "yes")]
+        can_edit: bool,
+    },
     /// A change everyone applies (also the sender's acknowledgement).
     Applied { seq: u64, client: String, cseq: u64, change: Change },
     /// The server couldn't apply this change; the tab drops it.
@@ -73,6 +79,10 @@ pub enum ToClient {
     People { people: Vec<Person>, you: String },
     /// Where someone is.
     Presence { client: String, sheet: usize, sel: Selection },
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -154,7 +164,10 @@ pub fn apply_cmd(s: &mut Session, sheet: usize, sel: &Selection, id: &str, param
     if switch {
         locale.apply();
     }
+    // Someone else's change is applied in a view-only tab too.
+    let read_only = std::mem::take(&mut s.read_only);
     let result = s.execute(id, params.clone());
+    s.read_only = read_only;
     if switch {
         own.apply();
     }

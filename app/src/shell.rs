@@ -746,7 +746,14 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
                 ui.add_space(8.0);
             }
             let share = Button::new(RichText::new("Share").size(14.0).color(theme::TEXT)).fill(theme::SHARE).corner_radius(18.0).min_size(vec2(84.0, 36.0));
-            ui.add_enabled(false, share).on_disabled_hover_text("Sharing comes in a later step");
+            #[cfg(target_arch = "wasm32")]
+            let can = crate::share::can_share();
+            #[cfg(not(target_arch = "wasm32"))]
+            let can = false;
+            if ui.add_enabled(can, share).on_disabled_hover_text("Sharing needs sign-in on the server, and a file that's saved there").clicked() {
+                #[cfg(target_arch = "wasm32")]
+                ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::share::REQUEST), ()));
+            }
             #[cfg(target_arch = "wasm32")]
             {
                 ui.add_space(8.0);

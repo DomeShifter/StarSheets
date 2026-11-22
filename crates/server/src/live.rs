@@ -32,7 +32,7 @@ const CHECK_EVERY: u64 = 25;
 const HISTORY: usize = 200;
 
 enum RoomMsg {
-    Join { client: String, user: Option<crate::auth::User>, out: UnboundedSender<String> },
+    Join { client: String, user: Option<crate::auth::User>, can_edit: bool, out: UnboundedSender<String> },
     Leave { client: String },
     From { client: String, msg: ToServer },
     /// The file was replaced through the files API (a version restored): read it again.
@@ -102,8 +102,23 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
             _ => return,
         }
     };
+    // Only people the file is shared with get in; viewers can't change it.
+    let role = {
+        let (app, user, file) = (app.clone(), user.clone(), file.clone());
+        tokio::task::spawn_blocking(move || {
+            let _g = app.lock.lock().unwrap_or_else(|e| e.into_inner());
+            crate::sharing::role(&app.store, app.auth, user.as_ref(), &file)
+        })
+        .await
+        .unwrap_or_default()
+    };
+    if role == crate::sharing::Role::None {
+        let _ = socket.send(Message::Text(text(&ToClient::Message { text: "You don't have access to this file.".into() }).into())).await;
+        return;
+    }
+    let can_edit = role >= crate::sharing::Role::Edit;
     let (out, mut outbox) = unbounded_channel::<String>();
-    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), user, out });
+    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), user, can_edit, out });
     // A ping now and then keeps proxies from closing a quiet connection.
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     ping.tick().await;
@@ -141,6 +156,7 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
 
 struct Client {
     out: UnboundedSender<String>,
+    can_edit: bool,
     person: sync::Person,
     /// Where the tab is (its last Presence), sent to people who join later.
     presence: Option<(usize, gridcraft_engine::selection::Selection)>,
@@ -265,8 +281,8 @@ impl Room {
 
     fn handle(&mut self, msg: RoomMsg) {
         match msg {
-            RoomMsg::Join { client, user, out } => {
-                let _ = out.send(text(&ToClient::Welcome { seq: self.seq, workbook: self.snapshot() }));
+            RoomMsg::Join { client, user, can_edit, out } => {
+                let _ = out.send(text(&ToClient::Welcome { seq: self.seq, workbook: self.snapshot(), can_edit }));
                 // Without sign-in (STARSHEETS_AUTH=off) people are guests, numbered as they come.
                 let person = match user {
                     Some(u) => sync::Person { client: client.clone(), username: u.username, name: u.name, colour: u.colour },
@@ -281,7 +297,7 @@ impl Room {
                         let _ = out.send(text(&ToClient::Presence { client: other.clone(), sheet: *sheet, sel: sel.clone() }));
                     }
                 }
-                self.clients.insert(client, Client { out, person, presence: None, blocked: None, redo: Vec::new() });
+                self.clients.insert(client, Client { out, person, can_edit, presence: None, blocked: None, redo: Vec::new() });
                 self.empty_since = None;
                 self.people();
             }
@@ -300,6 +316,11 @@ impl Room {
                     self.seq += 1;
                     let wb = self.snapshot();
                     self.all(&ToClient::Reset { seq: self.seq, workbook: wb });
+                }
+            }
+            RoomMsg::From { client, msg } if matches!(msg, ToServer::Change { .. } | ToServer::Undo | ToServer::Redo) && !self.clients.get(&client).is_some_and(|c| c.can_edit) => {
+                if let ToServer::Change { cseq, .. } = msg {
+                    self.to(&client, &ToClient::Rejected { cseq, why: gridcraft_engine::VIEW_ONLY.into() });
                 }
             }
             RoomMsg::From { client, msg } => match msg {
@@ -542,10 +563,10 @@ mod tests {
 
     fn join(app: &Shared, file: &str, name: &str) -> Tab {
         let (out, rx) = unbounded_channel();
-        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), user: None, out });
+        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), user: None, can_edit: true, out });
         let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
         match next(&mut t) {
-            ToClient::Welcome { seq, workbook } => {
+            ToClient::Welcome { seq, workbook, .. } => {
                 t.session.execute("file.new", json!({})).unwrap();
                 sync::set_workbook(&mut t.session, sync::workbook_from_json(&workbook, None).unwrap());
                 t.seq = seq;

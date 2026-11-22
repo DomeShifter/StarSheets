@@ -36,6 +36,8 @@ mod namespanel;
 mod notes;
 mod sheets_formulas;
 mod settings;
+#[cfg(target_arch = "wasm32")]
+mod share;
 mod shell;
 mod spelling;
 mod theme;

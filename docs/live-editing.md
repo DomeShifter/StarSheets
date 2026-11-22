@@ -25,7 +25,11 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
   from the server's log, so nobody else can claim a new server first; the owner adds people.
 - **Presence:** each tab sends where it is (sheet and selection) a few times a second at most;
   others draw it in that person's colour, with their name for a few seconds after it moves.
-- **Sharing** per file: owner, can edit, can view, and an optional "anyone with the link".
+- **Sharing** per file: owner, can edit, can view, and "anyone with the link" (anyone signed in
+  to this server who has it). A new file belongs to whoever made it; files from before sharing
+  belong to the server's owner, who runs the server and can open and manage every file. Other
+  people see only files that are theirs or shared with them, and can't change folders or the bin.
+  A viewer's tab refuses edits (GridCraft's `read_only`), and the server refuses them too.
 - Changes from other people never go through the clipboard, files on their computer or macros:
   a paste carries its own contents, and the server only accepts commands on an allow-list.
 

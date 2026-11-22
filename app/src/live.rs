@@ -89,6 +89,8 @@ pub struct Live {
     places: std::collections::HashMap<String, (usize, gridcraft_engine::selection::Selection, f64)>,
     sent_place: Option<(usize, gridcraft_engine::selection::Selection)>,
     sent_place_at: f64,
+    /// False for someone who may only view this file.
+    can_edit: bool,
 }
 
 impl Default for Live {
@@ -116,6 +118,7 @@ impl Default for Live {
             places: std::collections::HashMap::new(),
             sent_place: None,
             sent_place_at: 0.0,
+            can_edit: true,
         }
     }
 }
@@ -129,6 +132,7 @@ impl Live {
         let target = files.linked().filter(|(doc, _)| app.session.document_index(*doc).is_some());
         if target != self.file {
             self.disconnect();
+            app.session.read_only = false;
             *self = Live { client: self.client.clone(), unsupported: self.unsupported, ..Live::default() };
             self.file = target.clone();
         }
@@ -203,7 +207,9 @@ impl Live {
             .cloned()
             .collect();
         OTHERS.with(|o| *o.borrow_mut() = others);
-        let text = if !self.open || !self.joined {
+        let text = if self.joined && !self.can_edit {
+            "View only"
+        } else if !self.open || !self.joined {
             if self.pending.is_empty() { "Connecting…" } else { "Offline: changes will sync" }
         } else if !self.pending.is_empty() || self.server_dirty {
             "Saving…"
@@ -244,7 +250,10 @@ impl Live {
 
     fn message(&mut self, app: &mut SheetApp, m: ToClient) -> bool {
         match m {
-            ToClient::Welcome { seq, workbook } => {
+            ToClient::Welcome { seq, workbook, can_edit } => {
+                // A viewer's tab can't change the file (GridCraft refuses edits, patch 0042).
+                self.can_edit = can_edit;
+                app.session.read_only = !can_edit;
                 let current = app.session.active().map(|d| d.wb.clone());
                 match sync::workbook_from_json(&workbook, current.as_deref()) {
                     Ok(wb) => {

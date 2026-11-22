@@ -65,6 +65,6 @@
 - [ ] Step 1 follow-ups: keep changes made while offline across a reload; a log of unsaved changes on the server for a crash; selection follows rows inserted above it
 - [x] Step 2: accounts (local, username and password; owner set up with a code from the log, owner adds people) and seeing other people's cursors and avatars
 - [x] Step 3: undo that only undoes your own changes (cell by cell; refused when someone changed those cells since)
-- [ ] Step 4: share dialog and view-only mode
+- [x] Step 4: share dialog (owner, editors, viewers; anyone signed in with the link) and view-only mode
 
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).
