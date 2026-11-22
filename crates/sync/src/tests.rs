@@ -169,3 +169,47 @@ fn random_runs_replay_exactly() {
         assert!(n > 100, "seed {seed}: only {n} of 150 commands changed the workbook");
     }
 }
+
+/// One step's before and after, made in `a`.
+fn step(a: &mut Session, id: &str, p: serde_json::Value) -> (Arc<Workbook>, Arc<Workbook>) {
+    let before = wb(a);
+    a.execute(id, p).unwrap();
+    (before, wb(a))
+}
+
+fn text_at(s: &Session, cell: &str) -> String {
+    let c = gridcraft_engine::core::CellRef::parse(cell).unwrap();
+    format!("{:?}", s.active().unwrap().wb.sheets[0].value(c))
+}
+
+#[test]
+fn undo_your_change_keeps_later_changes_by_others() {
+    let mut s = session();
+    let (b1, a1) = step(&mut s, "cell.set", json!({"cell": "A1", "input": "mine"}));
+    step(&mut s, "cell.set", json!({"cell": "B1", "input": "theirs"}));
+    step(&mut s, "cell.set", json!({"cell": "C1", "input": "=LEN(A1)"}));
+    let undone = undo_cells(&b1, &a1, &wb(&s)).unwrap();
+    set_workbook_recalc(&mut s, undone);
+    assert_eq!(text_at(&s, "A1"), "Empty");
+    assert!(text_at(&s, "B1").contains("theirs"));
+    assert!(text_at(&s, "C1").contains('0'), "follows A1: {}", text_at(&s, "C1"));
+    // Redo puts it back.
+    let redone = undo_cells(&a1, &b1, &wb(&s)).unwrap();
+    set_workbook_recalc(&mut s, redone);
+    assert!(text_at(&s, "A1").contains("mine"));
+}
+
+#[test]
+fn undo_is_refused_when_someone_changed_those_cells_or_the_layout() {
+    let mut s = session();
+    let (b1, a1) = step(&mut s, "cell.set", json!({"cell": "A1", "input": "mine"}));
+    step(&mut s, "cell.set", json!({"cell": "A1", "input": "overwritten"}));
+    assert_eq!(undo_cells(&b1, &a1, &wb(&s)).unwrap_err(), UNDO_CHANGED);
+    let (b2, a2) = step(&mut s, "home.columnWidth", json!({"range": "B1", "width": 30}));
+    assert!(!Arc::ptr_eq(&b2, &a2), "the width changed");
+    assert_eq!(undo_cells(&b2, &a2, &wb(&s)).unwrap_err(), UNDO_LAYOUT);
+    // Formatting is cells too.
+    let (b3, a3) = step(&mut s, "home.bold", json!({"range": "D4"}));
+    step(&mut s, "cell.set", json!({"cell": "E5", "input": "later"}));
+    assert!(undo_cells(&b3, &a3, &wb(&s)).is_ok());
+}

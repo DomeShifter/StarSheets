@@ -400,47 +400,69 @@ impl Room {
         }
     }
 
-    /// Undo (first version): only your own latest change, while nobody has changed the file since.
+    /// Undo of your own latest change. When it's also the file's latest change the whole file goes
+    /// back; otherwise the cells it changed go back, as long as it changed only cells and nobody
+    /// has changed those cells since (`sync::undo_cells`).
     fn undo(&mut self, client: &str) {
-        let current = self.wb();
-        let ok = self.history.back().is_some_and(|s| s.client == client && current.as_ref().is_some_and(|c| Arc::ptr_eq(c, &s.after)));
-        if !ok {
-            let text = if self.history.iter().any(|s| s.client == client) {
-                "Can't undo: someone else has changed the file since your last change."
-            } else {
-                "Nothing to undo."
-            };
-            self.to(client, &ToClient::Message { text: text.into() });
+        let Some(k) = self.history.iter().rposition(|s| s.client == client) else {
+            self.to(client, &ToClient::Message { text: "Nothing to undo.".into() });
             return;
+        };
+        let Some(current) = self.wb() else { return };
+        let step = self.history[k].clone();
+        if k + 1 == self.history.len() && Arc::ptr_eq(&current, &step.after) {
+            sync::restore_workbook(&mut self.session, &step.before);
+        } else {
+            match sync::undo_cells(&step.before, &step.after, &current) {
+                Ok(wb) => sync::set_workbook_recalc(&mut self.session, wb),
+                Err(why) => {
+                    self.to(client, &ToClient::Message { text: why.into() });
+                    return;
+                }
+            }
         }
-        let Some(step) = self.history.pop_back() else { return };
-        sync::restore_workbook(&mut self.session, &step.before);
-        self.after_history_move();
+        self.history.remove(k);
         if let Some(c) = self.clients.get_mut(client) {
             c.redo.push(step);
         }
+        self.server_change(current);
     }
 
+    /// Redo of what you undid, the same way round.
     fn redo(&mut self, client: &str) {
-        let current = self.wb();
-        let ok = self.clients.get(client).and_then(|c| c.redo.last()).is_some_and(|s| current.as_ref().is_some_and(|c| Arc::ptr_eq(c, &s.before)));
-        if !ok {
+        let Some(step) = self.clients.get(client).and_then(|c| c.redo.last()).cloned() else {
             self.to(client, &ToClient::Message { text: "Nothing to redo.".into() });
             return;
+        };
+        let Some(current) = self.wb() else { return };
+        if Arc::ptr_eq(&current, &step.before) {
+            sync::restore_workbook(&mut self.session, &step.after);
+        } else {
+            match sync::undo_cells(&step.after, &step.before, &current) {
+                Ok(wb) => sync::set_workbook_recalc(&mut self.session, wb),
+                Err(why) => {
+                    self.to(client, &ToClient::Message { text: why.replace("undo", "redo") });
+                    return;
+                }
+            }
         }
-        let Some(step) = self.clients.get_mut(client).and_then(|c| c.redo.pop()) else { return };
-        sync::restore_workbook(&mut self.session, &step.after);
+        if let Some(c) = self.clients.get_mut(client) {
+            c.redo.pop();
+        }
         self.history.push_back(step);
-        self.after_history_move();
+        self.server_change(current);
     }
 
-    fn after_history_move(&mut self) {
+    /// A change the server made (undo, redo): everyone applies it, as the finished state of what
+    /// it changed (sender "" = the server).
+    fn server_change(&mut self, before: Arc<Workbook>) {
+        let Some(after) = self.wb() else { return };
         self.seq += 1;
         self.authors.push_back((self.seq, String::new()));
         self.dirty_since.get_or_insert_with(Instant::now);
         self.last_change = Instant::now();
-        let wb = self.snapshot();
-        self.all(&ToClient::Reset { seq: self.seq, workbook: wb });
+        let patch = sync::make_patch(&before, &after);
+        self.all(&ToClient::Applied { seq: self.seq, client: String::new(), cseq: 0, change: Change::State { patch } });
     }
 
     fn save_if_due(&mut self, now_please: bool) {
@@ -656,13 +678,32 @@ mod tests {
         assert!(matches!(next(&mut b), ToClient::Message { .. }));
         app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Undo });
         for t in [&mut a, &mut b] {
-            match next(t) {
-                ToClient::Reset { workbook, .. } => sync::set_workbook(&mut t.session, sync::workbook_from_json(&workbook, None).unwrap()),
-                m => panic!("expected reset, got {m:?}"),
-            }
+            assert_eq!(take_applied(t).0, "", "undo comes from the server");
         }
         assert_eq!(print(&a), start);
         assert_eq!(print(&b), start);
+        // Undo of a's change after b changed another cell keeps b's change.
+        edit(&app, &file, &mut a, "cell.set", json!({"cell": "A7", "input": "a again"}));
+        take_applied(&mut a);
+        take_applied(&mut b);
+        edit(&app, &file, &mut b, "cell.set", json!({"cell": "B7", "input": "b's"}));
+        take_applied(&mut a);
+        take_applied(&mut b);
+        app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Undo });
+        take_applied(&mut a);
+        take_applied(&mut b);
+        let csv = |t: &Tab| format!("{:?}", t.session.active().unwrap().wb.sheets[0].cells.iter().map(|(c, x)| (c.a1(), format!("{:?}", x.value))).collect::<Vec<_>>());
+        assert!(!csv(&b).contains("a again") && csv(&b).contains("b's"), "{}", csv(&b));
+        assert_eq!(print(&a), print(&b));
+        // b overwrites a's cell: a's undo is refused.
+        edit(&app, &file, &mut a, "cell.set", json!({"cell": "C8", "input": "a3"}));
+        take_applied(&mut a);
+        take_applied(&mut b);
+        edit(&app, &file, &mut b, "cell.set", json!({"cell": "C8", "input": "b over"}));
+        take_applied(&mut a);
+        take_applied(&mut b);
+        app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Undo });
+        assert!(matches!(next(&mut a), ToClient::Message { text } if text == sync::UNDO_CHANGED));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

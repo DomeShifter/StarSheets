@@ -48,6 +48,9 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
 - GridCraft's active sheet is view state stored in the workbook without making a new version, so
   switching sheets is never sent as a change.
 - Typed input depends on the person's date and number settings, so each command carries them.
-- Undo for now: your own latest change only, while nobody has changed the file since.
+- Undo puts back the cells your change touched (values, formulas, formats), keeping later
+  changes by others to other cells. It's refused when someone has changed those same cells since,
+  or when the change was more than cells (column widths, rules, sheets) and others have edited
+  since. Undo and redo go out as ordinary changes, so every tab stays in step.
 
 Progress is ticked off in [ROADMAP.md](../ROADMAP.md).

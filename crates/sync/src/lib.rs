@@ -202,6 +202,81 @@ pub fn restore_workbook(s: &mut Session, wb: &Arc<Workbook>) {
     }
 }
 
+// ---------------------------------------------------------------- undo of one change among others
+
+/// Why an undo (or redo) can't be done, in plain words.
+pub const UNDO_CHANGED: &str = "Can't undo: someone has changed those cells since.";
+pub const UNDO_LAYOUT: &str = "Can't undo that change any more: it changed more than cells (rows, columns, sheets or rules) and someone has edited the file since.";
+
+/// Two cells hold the same thing (a formula's result may differ: it follows other cells).
+fn same_cell(a: Option<&gridcraft_engine::model::Cell>, b: Option<&gridcraft_engine::model::Cell>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => a.style == b.style && a.formula == b.formula && a.py == b.py && (a.formula.is_some() || a.value == b.value),
+        (None, None) => true,
+        (Some(c), None) | (None, Some(c)) => c.formula.is_none() && c.py.is_none() && matches!(c.value, gridcraft_engine::core::Value::Empty) && c.style == gridcraft_engine::model::StyleId::DEFAULT,
+    }
+}
+
+/// Puts back what one change (`from` → `to`) did to cells, on top of later changes by others:
+/// each cell it changed goes back to its `from` state, provided nobody has changed that cell
+/// since (it still holds its `to` state). Only a change that touched nothing but cells (values,
+/// formulas, formats) can be undone this way. Undo is (before, after); redo is (after, before).
+pub fn undo_cells(from: &Workbook, to: &Workbook, current: &Workbook) -> Result<Workbook, &'static str> {
+    if from.sheets.len() != to.sheets.len() || from.sheets.iter().zip(&to.sheets).any(|(a, b)| a.name != b.name) {
+        return Err(UNDO_LAYOUT);
+    }
+    // Nothing outside the sheets may differ, except styles the change added (they're kept).
+    let outside = |w: &Workbook| {
+        let mut c = w.clone();
+        c.sheets = Vec::new();
+        c.styles = from.styles.clone();
+        c.active_sheet = Default::default();
+        c
+    };
+    if outside(from) != outside(to) {
+        return Err(UNDO_LAYOUT);
+    }
+    let mut out = current.clone();
+    for (a, b) in from.sheets.iter().zip(&to.sheets) {
+        if Arc::ptr_eq(a, b) {
+            continue;
+        }
+        // Only cells: the sheet with `from`'s cells (and results that follow them) must equal `from`.
+        let mut only_cells = (**b).clone();
+        only_cells.cells = a.cells.clone();
+        only_cells.spill = a.spill.clone();
+        only_cells.spill_ranges = a.spill_ranges.clone();
+        if only_cells != **a {
+            return Err(UNDO_LAYOUT);
+        }
+        let Some(j) = current.sheet_index(&b.name) else { return Err(UNDO_LAYOUT) };
+        let touched = a.cells.diff(&b.cells);
+        let now = &current.sheets[j];
+        if touched.iter().any(|c| !same_cell(now.cells.get(*c), b.cells.get(*c))) {
+            return Err(UNDO_CHANGED);
+        }
+        let sh = Arc::make_mut(&mut out.sheets[j]);
+        for c in touched {
+            match a.cells.get(c) {
+                Some(cell) => sh.cells.set(c, cell.clone()),
+                None => {
+                    sh.cells.remove(c);
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Puts `wb` in place (keeping this side's sheet and selection) and recalculates everything.
+pub fn set_workbook_recalc(s: &mut Session, wb: Workbook) {
+    set_workbook(s, wb);
+    if let Some(d) = s.active_mut() {
+        let (wb, calc) = (&mut d.wb, &mut d.calc);
+        calc.recalc_all(Arc::make_mut(wb));
+    }
+}
+
 // ---------------------------------------------------------------- whole workbooks and patches
 
 /// What JSON doesn't carry (unmodelled parts of the .xlsx, macros) comes from `from`.

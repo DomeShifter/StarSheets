@@ -15,8 +15,8 @@ new features and the last one for fixes.
   grid in their colour, with their name.
 - **Live editing between tabs:** open the same spreadsheet in several tabs (or browsers) and every
   change shows everywhere straight away. The server keeps the file and saves it; no more
-  "conflicted copy" files. Undo works on your own latest change for now (when someone has
-  changed the file since, StarSheets says so). Needs a proxy that passes WebSockets
+  "conflicted copy" files. Undo undoes your own changes and keeps everyone else's; if someone
+  has changed the same cells since, StarSheets says so instead. Needs a proxy that passes WebSockets
   (docs/deploy.md); without one the app saves the usual way.
 
 ### Changed
