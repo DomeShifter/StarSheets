@@ -1,0 +1,288 @@
+//! Edit › Find and replace (Ctrl+H), after Google Sheets: Find, Replace with, Search (all sheets,
+//! this sheet or a range), Match case, Match entire cell contents, Search using regular
+//! expressions, Also search within formulas; Find, Replace, Replace all and Done. Takes over
+//! GridCraft's Find dialog.
+
+use egui::{RichText, vec2};
+use gridcraft_engine::core::{CellRef, RangeRef, Value};
+use gridcraft_ui_egui::SheetApp;
+use serde_json::json;
+
+use crate::house;
+
+const SCOPES: &[&str] = &["All sheets", "This sheet", "Specific range"];
+
+#[derive(Default)]
+pub struct FindReplace {
+    open: bool,
+    find: String,
+    with: String,
+    scope: usize,
+    range: String,
+    match_case: bool,
+    whole: bool,
+    regex: bool,
+    formulas: bool,
+    /// What happened last ("3 instances of x replaced", "No more results").
+    status: String,
+    focus: bool,
+}
+
+/// One search, compiled once.
+struct Matcher {
+    re: regex::Regex,
+}
+
+impl Matcher {
+    fn new(f: &FindReplace) -> Result<Matcher, String> {
+        let body = if f.regex { f.find.clone() } else { regex::escape(&f.find) };
+        let body = if f.whole { format!("^(?:{body})$") } else { body };
+        regex::RegexBuilder::new(&body).case_insensitive(!f.match_case).build().map(|re| Matcher { re }).map_err(|_| "That isn't a valid regular expression.".to_string())
+    }
+}
+
+impl FindReplace {
+    /// Opens on Ctrl+H, Edit › Find and replace, and GridCraft's own Find dialog.
+    pub fn intercept(&mut self, app: &mut SheetApp) {
+        if app.dialog.as_ref().is_some_and(|d| matches!(d.name.as_str(), "find" | "replace")) {
+            app.dialog = None;
+            self.open = true;
+            self.focus = true;
+            self.status.clear();
+        }
+    }
+
+    pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+        if !self.open {
+            return;
+        }
+        let mut closed = false;
+        let mut action = None;
+        house::dialog(ctx, "starsheets_find_replace", 460.0, "Find and replace", Some(&mut closed), |ui| {
+            let field = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
+                ui.horizontal(|ui| {
+                    ui.add_sized([110.0, house::FIELD_HEIGHT], egui::Label::new(RichText::new(label).size(house::BODY)));
+                    ui.add(egui::TextEdit::singleline(text).desired_width(460.0 - 110.0 - house::S - 2.0 * house::M).margin(vec2(house::M, house::S + 1.0)).hint_text(hint))
+                })
+                .inner
+            };
+            let r = field(ui, "Find", &mut self.find, "");
+            if self.focus {
+                r.request_focus();
+                self.focus = false;
+            }
+            if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                action = Some("find");
+            }
+            field(ui, "Replace with", &mut self.with, "");
+            ui.horizontal(|ui| {
+                ui.add_sized([110.0, house::FIELD_HEIGHT], egui::Label::new(RichText::new("Search").size(house::BODY)));
+                house::select(ui, "find_scope", 460.0 - 110.0 - house::S, &mut self.scope, SCOPES, &[]);
+            });
+            if self.scope == 2 {
+                field(ui, "", &mut self.range, "e.g. Sheet1!A1:D20");
+            }
+            ui.add_space(house::XS);
+            ui.checkbox(&mut self.match_case, "Match case");
+            ui.checkbox(&mut self.whole, "Match entire cell contents");
+            ui.checkbox(&mut self.regex, "Search using regular expressions");
+            ui.checkbox(&mut self.formulas, "Also search within formulas");
+            if !self.status.is_empty() {
+                house::note(ui, &self.status);
+            }
+            ui.add_space(house::XL - house::S);
+            ui.horizontal(|ui| {
+                for (label, what) in [("Find", "find"), ("Replace", "replace"), ("Replace all", "all")] {
+                    if ui.add(house::secondary(label).min_size(vec2(0.0, house::BUTTON_HEIGHT))).clicked() {
+                        action = Some(what);
+                    }
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.add(house::primary("Done")).clicked() {
+                        action = Some("done");
+                    }
+                });
+            });
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                action = Some("done");
+            }
+        });
+        if closed {
+            action = Some("done");
+        }
+        match action {
+            Some("done") => self.open = false,
+            Some(a) if self.find.is_empty() => {
+                let _ = a;
+                self.status = "Type something to find.".into();
+            }
+            Some("find") => self.find_next(app),
+            Some("replace") => self.replace_one(app),
+            Some("all") => self.replace_all(app),
+            _ => {}
+        }
+    }
+
+    /// The (sheet, range) pairs to search, in order, starting with the active sheet.
+    fn places(&self, app: &SheetApp) -> Vec<(usize, Option<RangeRef>)> {
+        let Some(d) = app.session.active() else { return vec![] };
+        let active = d.wb.active_sheet();
+        match self.scope {
+            1 => vec![(active, None)],
+            2 => {
+                let (sheet, body) = match self.range.rsplit_once('!') {
+                    Some((s, b)) => (d.wb.sheet_index(s.trim_matches('\'')).unwrap_or(active), b),
+                    None => (active, self.range.as_str()),
+                };
+                RangeRef::parse(&body.replace('$', "")).map(|r| vec![(sheet, Some(r))]).unwrap_or_default()
+            }
+            _ => (0..d.wb.sheets.len()).map(|i| ((active + i) % d.wb.sheets.len(), None)).collect(),
+        }
+    }
+
+    /// The text a cell is searched in: what it shows, or its formula when that's asked for.
+    fn text_of(&self, app: &SheetApp, sheet: usize, c: CellRef) -> Option<(String, bool)> {
+        let d = app.session.active()?;
+        let sh = d.wb.sheets.get(sheet)?;
+        let cell = sh.cell(c)?;
+        if cell.formula.is_some() {
+            return self.formulas.then(|| (sh.input_text(c), true));
+        }
+        if matches!(cell.value, Value::Empty) {
+            return None;
+        }
+        let code = d.wb.styles.get(cell.style).num_fmt.as_str().to_string();
+        Some((gridcraft_engine::display::format(&cell.value, &code, &d.wb).text, false))
+    }
+
+    /// Every matching cell, in search order (row by row).
+    fn matches(&mut self, app: &SheetApp) -> Vec<(usize, CellRef)> {
+        let m = match Matcher::new(self) {
+            Ok(m) => m,
+            Err(e) => {
+                self.status = e;
+                return vec![];
+            }
+        };
+        let Some(d) = app.session.active() else { return vec![] };
+        let mut out = vec![];
+        for (sheet, within) in self.places(app) {
+            let Some(sh) = d.wb.sheets.get(sheet) else { continue };
+            let mut cells: Vec<CellRef> = sh.cells.iter().map(|(c, _)| c).filter(|c| within.is_none_or(|r| r.contains(*c))).collect();
+            cells.sort_by_key(|c| (c.row, c.col));
+            for c in cells {
+                if let Some((t, _)) = self.text_of(app, sheet, c)
+                    && m.re.is_match(&t)
+                {
+                    out.push((sheet, c));
+                }
+            }
+        }
+        out
+    }
+
+    fn select(app: &mut SheetApp, sheet: usize, c: CellRef) {
+        let name = app.session.active().and_then(|d| d.wb.sheets.get(sheet).map(|s| s.name.clone())).unwrap_or_default();
+        if app.session.active().is_some_and(|d| d.wb.active_sheet() != sheet) {
+            app.run_or_alert("sheet.activate", json!({ "sheet": sheet }));
+        }
+        let _ = app.run("edit.goTo", json!({ "reference": format!("'{}'!{}", name.replace('\'', "''"), c.a1()) }));
+    }
+
+    /// Moves to the next match after the active cell (wrapping round).
+    fn find_next(&mut self, app: &mut SheetApp) {
+        let all = self.matches(app);
+        if all.is_empty() {
+            if self.status.is_empty() || !self.status.starts_with("That") {
+                self.status = format!("No results for \"{}\".", self.find);
+            }
+            return;
+        }
+        let here = app.session.active().map(|d| (d.wb.active_sheet(), d.selection.active));
+        // The next match below/right of the active cell on this sheet, else the first on the
+        // following sheets, else back to the first.
+        let next = here
+            .and_then(|(s, c)| all.iter().position(|(ms, mc)| *ms == s && (mc.row, mc.col) > (c.row, c.col)))
+            .or_else(|| here.and_then(|(s, _)| all.iter().position(|(ms, _)| *ms != s)))
+            .unwrap_or(0);
+        let (s, c) = all[next];
+        self.status = format!("Result {} of {}", next + 1, all.len());
+        Self::select(app, s, c);
+    }
+
+    /// Replaces in the active cell when it matches, then moves to the next match.
+    fn replace_one(&mut self, app: &mut SheetApp) {
+        let Ok(m) = Matcher::new(self) else {
+            self.status = "That isn't a valid regular expression.".into();
+            return;
+        };
+        if let Some((s, c)) = app.session.active().map(|d| (d.wb.active_sheet(), d.selection.active))
+            && let Some((t, formula)) = self.text_of(app, s, c)
+            && m.re.is_match(&t)
+        {
+            let new = self.replaced(&m, &t);
+            let input = if formula && !new.starts_with('=') { format!("={new}") } else { new };
+            app.run_or_alert("cell.set", json!({ "cell": c.a1(), "input": input }));
+        }
+        self.find_next(app);
+    }
+
+    fn replaced(&self, m: &Matcher, t: &str) -> String {
+        if self.regex {
+            m.re.replace_all(t, self.with.as_str()).into_owned()
+        } else {
+            m.re.replace_all(t, regex::NoExpand(&self.with)).into_owned()
+        }
+    }
+
+    /// Replaces every match in the search area.
+    fn replace_all(&mut self, app: &mut SheetApp) {
+        let all = self.matches(app);
+        let Ok(m) = Matcher::new(self) else { return };
+        if all.is_empty() {
+            self.status = format!("No results for \"{}\".", self.find);
+            return;
+        }
+        let back = app.session.active().map(|d| d.wb.active_sheet());
+        let mut done = 0;
+        for (s, c) in &all {
+            let Some((t, formula)) = self.text_of(app, *s, *c) else { continue };
+            let new = self.replaced(&m, &t);
+            let input = if formula && !new.starts_with('=') { format!("={new}") } else { new };
+            let name = app.session.active().and_then(|d| d.wb.sheets.get(*s).map(|x| x.name.clone())).unwrap_or_default();
+            if app.run("cell.set", json!({ "cell": c.a1(), "input": input, "sheet": name })).is_ok() {
+                done += 1;
+            }
+        }
+        if let Some(b) = back
+            && app.session.active().is_some_and(|d| d.wb.active_sheet() != b)
+        {
+            app.run_or_alert("sheet.activate", json!({ "sheet": b }));
+        }
+        self.status = format!("Replaced {done} instance{} of \"{}\" with \"{}\".", if done == 1 { "" } else { "s" }, self.find, self.with);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matching_follows_the_options() {
+        let mut f = FindReplace { find: "cat".into(), ..Default::default() };
+        assert!(Matcher::new(&f).unwrap().re.is_match("Concatenate"));
+        f.match_case = true;
+        assert!(!Matcher::new(&f).unwrap().re.is_match("CAT"));
+        f.whole = true;
+        assert!(!Matcher::new(&f).unwrap().re.is_match("cats"));
+        f = FindReplace { find: "a.c".into(), ..Default::default() };
+        assert!(!Matcher::new(&f).unwrap().re.is_match("abc"), "without regex a dot is a dot");
+        f.regex = true;
+        assert!(Matcher::new(&f).unwrap().re.is_match("abc"));
+        f.with = "[$0]".into();
+        assert_eq!(f.replaced(&Matcher::new(&f).unwrap(), "xabcx"), "x[abc]x");
+        f.regex = false;
+        f.find = "x".into();
+        assert_eq!(f.replaced(&Matcher::new(&f).unwrap(), "xx"), "[$0][$0]", "without regex $ is literal");
+    }
+}

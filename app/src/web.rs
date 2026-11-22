@@ -86,7 +86,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default() }))
                 }),
             )
             .await;
@@ -110,6 +110,8 @@ struct WebShell {
     shell: crate::shell::Shell,
     bottom: crate::bottom::Bottom,
     chart: crate::chartpanel::ChartPanel,
+    names: crate::namespanel::NamesPanel,
+    find: crate::findreplace::FindReplace,
     link: crate::linkcard::LinkCard,
     autolink: crate::autolink::AutoLink,
     cf: crate::cfpanel::CfPanel,
@@ -142,16 +144,24 @@ impl WebShell {
         self.cf.intercept(&mut self.app);
         self.dv.intercept(&mut self.app, ctx);
         self.chart.intercept(&mut self.app, ctx);
+        self.names.intercept(&mut self.app);
         // Only one side panel at a time: the one that just opened wins.
         if self.chart.just_opened {
             self.cf.close(&mut self.app);
             self.dv.close();
+            self.names.close();
+        } else if self.names.just_opened {
+            self.cf.close(&mut self.app);
+            self.dv.close();
+            self.chart.close();
         } else if self.dv.just_opened {
             self.cf.close(&mut self.app);
             self.chart.close();
+            self.names.close();
         } else if self.cf.open && !cf_was {
             self.dv.close();
             self.chart.close();
+            self.names.close();
         }
     }
 }
@@ -212,6 +222,7 @@ impl eframe::App for WebShell {
         self.cf.ui(&mut self.app, ui);
         self.dv.ui(&mut self.app, ui);
         self.chart.ui(&mut self.app, ui);
+        self.names.ui(&mut self.app, ui);
         self.app.ui(ui);
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
@@ -222,6 +233,8 @@ impl eframe::App for WebShell {
         self.settings.ui(&mut self.app, &ctx);
         self.custom_date.ui(&mut self.app, &ctx);
         self.custom_number.ui(&mut self.app, &ctx);
+        self.find.intercept(&mut self.app);
+        self.find.ui(&mut self.app, &ctx);
         self.calc.ui(&self.app, ui);
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);

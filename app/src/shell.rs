@@ -72,7 +72,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
                 ],
             ),
             Sep,
-            Cmd("Find and replace", "edit.replace", "Ctrl+H"),
+            Cmd("Find and replace", "ui:find", "Ctrl+H"),
         ],
     ),
     (
@@ -251,7 +251,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Cmd("Add a slicer", "insert.slicer", ""),
             Sep,
             Cmd("Protect sheets and ranges", "review.protectSheet", ""),
-            Cmd("Named ranges", "formulas.nameManager", ""),
+            Cmd("Named ranges", "ui:nameManager", ""),
             Sep,
             Cmd("Data validation", "ui:dataValidation", ""),
             Sub("Data clean-up", &[Cmd("Remove duplicates", "data.removeDuplicates", "")]),

@@ -43,6 +43,10 @@ new features and the last one for fixes.
   padding, pill-shaped buttons, 36 px fields, padded menus (docs/house-style.md).
 
 ### Added
+- **Find and replace** after Google Sheets: all sheets, this sheet or a range; match case, whole
+  cell, regular expressions, within formulas; Find, Replace, Replace all.
+- **Named ranges** side panel after Google Sheets: a list, "Add a range", and a name + range
+  editor (no scope or comment).
 - File › Details: name, location, last saved, and how many sheets, filled cells, formulas,
   charts and notes the spreadsheet has.
 - Format › Number › **Custom number formats**, after Google Sheets: a code box with Apply, a

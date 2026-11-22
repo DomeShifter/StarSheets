@@ -19,11 +19,13 @@ mod dvpanel;
 mod filebrowser;
 #[cfg(target_arch = "wasm32")]
 mod files;
+mod findreplace;
 mod fonts;
 mod house;
 mod icons;
 mod linkcard;
 mod merge;
+mod namespanel;
 mod notes;
 mod sheets_formulas;
 mod settings;
