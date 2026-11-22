@@ -712,10 +712,14 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
     let dirty = app.session.active().is_some_and(|d| d.is_dirty());
     ui.horizontal(|ui| {
         // Our own mark (a white star on a green tile; same file as the favicon).
-        match icons::logo(36.0) {
-            Some(img) => ui.add(img),
-            None => ui.label(RichText::new("★").size(26.0).color(theme::BLUE)),
+        // A click goes home (files.rs), as Sheets' logo does.
+        let logo = match icons::logo(36.0) {
+            Some(img) => ui.add(img.sense(egui::Sense::click())),
+            None => ui.add(egui::Label::new(RichText::new("★").size(26.0).color(theme::BLUE)).sense(egui::Sense::click())),
         };
+        if logo.on_hover_text("StarSheets home").clicked() {
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "home".to_string()));
+        }
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {

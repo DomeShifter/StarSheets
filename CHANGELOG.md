@@ -6,6 +6,26 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+### Added
+- **Home screen:** StarSheets opens on your files instead of a blank sheet, like Google Sheets'
+  home. A folder tree on the left (My files, Shared with me, Recent, Starred, Bin, and for the
+  server's owner Everyone's files), and your folders and spreadsheets as cards with a **preview
+  picture** of each, or as a list. New spreadsheet, new folder and Upload are under New; you can
+  also drop spreadsheets from your computer onto the page. Right-click for Open, Share, Star,
+  Rename, Make a copy, Download, Copy/Cut/Paste and Move to bin; drag things onto a folder, the
+  tree or the path to move them. The StarSheets logo in a spreadsheet takes you home.
+- **Everyone has their own folder** on the server, and **folders can be shared**: everything in a
+  shared folder is shared too, also what's added later. Moving something into another person's
+  folder makes it theirs, so StarSheets asks first.
+- **Stars and Recent:** star files and folders to find them quickly; Recent lists what you opened.
+- **Your own bin:** each person's deleted things go to their own bin, and are deleted for good
+  after 30 days. Restoring a file brings back its earlier versions and who it was shared with.
+
+### Changed
+- When a server that had files from before gets its first accounts, those files move into the
+  owner's own folder (and files someone else made into theirs) once, automatically. Nothing is
+  renamed or lost.
+
 ### Changed
 - **Files changed outside StarSheets are safe.** If a spreadsheet that's open in StarSheets is
   changed on disk (for example in Excel over a file share), StarSheets notices within a few

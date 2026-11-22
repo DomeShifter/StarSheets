@@ -104,6 +104,20 @@ const ICONS: &[(&str, &[u8])] = &[
     ("width", include_bytes!("../icons/width.svg")),
     ("wrap_text", include_bytes!("../icons/wrap_text.svg")),
     ("zoom_in", include_bytes!("../icons/zoom_in.svg")),
+    ("chevron_right", include_bytes!("../icons/chevron_right.svg")),
+    ("expand_more", include_bytes!("../icons/expand_more.svg")),
+    ("folder", include_bytes!("../icons/folder.svg")),
+    ("folder_shared", include_bytes!("../icons/folder_shared.svg")),
+    ("grid_view", include_bytes!("../icons/grid_view.svg")),
+    ("group", include_bytes!("../icons/group.svg")),
+    ("groups", include_bytes!("../icons/groups.svg")),
+    ("home_storage", include_bytes!("../icons/home_storage.svg")),
+    ("more_vert", include_bytes!("../icons/more_vert.svg")),
+    ("person_add", include_bytes!("../icons/person_add.svg")),
+    ("schedule", include_bytes!("../icons/schedule.svg")),
+    ("star", include_bytes!("../icons/star.svg")),
+    ("star_fill", include_bytes!("../icons/star_fill.svg")),
+    ("view_list", include_bytes!("../icons/view_list.svg")),
 ];
 
 /// The icon called `name`, 18 px, or None if it isn't embedded (the test below checks the names

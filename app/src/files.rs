@@ -172,13 +172,16 @@ impl Files {
     fn request(&mut self, app: &mut SheetApp, ctx: &egui::Context, req: &str) {
         match req {
             "open" => {
-                self.browser.show_in("");
+                // With accounts, everyone starts in their own folder (`<username>/`).
+                let home = crate::account::me().map(|m| m.username).unwrap_or_default();
+                self.browser.show_in(&home);
                 self.browser_to_file = true;
                 list_files(self.inbox.clone(), ctx.clone());
             }
             "new" => {
-                open_tab("");
+                open_url(&format!("{}?new=1", page_url("")));
             }
+            "home" => go_to(""),
             "versions" => {
                 if let Some(l) = &self.link {
                     self.versions = Some(vec![]);

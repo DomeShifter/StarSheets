@@ -23,6 +23,8 @@ mod errortip;
 mod filebrowser;
 #[cfg(target_arch = "wasm32")]
 mod files;
+#[cfg(target_arch = "wasm32")]
+mod home;
 mod findreplace;
 mod fonts;
 mod house;

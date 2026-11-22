@@ -87,7 +87,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
                 }),
             )
             .await;
@@ -127,6 +127,8 @@ struct WebShell {
     calc: crate::calcpreview::CalcPreview,
     merge: crate::merge::MergeGuard,
     files: crate::files::Files,
+    /// The home screen, shown instead of a spreadsheet when the page has no file (home.rs).
+    home: crate::home::Home,
     live: crate::live::Live,
     account: crate::account::Account,
     share: crate::share::Share,
@@ -206,6 +208,17 @@ impl eframe::App for WebShell {
         }
         // Files first: it takes Ctrl+O for its Open dialog before GridCraft's keymap sees it.
         self.account.logic(ctx);
+        if self.home.active {
+            // The home screen: no spreadsheet runs; dropped files are uploaded where you are.
+            self.home.logic(ctx);
+            self.share.logic(&self.app, ctx, &self.files);
+            let dropped: Vec<(String, Vec<u8>)> = std::mem::take(&mut *self.inbox.lock().unwrap_or_else(|e| e.into_inner()));
+            for (name, bytes) in dropped {
+                self.home.upload(ctx, name, bytes);
+            }
+            crate::house::keep(ctx);
+            return;
+        }
         self.files.logic(&mut self.app, ctx);
         // Live editing: send this tab's changes, apply everyone else's (live.rs).
         self.live.logic(&mut self.app, ctx, &self.files);
@@ -238,6 +251,14 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.home.active {
+            let ctx = ui.ctx().clone();
+            self.home.ui(ui);
+            self.share.ui(&ctx);
+            self.account.ui(&ctx);
+            crate::house::style_tooltips(&ctx);
+            return;
+        }
         // Our panels first, so they sit above GridCraft's formula bar and grid.
         self.shell.ui(&mut self.app, ui);
         self.bottom.ui(&mut self.app, ui);

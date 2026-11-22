@@ -15,6 +15,18 @@ use crate::theme;
 
 /// Asks for the Share dialog (the Share button sets it in egui memory).
 pub const REQUEST: &str = "starsheets_share_request";
+/// Asks for the Share dialog for something on the home screen: (sharing url, page link, name).
+const ITEM_REQUEST: &str = "starsheets_share_item";
+
+/// Opens the Share dialog for a file (by id) or a folder (by path) from the home screen.
+pub fn share_item(ctx: &egui::Context, folder: bool, key: &str, name: &str) {
+    let (url, link) = if folder {
+        (format!("api/folders/sharing?path={}", crate::files::enc(key)), format!("?dir={}", crate::files::enc(key)))
+    } else {
+        (format!("api/files/{key}/sharing"), format!("?file={key}"))
+    };
+    ctx.data_mut(|m| m.insert_temp(egui::Id::new(ITEM_REQUEST), (url, link, name.to_string())));
+}
 
 thread_local! {
     /// Whether the open file can be shared (signed in, and it's on the server).
@@ -51,7 +63,9 @@ fn role_index(r: &str) -> usize {
 pub struct Share {
     inbox: Rc<RefCell<Vec<Reply>>>,
     open: bool,
-    file: String,
+    /// Where its sharing is read and saved, and the link people are given ("?file=…").
+    url: String,
+    page: String,
     name: String,
     loaded: bool,
     people: Vec<Person>,
@@ -101,11 +115,16 @@ impl Share {
     pub fn logic(&mut self, app: &gridcraft_ui_egui::SheetApp, ctx: &egui::Context, files: &crate::files::Files) {
         let file = files.linked().filter(|(doc, _)| app.session.active().is_some_and(|d| d.uid == *doc));
         SHAREABLE.with(|s| s.set(file.is_some() && crate::account::me().is_some()));
-        if let Some(()) = ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::new(REQUEST)))
-            && let Some((_, id)) = file
-        {
-            *self = Share { inbox: self.inbox.clone(), open: true, file: id.clone(), name: app.session.active().map(|d| d.title.clone()).unwrap_or_default(), ..Share::default() };
-            call(&self.inbox, ctx, Method::Get, format!("api/files/{id}/sharing"), None, loaded);
+        let item = ctx.data_mut(|m| m.remove_temp::<(String, String, String)>(egui::Id::new(ITEM_REQUEST)));
+        let asked = ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::new(REQUEST))).is_some();
+        let target = match (item, file) {
+            (Some(t), _) => Some(t),
+            (None, Some((_, id))) if asked => Some((format!("api/files/{id}/sharing"), format!("?file={id}"), app.session.active().map(|d| d.title.clone()).unwrap_or_default())),
+            _ => None,
+        };
+        if let Some((url, page, name)) = target {
+            *self = Share { inbox: self.inbox.clone(), open: true, url: url.clone(), page, name, ..Share::default() };
+            call(&self.inbox, ctx, Method::Get, url, None, loaded);
             call(&self.inbox, ctx, Method::Get, "api/users".into(), None, |v| {
                 Reply::Users(
                     v.as_array()
@@ -141,7 +160,7 @@ impl Share {
     fn link_url(&self) -> String {
         let base = web_sys::window().and_then(|w| w.location().href().ok()).unwrap_or_default();
         let base = base.split(['?', '#']).next().unwrap_or("").to_string();
-        format!("{base}?file={}", self.file)
+        format!("{base}{}", self.page)
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) {
@@ -239,7 +258,7 @@ impl Share {
             }
             let link = ["none", "view", "edit"][self.link.min(2)];
             let body = json!({ "people": people, "link": link });
-            call(&self.inbox, ctx, Method::Post, format!("api/files/{}/sharing", self.file), Some(body), |_| Reply::Saved);
+            call(&self.inbox, ctx, Method::Post, self.url.clone(), Some(body), |_| Reply::Saved);
         }
     }
 }
