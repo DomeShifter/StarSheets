@@ -68,4 +68,11 @@
 - [x] Step 4: share dialog (owner, editors, viewers; anyone signed in with the link) and view-only mode
 - [x] Sign-up: people make their own account when the owner allows it (optional sign-up code)
 
+## Files and folders checklist
+- [x] Files changed outside StarSheets (Excel, a file share) are never written over
+- [x] Everyone's own folder; folder sharing; own bin (30 days); stars and recent
+- [x] Preview pictures, drawn on the server
+- [x] Home screen with a folder tree, cards or list, drag to move, upload
+- [ ] A "Move to…" folder picker and a Details panel (owner, who changed it last, who has access)
+
 The full Sheets feature list with a phase per item is in [docs/sheets-reference.md](docs/sheets-reference.md).
