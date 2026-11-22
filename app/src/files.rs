@@ -621,8 +621,16 @@ impl Files {
 }
 
 /// Whether any sheet has anything in it.
+/// Whether a workbook holds anything worth a file: a value or formula, a note, a chart or a
+/// picture. Formatting alone (a format previewed on a blank sheet) doesn't count.
 fn has_data(wb: &Workbook) -> bool {
-    wb.sheets.iter().any(|s| s.used_range().is_some())
+    wb.sheets.iter().any(|s| {
+        s.cells.iter().any(|(_, c)| c.formula.is_some() || !matches!(c.value, gridcraft_engine::core::Value::Empty))
+            || !s.comments.is_empty()
+            || !s.charts.is_empty()
+            || !s.images.is_empty()
+            || !s.shapes.is_empty()
+    })
 }
 
 /// A name without its spreadsheet extension (only known ones: "Budget v1.2" keeps its ".2").

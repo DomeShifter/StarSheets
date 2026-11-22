@@ -19,6 +19,9 @@ new features and the last one for fixes.
 - Insert note writes straight into the note card (no separate box).
 
 ### Fixed
+- Previewing a format on a blank sheet no longer saves an empty file (only values, formulas,
+  notes, charts and pictures count as content).
+- Side panels scroll when they are taller than the window, with a visible scroll bar.
 - Note cards can be resized with their corner grip.
 - "Today" in the date picker puts today's date in.
 - Renaming a sheet tab: Enter keeps the name, Esc cancels.
@@ -27,6 +30,8 @@ new features and the last one for fixes.
   padding, pill-shaped buttons, 36 px fields, padded menus (docs/house-style.md).
 
 ### Added
+- Format › Number › **Custom number formats**, after Google Sheets: a code box with Apply, a
+  sample of the selected cell, and ready-made formats; the selection shows it as you type.
 - **Chart editor**, after Google Sheets: a side panel with Setup (chart type, stacking, data range,
   X-axis, series, switch rows/columns) and Customise (colours, smooth lines, doughnut hole and
   rotation, chart and axis titles, series colour, trendline, data labels, legend, gridlines).

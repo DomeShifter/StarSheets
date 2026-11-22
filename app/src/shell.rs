@@ -167,7 +167,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     CmdWith("Duration", "home.numberFormat", "24:01:00", r#"{"code":"[h]:mm:ss"}"#),
                     Sep,
                     Cmd("Custom date and time", "panel:customdate", ""),
-                    Cmd("Custom number format", "home.formatCells", ""),
+                    Cmd("Custom number format", "panel:customnumber", ""),
                 ],
             ),
             Sub(
@@ -344,7 +344,7 @@ const NUMBER_FORMATS: &[(&str, &str, &str)] = &[
     ("Duration|24:01:00", "home.numberFormat", r#"{"code":"[h]:mm:ss"}"#),
     ("-", "", ""),
     ("Custom date and time", "panel:customdate", "{}"),
-    ("Custom number format", "home.formatCells", "{}"),
+    ("Custom number format", "panel:customnumber", "{}"),
 ];
 
 const BORDERS: &[(&str, &str, &str)] = &[
@@ -653,6 +653,8 @@ fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
     let mut run = |app: &mut SheetApp, ui: &mut Ui, id: &str, p: &str| {
         if id == "panel:customdate" {
             ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customdate::REQUEST), true));
+        } else if id == "panel:customnumber" {
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customnumber::REQUEST), true));
         } else {
             app.run_or_alert(id, params(p));
         }
@@ -977,6 +979,8 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::settings::REQUEST), true));
                     } else if *id == "panel:note" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::notes::REQUEST), true));
+                    } else if *id == "panel:customnumber" {
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customnumber::REQUEST), true));
                     } else if *id == "panel:chart" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::chartpanel::REQUEST), true));
                     } else if *id == "panel:dropdown" {

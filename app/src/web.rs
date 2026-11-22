@@ -86,7 +86,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default() }))
                 }),
             )
             .await;
@@ -116,6 +116,7 @@ struct WebShell {
     dv: crate::dvpanel::DvPanel,
     dates: crate::datepicker::DatePicker,
     custom_date: crate::customdate::CustomDate,
+    custom_number: crate::customnumber::CustomNumber,
     settings: crate::settings::SettingsWindow,
     notes: crate::notes::Notes,
     calc: crate::calcpreview::CalcPreview,
@@ -220,6 +221,7 @@ impl eframe::App for WebShell {
         self.notes.ui(&mut self.app, ui);
         self.settings.ui(&mut self.app, &ctx);
         self.custom_date.ui(&mut self.app, &ctx);
+        self.custom_number.ui(&mut self.app, &ctx);
         self.calc.ui(&self.app, ui);
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);

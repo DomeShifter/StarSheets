@@ -12,6 +12,7 @@ mod cfpanel;
 mod chartpanel;
 mod colourpicker;
 mod customdate;
+mod customnumber;
 mod datepicker;
 mod dvpanel;
 #[cfg(target_arch = "wasm32")]
