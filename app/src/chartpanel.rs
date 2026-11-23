@@ -48,16 +48,57 @@ const TYPES: &[(&str, &str, &str)] = &[
 const TYPE_GROUPS: &[usize] = &[2, 5, 8, 11, 13, 16, 22];
 
 const LEGEND: &[(&str, &str)] = &[("Bottom", "bottom"), ("Top", "top"), ("Left", "left"), ("Right", "right"), ("None", "none")];
-const SCHEMES: &[(&str, &str)] = &[
-    ("Colourful", "colorful"),
-    ("Monochrome", "monochrome"),
-    ("Blue", "accent1"),
-    ("Orange", "accent2"),
-    ("Grey", "accent3"),
-    ("Gold", "accent4"),
-    ("Light blue", "accent5"),
-    ("Green", "accent6"),
+/// Colour schemes: two fixed ones, then one per theme accent colour, named after the colour it
+/// really is in this file's theme (to-do row 60: fixed Office names said "Grey", "Gold" and
+/// "Light blue" for what the newer theme draws green, light blue and purple).
+const SCHEMES: &[(&str, &str)] = &[("Colourful", "colorful"), ("Monochrome", "monochrome")];
+
+/// Plain names for theme colours: the nearest of these is used.
+const COLOUR_NAMES: &[(&str, u32)] = &[
+    ("Blue", 0x4472C4),
+    ("Dark blue", 0x1F3864),
+    ("Light blue", 0x5B9BD5),
+    ("Sky blue", 0x0F9ED5),
+    ("Teal", 0x156082),
+    ("Turquoise", 0x2AA198),
+    ("Green", 0x4EA72E),
+    ("Dark green", 0x196B24),
+    ("Orange", 0xE97132),
+    ("Gold", 0xFFC000),
+    ("Yellow", 0xFFD966),
+    ("Red", 0xC00000),
+    ("Pink", 0xE91E63),
+    ("Purple", 0xA02B93),
+    ("Violet", 0x7030A0),
+    ("Brown", 0x843C0C),
+    ("Grey", 0xA5A5A5),
+    ("Dark grey", 0x595959),
 ];
+
+fn colour_name(rgb: u32) -> &'static str {
+    let ch = |c: u32, s: u32| ((c >> s) & 0xFF) as i32;
+    let dist = |a: u32, b: u32| (0..3).map(|k| (ch(a, k * 8) - ch(b, k * 8)).pow(2)).sum::<i32>();
+    COLOUR_NAMES.iter().min_by_key(|(_, c)| dist(rgb, *c)).map_or("Colour", |(n, _)| n)
+}
+
+/// The scheme list for this workbook: (menu name, palette id).
+fn schemes(app: &SheetApp) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = SCHEMES.iter().map(|(n, p)| (n.to_string(), p.to_string())).collect();
+    let Some(d) = app.session.active() else { return out };
+    let mut used: Vec<String> = Vec::new();
+    for k in 1..=6u8 {
+        let rgb = crate::cfpanel::rgb_of(&gridcraft_engine::model::Color::Theme(3 + k, 0), &d.wb.theme).unwrap_or(0);
+        let mut name = colour_name(rgb).to_string();
+        // Two accents with the same nearest name: say which is darker.
+        if used.contains(&name) {
+            name = format!("{name} {}", used.iter().filter(|u| u.starts_with(&name)).count() + 1);
+        }
+        used.push(name.clone());
+        out.push((name, format!("accent{k}")));
+    }
+    out
+}
+
 const HOLES: &[(&str, u32)] = &[("None", 0), ("25%", 25), ("50%", 50), ("75%", 75)];
 const TITLES: &[&str] = &["Chart title", "Horizontal axis title", "Vertical axis title"];
 
@@ -78,7 +119,8 @@ pub struct ChartPanel {
     open: [bool; 5],
     title_which: usize,
     series_which: usize,
-    slice_which: usize,
+    /// Pie slices: every slice listed, not only the first SLICES_SHOWN.
+    all_slices: bool,
     scheme: usize,
     /// The data range and X-axis boxes while they are being typed in.
     range_draft: Option<String>,
@@ -343,8 +385,10 @@ impl ChartPanel {
         // Chart style.
         if section(ui, "Chart style", &mut self.open[0]) {
             house::label(ui, "Colours", "");
-            if house::select(ui, "chart_scheme", PANEL_W, &mut self.scheme, &SCHEMES.iter().map(|s| s.0).collect::<Vec<_>>(), &[1]) {
-                app.run_or_alert("chart.changeColors", json!({ "chart": id, "palette": SCHEMES[self.scheme].1 }));
+            let list = schemes(app);
+            let names: Vec<&str> = list.iter().map(|s| s.0.as_str()).collect();
+            if house::select(ui, "chart_scheme", PANEL_W, &mut self.scheme, &names, &[1]) {
+                app.run_or_alert("chart.changeColors", json!({ "chart": id, "palette": list[self.scheme].1 }));
             }
             if matches!(c.kind, ChartKind::Line | ChartKind::LineMarkers | ChartKind::ScatterLines) {
                 let mut smooth = c.series.iter().any(|s| s.smooth);
@@ -395,16 +439,32 @@ impl ChartPanel {
             let Some(d) = app.session.active() else { return };
             let data = gridcraft_chart::resolve(&d.wb, d.wb.active_sheet(), c);
             let names: Vec<String> = data.categories.iter().take(200).cloned().collect();
+            // Every slice on its own row (colour box + name), so several can be changed without
+            // picking them one at a time from a list (to-do row 62). Long lists show the first
+            // SLICES_SHOWN with "Show all" below, to keep the panel calm.
             if !names.is_empty() {
-                let labels: Vec<&str> = names.iter().map(String::as_str).collect();
-                self.slice_which = self.slice_which.min(labels.len() - 1);
-                house::label(ui, "Slice", "");
-                house::select(ui, "chart_slice_which", PANEL_W, &mut self.slice_which, &labels, &[]);
-                let j = self.slice_which;
-                let rgba = if j == 0 { data.series.first().map(|s| s.color) } else { data.palette.get(j % data.palette.len().max(1)).copied() };
-                let now = rgba.map(|[r, g, b, _]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b));
-                house::label(ui, "Colour", "");
-                if let Some(rgb) = colour_button(ui, "chart_slice_colour", now) {
+                let colour_of = |j: usize| {
+                    let rgba = if j == 0 { data.series.first().map(|s| s.color) } else { data.palette.get(j % data.palette.len().max(1)).copied() };
+                    rgba.map(|[r, g, b, _]| u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
+                };
+                house::label(ui, "Slice colours", "Click a colour box to change that slice.");
+                let shown = if self.all_slices { names.len() } else { names.len().min(SLICES_SHOWN) };
+                let mut pick = None;
+                for (j, name) in names.iter().enumerate().take(shown) {
+                    ui.horizontal(|ui| {
+                        if let Some(rgb) = slice_swatch(ui, j, colour_of(j)) {
+                            pick = Some((j, rgb));
+                        }
+                        ui.label(RichText::new(name).size(house::BODY).color(theme::TEXT));
+                    });
+                }
+                if names.len() > SLICES_SHOWN {
+                    let text = if self.all_slices { "Show fewer".to_string() } else { format!("Show all {} slices", names.len()) };
+                    if ui.add(house::link(&text)).clicked() {
+                        self.all_slices = !self.all_slices;
+                    }
+                }
+                if let Some((j, rgb)) = pick {
                     app.run_or_alert("chart.formatSelection", json!({ "chart": id, "point": j, "color": format!("#{rgb:06X}") }));
                 }
             }
@@ -464,6 +524,26 @@ impl ChartPanel {
             }
         }
     }
+}
+
+/// How many pie slices are listed before "Show all".
+const SLICES_SHOWN: usize = 12;
+
+/// A small colour box for one pie slice; the colour picked, if any.
+fn slice_swatch(ui: &mut Ui, j: usize, now: Option<u32>) -> Option<u32> {
+    let swatch = egui::Button::new("")
+        .fill(now.map_or(Color32::WHITE, |rgb| Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)))
+        .stroke(Stroke::new(1.0, theme::BOX))
+        .corner_radius(f32::from(house::FIELD_RADIUS))
+        .min_size(vec2(32.0, 24.0));
+    let r = ui.add(swatch).on_hover_text("Slice colour");
+    let mut picked = None;
+    egui::Popup::menu(&r).id(egui::Id::new(("chart_slice_colour", j))).show(|ui| {
+        if let Some(crate::colourpicker::Choice::Colour(rgb)) = crate::colourpicker::palette(ui, now, false, false) {
+            picked = Some(rgb);
+        }
+    });
+    picked
 }
 
 /// A colour box that opens the house colour menu; the colour picked, if any.

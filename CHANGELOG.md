@@ -9,15 +9,27 @@ new features and the last one for fixes.
 ### Added
 - **Spelling suggestions:** while typing in a cell, click a word underlined in red to see up to
   five corrections, add it to your own dictionary (kept in this browser), or ignore it.
+- **Insert row below / column right** in the cell right-click menu and in Insert › Rows and
+  Insert › Columns.
+- **Chart editor › Pie slices:** every slice is listed with its own colour box, so you can change
+  several without picking them one at a time (long lists show the first 12, then "Show all").
 - **Activity log** for whoever runs the server: who opened and saved what, conflicts, changes made
   outside StarSheets and failed saves, one line each with the time, in
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Sign-in** is now a real web form, so password managers (Keeper, Bitwarden, the browser's own)
+  can fill in your username and password.
+- **Chart menu** (right-click a chart) has the same padding and icons as the other menus.
 - **File › Open:** renaming now opens a small Rename dialog (as in Drive) instead of a box squeezed
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Undo (Ctrl+Z) no longer jumps to the top of the sheet; you stay where you were working.
+- Pressing Enter in a side-panel box (a chart's data range, find, a rule's formula, the font
+  size…) no longer also starts editing a cell on the sheet.
+- Chart colour schemes are named after the colours they really use in your file (they said
+  "Grey", "Gold" and "Light blue" for green, light blue and purple).
 - Text being typed in a cell was thrown away when the connection to the server dropped and came
   back (for example when the server restarted, or a tab had been open a long time), or when
   another tab changed the same sheet. It now stays, and is saved when you finish.

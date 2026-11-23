@@ -263,6 +263,8 @@ impl eframe::App for WebShell {
             crate::house::style_tooltips(&ctx);
             return;
         }
+        // Which box had the keyboard as this frame began (see the check before the grid).
+        let focus_at_start = ui.ctx().memory(|m| m.focused());
         // Our panels first, so they sit above GridCraft's formula bar and grid.
         self.shell.ui(&mut self.app, ui);
         self.bottom.ui(&mut self.app, ui);
@@ -278,6 +280,14 @@ impl eframe::App for WebShell {
         // Before GridCraft draws: its alerts are shown as house dialogs instead.
         self.messages.ui(&mut self.app, &ctx);
         self.spell.before(&ctx);
+        // A one-line box in a panel, menu or the toolbar (chart range, font size, find, rule
+        // formula…) lets go of the keyboard when Enter or Tab is pressed. The grid, drawn next,
+        // then finds nothing focused and would take that same key as its own: Enter started
+        // editing the active cell (to-do row 57). The key was the box's, so the grid doesn't see
+        // this frame's keys; from the next frame it has the keyboard as usual.
+        if focus_at_start.is_some() && ctx.memory(|m| m.focused()).is_none() {
+            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
+        }
         self.app.ui(ui);
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);

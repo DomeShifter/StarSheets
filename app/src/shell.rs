@@ -115,8 +115,8 @@ pub const MENUS: &[(&str, &[Item])] = &[
         "Insert",
         &[
             Sub("Cells", &[Cmd("Insert cells", "home.insertCells", "")]),
-            Sub("Rows", &[Cmd("Insert row above", "home.insertRows", "Ctrl+Alt+=")]),
-            Sub("Columns", &[Cmd("Insert column left", "home.insertColumns", "Ctrl+Alt+=")]),
+            Sub("Rows", &[Cmd("Insert row above", "home.insertRows", "Ctrl+Alt+="), Cmd("Insert row below", "panel:insertBelow", "")]),
+            Sub("Columns", &[Cmd("Insert column left", "home.insertColumns", "Ctrl+Alt+="), Cmd("Insert column right", "panel:insertRight", "")]),
             Cmd("Sheet", "home.insertSheet", "Shift+F11"),
             Sep,
             Cmd("Chart", "panel:chart", ""),
@@ -863,6 +863,9 @@ pub const MENU_ICONS: &[(&str, &str)] = &[
     ("Resize the column", "aspect_ratio"),
     ("Sort sheet A to Z", "sort_by_alpha"),
     ("Sort sheet Z to A", "sort_by_alpha"),
+    ("Edit chart", "edit"),
+    ("Delete chart", "delete"),
+    ("Delete", "delete"),
     ("Insert link", "link"),
     ("Insert note", "sticky_note_2"),
     ("Drop-down", "arrow_drop_down_circle"),
@@ -1018,6 +1021,8 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::chartpanel::REQUEST), true));
                     } else if *id == "panel:dropdown" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
+                    } else if *id == "panel:insertBelow" || *id == "panel:insertRight" {
+                        gridcraft_ui_egui::grid::insert_after(app, *id == "panel:insertBelow");
                     } else if let Some(what) = id.strip_prefix("panel:") {
                         // File actions (files.rs reads this from egui memory).
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), what.to_string()));

@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use egui::{Align2, Color32, RichText, Sense, Ui, vec2};
 use serde_json::{Value as Json, json};
+use wasm_bindgen::JsCast;
 
 use crate::files::{Method, fetch};
 use crate::house;
@@ -150,6 +151,8 @@ pub struct Account {
     error: Option<String>,
     done: Option<String>,
     focused: bool,
+    /// The HTML sign-in form (index.html) is showing.
+    dom_sign_in: bool,
     // Form fields.
     code: String,
     username: String,
@@ -337,9 +340,10 @@ impl Account {
     }
 
     pub fn ui(&mut self, ctx: &egui::Context) {
+        self.sign_in_dom(ctx);
         match self.dialog {
             Dialog::None => {}
-            Dialog::SignIn => self.sign_in(ctx),
+            Dialog::SignIn => {}
             Dialog::SignUp => self.sign_up(ctx),
             Dialog::Setup => self.setup(ctx),
             Dialog::Profile => self.profile(ctx),
@@ -454,31 +458,22 @@ impl Account {
         });
     }
 
-    fn sign_in(&mut self, ctx: &egui::Context) {
-        let mut go = false;
-        let mut create = false;
-        house::dialog(ctx, "starsheets_sign_in", 360.0, "Sign in to StarSheets", None, |ui| {
-            let r = Self::field(ui, &mut self.username, "Username", false);
-            self.first(&r);
-            go |= Self::enter(ui, &r);
-            ui.add_space(house::S);
-            let r = Self::field(ui, &mut self.password, "Password", true);
-            go |= Self::enter(ui, &r);
-            self.messages(ui);
-            house::note(ui, "Forgotten your password? The person who runs this server can set a new one.");
-            if self.signup && ui.add(house::link("New here? Create an account")).clicked() {
-                create = true;
+    /// The sign-in box is a real HTML form (index.html) so password managers can fill it; the
+    /// form signs in itself and reloads the page. Here: show it, hide it, and follow its
+    /// "Create an account" link.
+    fn sign_in_dom(&mut self, ctx: &egui::Context) {
+        let want = self.dialog == Dialog::SignIn;
+        let Some(w) = web_sys::window() else { return };
+        if want != self.dom_sign_in {
+            self.dom_sign_in = want;
+            if let Some(f) = js_sys::Reflect::get(&w, &"__ssSignIn".into()).ok().and_then(|f| f.dyn_into::<js_sys::Function>().ok()) {
+                let _ = f.call2(&w, &want.into(), &self.signup.into());
             }
-            go |= house::actions(ui, &["Sign in"]).is_some();
-        });
-        if create {
-            self.open(Dialog::SignUp);
-            return;
         }
-        if go && !self.busy && !self.username.is_empty() && !self.password.is_empty() {
-            self.busy = true;
-            self.error = None;
-            call(&self.inbox, ctx, Method::Post, "api/login", Some(json!({ "username": self.username, "password": self.password })), |_| Reply::Reload);
+        if want && js_sys::Reflect::get(&w, &"__ssWantSignUp".into()).is_ok_and(|v| v.is_truthy()) {
+            let _ = js_sys::Reflect::set(&w, &"__ssWantSignUp".into(), &false.into());
+            self.open(Dialog::SignUp);
+            ctx.request_repaint();
         }
     }
 

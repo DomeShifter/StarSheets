@@ -155,6 +155,7 @@ impl Live {
         if self.ws.is_none() && now_ms() >= self.retry_at {
             self.connect(ctx);
         }
+        let views = sheet_views(app);
         let log = app.session.sync_log.get_or_insert_with(Vec::new);
         let steps = std::mem::take(log);
         let mut changed = false;
@@ -184,6 +185,7 @@ impl Live {
             changed |= self.handle(app, ev);
         }
         if changed {
+            keep_sheet_views(app, views);
             app.after_engine();
             ctx.request_repaint();
         }
@@ -610,4 +612,23 @@ fn restore_draft(app: &mut SheetApp, file: &str) {
     let _ = app.run("sheet.activate", serde_json::json!({ "sheet": sheet }));
     let _ = app.run("selection.set", serde_json::json!({ "range": cell.to_string() }));
     app.begin_edit(Some(v["text"].as_str().unwrap_or("").to_string()), false);
+}
+
+/// Each sheet's scroll position in this window, by sheet name. GridCraft keeps scroll positions
+/// under the sheet's id, and a workbook that comes back from the server (an undo, another tab's
+/// change, a reconnect) has new ids, so without this the view jumped to the top (to-do row 55).
+fn sheet_views(app: &SheetApp) -> Vec<(u64, String, gridcraft_ui_egui::SheetView)> {
+    let (Some(w), Some(d)) = (app.session.active_window(), app.session.active()) else { return Vec::new() };
+    d.wb.sheets.iter().filter_map(|sh| app.views.get(&(w, sh.uid.get())).map(|v| (w, sh.name.clone(), *v))).collect()
+}
+
+/// Puts the scroll positions from `sheet_views` back on the sheets of the same name.
+fn keep_sheet_views(app: &mut SheetApp, before: Vec<(u64, String, gridcraft_ui_egui::SheetView)>) {
+    let Some(d) = app.session.active() else { return };
+    let ids: Vec<(String, u64)> = d.wb.sheets.iter().map(|sh| (sh.name.clone(), sh.uid.get())).collect();
+    for (w, name, v) in before {
+        if let Some((_, uid)) = ids.iter().find(|(n, _)| *n == name) {
+            app.views.entry((w, *uid)).or_insert(v);
+        }
+    }
 }
