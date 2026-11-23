@@ -140,7 +140,7 @@ pub fn has(name: &str) -> bool {
     ICONS.iter().any(|(n, _)| *n == name)
 }
 
-/// The StarSheets logo (app/icons/starsheets.svg, same as the favicon) at `size` px, in colour.
+/// The StarSheets logo (app/icons/starsheets.svg; app/favicon.svg is a simplified copy for 16-32 px) at `size` px, in colour.
 pub fn logo(size: f32) -> Option<Image<'static>> {
     let (_, bytes) = ICONS.iter().find(|(n, _)| *n == "starsheets")?;
     Some(Image::new(ImageSource::Bytes { uri: "bytes://starsheets/logo.svg".into(), bytes: (*bytes).into() }).fit_to_exact_size(vec2(size, size)))

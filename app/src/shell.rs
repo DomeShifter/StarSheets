@@ -834,7 +834,7 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
     let name = app.session.active().map(|d| d.display_title().to_string()).unwrap_or_else(|| "Untitled spreadsheet".into());
     let dirty = app.session.active().is_some_and(|d| d.is_dirty());
     ui.horizontal(|ui| {
-        // Our own mark (a white star on a green tile; same file as the favicon).
+        // Our own mark (a sheet with a star on a green tile; the favicon is a simplified copy).
         // A click goes home (files.rs), as Sheets' logo does.
         let logo = match icons::logo(36.0) {
             Some(img) => ui.add(img.sense(egui::Sense::click())),
