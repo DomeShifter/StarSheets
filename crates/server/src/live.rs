@@ -325,6 +325,10 @@ impl Room {
         let mut s = Session::new();
         let b64 = gridcraft_engine::io::base64_encode(&bytes);
         s.execute("file.open", json!({ "name": name, "base64": b64 })).map_err(|e| format!("Can't open the file: {e}"))?;
+        // Google Sheets' Clip lives in StarSheets' section of the file: back onto the cells.
+        if let Some(d) = s.active_mut() {
+            sync::clip_from_host(Arc::make_mut(&mut d.wb));
+        }
         self.session = s;
         Ok(())
     }
@@ -609,7 +613,10 @@ impl Room {
         if self.app.store.version_of(&full).ok() != self.disk {
             return Err(SaveError::Outside);
         }
-        let bytes = gridcraft_engine::io::save_bytes(wb, &crate::store::base_of(&path)).map_err(|e| failed(e.to_string()))?;
+        // Cells with Google Sheets' Clip are listed in StarSheets' section (Excel has no such setting).
+        let mut wb = wb.clone();
+        sync::clip_into_host(&mut wb);
+        let bytes = gridcraft_engine::io::save_bytes(&wb, &crate::store::base_of(&path)).map_err(|e| failed(e.to_string()))?;
         self.app.store.keep_version(&self.file, &full).map_err(|e| failed(e.to_string()))?;
         self.app.store.write_file(&full, &bytes).map_err(|e| failed(e.to_string()))?;
         self.disk = self.app.store.version_of(&full).ok();

@@ -7,6 +7,8 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Added
+- **Clip** text wrapping beside Overflow and Wrap (Format › Wrapping and the toolbar), as in
+  Google Sheets; kept in StarSheets' section of the file, since Excel has no such setting.
 - **StarSheets' own section in your files:** what Excel has no place for (which kind of rule a
   drop-down was made with, which colours belong to its items, protected-range settings) is kept
   inside the .xlsx in a part Excel and LibreOffice keep but don't show. Files stay ordinary .xlsx.
@@ -31,6 +33,15 @@ new features and the last one for fixes.
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Pictures in cells from Google Sheets files** open as pictures in the cells (they follow the
+  cell's alignment); floating pictures and charts slide under frozen rows and columns.
+- **Google-style formulas** (`{…}`, `SORTN`, `ARRAYFORMULA`, `QUERY`, open ranges like `A3:C`)
+  leave empty cells empty in their results, as Google Sheets does, instead of showing 0.
+- The in-cell editor of a Wrap cell widens with the formula before wrapping.
+- A drop-down rule's ranges are merged (`A2:B28`, not `A2,A2:A28,A2:B2,B2:B28`).
+- The browser tab shows only the file's name; the sheet tabs use all the room up to the quick sum.
+- The conditional formatting panel's live preview edits the rule in place (no more rules
+  vanishing and coming back while editing).
 - **Google Sheets formulas in .xlsx files open in Excel:** formulas Excel can't read (`{A1:B1;…}`
   with ranges, `SORTN`, `QUERY`, `ARRAYFORMULA`…) are saved the way Google Sheets saves them, so
   Excel shows their last results and StarSheets gets the formulas back unchanged.
@@ -55,6 +66,7 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Delete on empty cells no longer adds an undo step.
 - Editing a drop-down no longer makes conditional formatting rules vanish and come back, and a
   rule of your own on the same cells is no longer taken for a drop-down colour.
 - Google Sheets files: array formulas (ARRAYFORMULA, QUERY…) work after import instead of

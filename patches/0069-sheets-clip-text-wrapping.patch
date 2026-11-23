@@ -1,0 +1,122 @@
+diff --git a/crates/engine/src/cmd/format.rs b/crates/engine/src/cmd/format.rs
+index 1c2a4bf..3812213 100644
+--- a/crates/engine/src/cmd/format.rs
++++ b/crates/engine/src/cmd/format.rs
+@@ -103,12 +103,7 @@ pub fn specs() -> Vec<CommandSpec> {
+         cmd!("home.alignTop", "Top Align", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| valign(s, p, VAlign::Top)),
+         cmd!("home.alignMiddle", "Middle Align", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| valign(s, p, VAlign::Center)),
+         cmd!("home.alignBottom", "Bottom Align", ["Home", "Alignment"], None, "{range?}", has_doc, |s, p| valign(s, p, VAlign::Bottom)),
+-        cmd!("home.wrapText", "Wrap Text", ["Home", "Alignment"], None, "{range?, on?}", has_doc, |s, p| toggle(
+-            s,
+-            p,
+-            |st| st.align.wrap,
+-            |st, v| st.align.wrap = v
+-        )),
++        cmd!("home.wrapText", "Wrap Text", ["Home", "Alignment"], None, "{range?, on?, clip?} (clip: Google Sheets' Clip, one line cut off at the cell's edge; wrapping and clipping exclude each other)", has_doc, wrap_text),
+         cmd!("home.shrinkToFit", "Shrink to Fit", [], None, "{range?, on?}", has_doc, |s, p| toggle(
+             s,
+             p,
+@@ -318,6 +313,26 @@ pub(crate) fn active_style(s: &Session) -> Result<Style> {
+     Ok(d.wb.styles.get(sh.style_id(d.selection.active)).clone())
+ }
+ 
++/// Overflow (`on: false`), Wrap (`on: true`) or Clip (`clip: true`): one choice of the three.
++fn wrap_text(s: &mut Session, p: &Json) -> Result<Json> {
++    if bool_param(p, "clip") == Some(true) {
++        apply_style(s, p, |st| {
++            st.align.wrap = false;
++            st.align.clip = true;
++        })?;
++        return Ok(json!({"on": false, "clip": true}));
++    }
++    let on = match bool_param(p, "on") {
++        Some(v) => v,
++        None => !active_style(s)?.align.wrap,
++    };
++    apply_style(s, p, |st| {
++        st.align.wrap = on;
++        st.align.clip = false;
++    })?;
++    Ok(json!({"on": on}))
++}
++
+ fn toggle(s: &mut Session, p: &Json, get: fn(&Style) -> bool, set: fn(&mut Style, bool)) -> Result<Json> {
+     let on = match bool_param(p, "on") {
+         Some(v) => v,
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index bd8c378..e90dccc 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -6662,3 +6662,19 @@ fn host_data_is_an_undoable_edit_and_saved_in_the_file() {
+     s.execute("file.open", json!({"name": "x", "base64": crate::io::base64_encode(&bytes)})).unwrap();
+     assert_eq!(s.doc().unwrap().wb.host_data.as_deref(), Some("{\"v\":1}"));
+ }
++
++#[test]
++fn overflow_wrap_and_clip_are_one_choice() {
++    let mut s = s();
++    let al = |s: &Session| {
++        let d = s.doc().unwrap();
++        let st = d.wb.styles.get(d.wb.active().unwrap().style_id(CellRef::new(0, 0))).clone();
++        (st.align.wrap, st.align.clip)
++    };
++    s.execute("home.wrapText", json!({"range": "A1", "on": false, "clip": true})).unwrap();
++    assert_eq!(al(&s), (false, true));
++    s.execute("home.wrapText", json!({"range": "A1", "on": true})).unwrap();
++    assert_eq!(al(&s), (true, false));
++    s.execute("home.wrapText", json!({"range": "A1", "on": false})).unwrap();
++    assert_eq!(al(&s), (false, false));
++}
+diff --git a/crates/model/src/style.rs b/crates/model/src/style.rs
+index 97a8c6c..9d505da 100644
+--- a/crates/model/src/style.rs
++++ b/crates/model/src/style.rs
+@@ -371,6 +371,11 @@ pub struct Alignment {
+     /// Unspecified inherits in differential styles and uses context for ordinary cells.
+     #[serde(default)]
+     pub reading_order: Option<ReadingOrder>,
++    /// Google Sheets' "Clip" text wrapping: one line, cut off at the cell's edge instead of
++    /// running into empty neighbours. Excel has no such setting, so files don't store it (a host
++    /// keeps it its own way, StarSheets).
++    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
++    pub clip: bool,
+ }
+ 
+ #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+diff --git a/crates/ui-egui/src/grid/quadrant.rs b/crates/ui-egui/src/grid/quadrant.rs
+index 95f68a0..c76bac9 100644
+--- a/crates/ui-egui/src/grid/quadrant.rs
++++ b/crates/ui-egui/src/grid/quadrant.rs
+@@ -463,7 +463,7 @@ fn paint_cell(q: &QuadrantPaint<'_>, painted: &(CellRef, Rect, Look, Option<CfLo
+     // Overflow into empty neighbours for text (not upright text, whose width is its line height).
+     let mut clip = *rect;
+     let overflows = text_overflows_cell(numeric, &v, st.align.rotation, w, rect.width(), pad);
+-    if should_expand_text(filter_space, overflows, across_end, c.col, in_merge(c).is_some()) {
++    if !st.align.clip && should_expand_text(filter_space, overflows, across_end, c.col, in_merge(c).is_some()) {
+         let mut right = rect.right();
+         let mut left = rect.left();
+         if across_end > c.col {
+diff --git a/crates/xlsx/src/styles.rs b/crates/xlsx/src/styles.rs
+index f25424d..c213733 100644
+--- a/crates/xlsx/src/styles.rs
++++ b/crates/xlsx/src/styles.rs
+@@ -275,6 +275,7 @@ fn read_alignment(a: &El) -> Alignment {
+             Some(2) => Some(ReadingOrder::RightToLeft),
+             _ => None,
+         },
++        clip: false,
+     };
+     if let Some(r) = a.attr_i64("textRotation") {
+         al.rotation = match r {
+diff --git a/crates/xlsx/src/xls/styles.rs b/crates/xlsx/src/xls/styles.rs
+index a9f624b..f76f8ff 100644
+--- a/crates/xlsx/src/xls/styles.rs
++++ b/crates/xlsx/src/xls/styles.rs
+@@ -340,6 +340,7 @@ fn xf_style(xf: &Xf, fonts: &[Font], formats: &HashMap<u16, String>, table: &[u3
+         indent: a2 & 0x0F,
+         shrink: a2 & 0x10 != 0,
+         reading_order: None,
++        clip: false,
+     };
+     let b1 = word32(4);
+     let b2 = word32(8);

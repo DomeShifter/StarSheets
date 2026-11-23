@@ -92,3 +92,11 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0063 | formula, functions, xlsx | Google Sheets: SORTN; SORT with is_ascending TRUE/FALSE and column pairs; open-ended ranges `A3:C` (printed back as typed, written to files as `A3:C1048576`) |
 | 0064 | xlsx | Formulas Excel can't read (Google-only functions, `{…}` with ranges) are saved the way Google Sheets saves them: `IFERROR(__xludf.DUMMYFUNCTION("…"),last result)`, spilled cells as `COMPUTED_VALUE` placeholders; they read back unchanged |
 | 0065 | model, engine, xlsx | `Workbook::host_data`: text a host app keeps with the file (command `workbook.setHostData`, undoable), saved as a custom XML part (`urn:gridcraft:host-data:1`) that Excel and LibreOffice keep |
+| 0066 | engine | `home.conditionalFormat {replace: i}` edits rule i in place (keeps its priority); `home.manageRules {set: i, cf}` puts a stored rule back exactly: live previews without undo |
+| 0067 | calc | Array results of Google-style formulas (`{…}` literals, ARRAYFORMULA, QUERY, SORTN, open-ended ranges such as `A3:C`) keep blank cells blank, as Google Sheets shows them (Excel-style formulas keep Excel's zeros) |
+| 0068 | xlsx, ui-egui | A picture anchored exactly in one cell (how Google Sheets exports pictures in cells) is read as an in-cell picture; floating objects are clipped to their pane, so they scroll under frozen rows and columns |
+| 0069 | model, engine, ui-egui | Google Sheets' "Clip" text wrapping: `Alignment::clip` (not in files), `home.wrapText {clip: true}`, clipped text never overflows |
+| 0070 | ui-egui | The in-cell editor of a Wrap cell widens with the text too (up to the grid's edge) before wrapping, as in Sheets |
+| 0071 | core, engine, xlsx | `RangeRef::tidy`: a data validation rule's areas are merged into rectangles and covered ones dropped (after fills, edits and on reading a file) |
+| 0072 | ui-egui | With `sheets_keys` the browser tab title is only the file name (no "— Edited") |
+| 0073 | engine | Clear contents (Delete) over cells with nothing in them changes nothing, so it adds no undo step |

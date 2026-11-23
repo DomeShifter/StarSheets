@@ -498,3 +498,84 @@ pub fn copy_sheet_into(src: &Workbook, index: usize, dst: &mut Workbook) -> Opti
     dst.sheets.push(Arc::new(sheet));
     Some(name)
 }
+
+// ---------------------------------------------------------------- Clip in StarSheets' section
+
+/// The key of Google Sheets' "Clip" text wrapping in StarSheets' section of a file: Excel has no
+/// such setting, so the cells that have it are listed there (`[{"sheet", "ranges"}]`).
+const CLIP_KEY: &str = "clip";
+
+/// Before writing a file: lists the cells whose style clips their text in the section (and drops
+/// the list when there are none).
+pub fn clip_into_host(wb: &mut Workbook) {
+    let mut entries = Vec::new();
+    for sh in &wb.sheets {
+        let cells: Vec<gridcraft_engine::core::CellRef> =
+            sh.cells.iter().filter(|(_, c)| wb.styles.get(c.style).align.clip).map(|(at, _)| at).collect();
+        if !cells.is_empty() {
+            entries.push(serde_json::json!({ "sheet": sh.name, "ranges": runs(&cells) }));
+        }
+    }
+    let mut host: serde_json::Map<String, Json> = wb.host_data.as_deref().and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
+    if entries.is_empty() {
+        if host.remove(CLIP_KEY).is_none() {
+            return;
+        }
+    } else {
+        host.insert(CLIP_KEY.into(), Json::Array(entries));
+        host.entry("v").or_insert(Json::from(1));
+    }
+    let only_version = host.keys().all(|k| k == "v");
+    wb.host_data = if only_version { None } else { serde_json::to_string(&host).ok() };
+}
+
+/// After reading a file: gives the listed cells the clip style again, and takes the list out of
+/// the section (while the file is open the cells' styles say it).
+pub fn clip_from_host(wb: &mut Workbook) {
+    let Some(mut host) = wb.host_data.as_deref().and_then(|t| serde_json::from_str::<serde_json::Map<String, Json>>(t).ok()) else { return };
+    let Some(entries) = host.remove(CLIP_KEY) else { return };
+    for e in entries.as_array().into_iter().flatten() {
+        let (Some(name), Some(ranges)) = (e.get("sheet").and_then(Json::as_str), e.get("ranges").and_then(Json::as_str)) else { continue };
+        let Some(i) = wb.sheets.iter().position(|s| s.name == name) else { continue };
+        let mut sh = (*wb.sheets[i]).clone();
+        for r in ranges.split(',').filter_map(|r| gridcraft_engine::core::RangeRef::parse(r.trim())) {
+            // A list from an edited copy may point anywhere: only cells that exist, and not too many.
+            for at in r.iter().take(1_000_000) {
+                let Some(cell) = sh.cells.get(at).cloned() else { continue };
+                let mut st = wb.styles.get(cell.style).clone();
+                if st.align.clip {
+                    continue;
+                }
+                st.align.clip = true;
+                st.align.wrap = false;
+                let style = wb.styles.intern(st);
+                sh.cells.set(at, gridcraft_engine::model::Cell { style, ..cell });
+            }
+        }
+        wb.sheets[i] = Arc::new(sh);
+    }
+    let only_version = host.keys().all(|k| k == "v");
+    wb.host_data = if only_version { None } else { serde_json::to_string(&host).ok() };
+}
+
+/// Cells as few ranges as simply found: runs along each row, then runs of equal row runs.
+fn runs(cells: &[gridcraft_engine::core::CellRef]) -> String {
+    use gridcraft_engine::core::{CellRef, RangeRef};
+    let mut sorted = cells.to_vec();
+    sorted.sort_by_key(|c| (c.row, c.col));
+    let mut row_runs: Vec<(u32, u32, u32)> = Vec::new();
+    for c in sorted {
+        match row_runs.last_mut() {
+            Some((r, _, end)) if *r == c.row && *end + 1 == c.col => *end = c.col,
+            _ => row_runs.push((c.row, c.col, c.col)),
+        }
+    }
+    let mut blocks: Vec<RangeRef> = Vec::new();
+    for (r, a, b) in row_runs {
+        match blocks.iter_mut().find(|x| x.end.row + 1 == r && x.start.col == a && x.end.col == b) {
+            Some(x) => x.end.row = r,
+            None => blocks.push(RangeRef::new(CellRef::new(r, a), CellRef::new(r, b))),
+        }
+    }
+    blocks.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",")
+}

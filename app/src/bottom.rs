@@ -60,6 +60,9 @@ pub struct Bottom {
     tab_max: f32,
     /// Where a click on ◀ or ▶ moves the tab strip to.
     tab_scroll_to: Option<f32>,
+    /// How wide the quick sum was last frame: the tabs get the rest (to-do 2 row 28: a fixed
+    /// 220 px left a gap when it was short or hidden).
+    quick_w: f32,
 }
 
 /// How far one click on the tab strip's ◀ or ▶ scrolls.
@@ -158,7 +161,7 @@ impl Bottom {
                     };
                     all.on_hover_text("All sheets (Alt+Shift+K)");
                     ui.add_space(6.0);
-                    let quick_width = 220.0;
+                    let quick_width = if self.quick_w > 0.0 { self.quick_w + 12.0 } else { 0.0 };
                     // ◀ ▶ after the tabs when they don't all fit (to-do 2 row 18).
                     let overflow = self.tab_max > 0.5;
                     let arrows_width = if overflow { 2.0 * 30.0 + 2.0 + 6.0 } else { 0.0 };
@@ -193,7 +196,11 @@ impl Bottom {
                             self.tab_scroll_to = Some((self.tab_offset + TAB_STEP).min(self.tab_max));
                         }
                     }
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.quick_sum(app, ui));
+                    let w = ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.quick_sum(app, ui)).inner;
+                    if (w - self.quick_w).abs() > 0.5 {
+                        self.quick_w = w;
+                        ui.ctx().request_repaint();
+                    }
                 });
             });
     }
@@ -486,17 +493,18 @@ impl Bottom {
         }
     }
 
-    fn quick_sum(&mut self, app: &SheetApp, ui: &mut Ui) {
-        let Some(d) = app.session.active() else { return };
-        let Some(sh) = d.wb.active() else { return };
+    /// Draws the quick sum (right to left) and returns its width (0 when there is none).
+    fn quick_sum(&mut self, app: &SheetApp, ui: &mut Ui) -> f32 {
+        let Some(d) = app.session.active() else { return 0.0 };
+        let Some(sh) = d.wb.active() else { return 0.0 };
         // Like Sheets: only when more than one cell is selected.
         let cells: u64 = d.selection.ranges.iter().map(|r| u64::from(r.end.row - r.start.row + 1) * u64::from(r.end.col - r.start.col + 1)).sum();
         if cells < 2 {
-            return;
+            return 0.0;
         }
         let st = gridcraft_engine::display::stats(sh, &d.selection.ranges);
         if st.count == 0 {
-            return;
+            return 0.0;
         }
         let value = |q: QuickSum| -> String {
             match q {
@@ -520,7 +528,10 @@ impl Bottom {
                     ui.close();
                 }
             }
-        });
+        })
+        .response
+        .rect
+        .width()
     }
 }
 

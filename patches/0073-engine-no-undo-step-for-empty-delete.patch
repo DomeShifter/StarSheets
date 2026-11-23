@@ -1,0 +1,45 @@
+diff --git a/crates/engine/src/cmd/edit.rs b/crates/engine/src/cmd/edit.rs
+index 8c7072f..de24568 100644
+--- a/crates/engine/src/cmd/edit.rs
++++ b/crates/engine/src/cmd/edit.rs
+@@ -267,7 +267,20 @@ fn clear(s: &mut Session, p: &Json, what: &str) -> Result<Json> {
+             })
+         })
+     };
+-    // Notes and links aren't cell contents, so the cell comparison that guards a protected sheet
++    // Nothing to clear (Delete on an empty cell): no change, so no undo step (StarSheets).
++    if what == "contents" && !uncheck_only {
++        let d = s.doc()?;
++        let has = d.wb.sheet(sheet).is_some_and(|sh| {
++            ranges.iter().any(|r| {
++                sh.cells.iter_range(*r).any(|(_, x)| !x.value.is_empty() || x.formula.is_some() || x.py.is_some())
++                    || sh.cell_pictures.keys().any(|c| r.contains(*c))
++            })
++        });
++        if !has {
++            return Ok(Json::Null);
++        }
++    }
++        // Notes and links aren't cell contents, so the cell comparison that guards a protected sheet
+     // doesn't see them go: a locked cell's are refused here, stored cell or not.
+     if matches!(what, "all" | "comments" | "hyperlinks") {
+         let d = s.doc()?;
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index e90dccc..e2f8070 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -6678,3 +6678,14 @@ fn overflow_wrap_and_clip_are_one_choice() {
+     s.execute("home.wrapText", json!({"range": "A1", "on": false})).unwrap();
+     assert_eq!(al(&s), (false, false));
+ }
++
++#[test]
++fn delete_on_empty_cells_is_not_an_undo_step() {
++    let mut s = s();
++    s.execute("cell.set", json!({"cell": "A1", "input": "x"})).unwrap();
++    let steps = s.doc().unwrap().undo.len();
++    s.execute("edit.clearContents", json!({"range": "C3:D9"})).unwrap();
++    assert_eq!(s.doc().unwrap().undo.len(), steps);
++    s.execute("edit.clearContents", json!({"range": "A1"})).unwrap();
++    assert_eq!(s.doc().unwrap().undo.len(), steps + 1);
++}

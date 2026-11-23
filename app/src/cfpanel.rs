@@ -4,7 +4,7 @@
 //! by GridCraft (`home.conditionalFormat`, `home.manageRules`; colour-scale points: patch 0017).
 
 use egui::{Color32, CornerRadius, Frame, Margin, RichText, Sense, Stroke, Ui, vec2};
-use gridcraft_engine::model::{CfOperator, CfRule, CfValueKind, Color, Underline};
+use gridcraft_engine::model::{CfOperator, CfRule, CfValueKind, Color, CondFormat, Underline};
 use gridcraft_ui_egui::SheetApp;
 use serde_json::{Value as Json, json};
 
@@ -121,11 +121,17 @@ pub struct CfPanel {
     pub open: bool,
     draft: Option<Draft>,
     error: Option<String>,
-    /// Live preview while editing, as in Sheets: the draft is applied to the sheet for real and
-    /// undone again on every change, Cancel or close. (what was applied, commands to undo)
-    /// (what was applied, how many undo steps it took, the workbook it left: an edit made since
-    /// means undo would take back the user's edit instead, so the preview is kept then).
-    preview: Option<(String, usize, usize)>,
+    /// Live preview while editing, as in Sheets: the draft is on the sheet for real. Each change
+    /// edits that one rule in place (`replace`), and Cancel puts the edited rule back exactly or
+    /// deletes a new one. No undo: with live editing undo is the server's, and undos mixed with
+    /// edits in one frame came back out of step (rules vanished and came back, to-do 2 row 14).
+    /// The plan last applied (applying the same again is skipped).
+    key: Option<String>,
+    /// The preview rule on the sheet: where it was put and what it was, so it is found again by
+    /// what it is even if other rules moved.
+    shown: Option<(usize, CondFormat)>,
+    /// The rule being edited as it was before the panel touched it (put back on Cancel).
+    original: Option<CondFormat>,
 }
 
 impl CfPanel {
@@ -141,7 +147,7 @@ impl CfPanel {
 
     /// Closes the panel (another side panel opened), undoing any preview.
     pub fn close(&mut self, app: &mut SheetApp) {
-        self.revert_preview(app);
+        self.revert(app);
         self.draft = None;
         self.open = false;
     }
@@ -168,7 +174,7 @@ impl CfPanel {
                     ui.label(RichText::new("Conditional format rules").size(16.0).color(theme::TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.add(egui::Button::new(RichText::new("✕").size(16.0)).frame(false)).on_hover_text("Close").clicked() {
-                            self.revert_preview(app);
+                            self.revert(app);
                             self.draft = None;
                             self.open = false;
                         }
@@ -179,10 +185,8 @@ impl CfPanel {
                     crate::house::form_style(ui);
                     ui.set_width(PANEL_W);
                     if let Some(mut d) = self.draft.take() {
-                        self.adopt_if_edited(app, &mut d);
                         match self.editor(app, ui, &mut d) {
                             Some(true) => {
-                                self.revert_preview(app);
                                 if self.save(app, &d) {
                                     self.draft = None;
                                 } else {
@@ -190,7 +194,7 @@ impl CfPanel {
                                 }
                             }
                             Some(false) => {
-                                self.revert_preview(app);
+                                self.revert(app);
                                 self.error = None;
                                 let h = crate::hostdata::read(app);
                                 let none_left = app.session.active().and_then(|d| d.wb.active()).is_none_or(|sh| sh.cond_formats.iter().all(|cf| crate::dvpanel::is_item_colour(sh, cf, &h)));
@@ -258,6 +262,9 @@ impl CfPanel {
                 d.index = Some(i);
                 read_date_choice(&mut d);
                 self.draft = Some(d);
+                self.original = Some(cf.clone());
+                self.shown = Some((i, cf.clone()));
+                self.key = None;
             }
             ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, theme::DIVIDER));
         }
@@ -267,6 +274,9 @@ impl CfPanel {
         ui.add_space(12.0);
         if ui.add(egui::Button::new(RichText::new("+  Add another rule").size(14.0).color(GREEN)).frame(false)).clicked() {
             self.draft = Some(Draft::new(selection_text(app)));
+            self.original = None;
+            self.shown = None;
+            self.key = None;
         }
     }
 
@@ -315,56 +325,71 @@ impl CfPanel {
         out
     }
 
-    /// The sheet was edited while a preview is on: undoing the preview would undo that edit, so
-    /// the preview stays as the rule (new rules go first, so it is rule 0) and the next change
-    /// replaces it.
-    fn adopt_if_edited(&mut self, app: &SheetApp, d: &mut Draft) {
-        let Some((applied, left)) = self.preview.as_ref().map(|(_, a, l)| (*a, *l)) else { return };
-        if wb_ptr(app) == left {
-            return;
+    /// Where the preview rule is now (found by what it is when other rules moved), if still there.
+    fn locate(app: &SheetApp, at: &(usize, CondFormat)) -> Option<usize> {
+        let sh = app.session.active()?.wb.active()?;
+        if sh.cond_formats.get(at.0) == Some(&at.1) {
+            return Some(at.0);
         }
-        self.preview = None;
-        if applied > 0 && rule_json(d).is_ok() {
-            d.index = Some(0);
-        }
+        sh.cond_formats.iter().position(|cf| *cf == at.1)
     }
 
-    /// Undoes the live preview, if one is applied.
-    fn revert_preview(&mut self, app: &mut SheetApp) {
-        if let Some((_, n, left)) = self.preview.take()
-            && wb_ptr(app) == left
-        {
-            for _ in 0..n {
-                let _ = app.run("edit.undo", json!({}));
+    /// Takes the preview off: the edited rule goes back exactly as it was, a new one goes.
+    fn revert(&mut self, app: &mut SheetApp) {
+        self.key = None;
+        let (Some(at), original) = (self.shown.take(), self.original.take()) else { return };
+        let Some(i) = Self::locate(app, &at) else { return };
+        match original {
+            Some(cf) if cf != at.1 => {
+                let _ = app.run("home.manageRules", json!({ "set": i, "cf": serde_json::to_value(&cf).unwrap_or_default() }));
+            }
+            Some(_) => {}
+            None => {
+                let _ = app.run("home.manageRules", json!({ "delete": i }));
             }
         }
     }
 
-    /// Applies the draft as it stands, replacing the previous preview, when it changed. A draft
-    /// that isn't complete yet (e.g. no value typed) shows nothing.
+    /// Puts the draft on the sheet: in place of the preview (or the edited rule), or as a new
+    /// rule (GridCraft adds new rules first). Returns the engine's complaint, if any.
+    fn apply(&mut self, app: &mut SheetApp, d: &Draft, rule: Json) -> Result<(), String> {
+        let mut p = json!({ "range": d.range.trim(), "rule": rule });
+        let at = self.shown.as_ref().and_then(|at| Self::locate(app, at));
+        if let Some(i) = at {
+            p["replace"] = json!(i);
+        }
+        app.run("home.conditionalFormat", p).map_err(|e| crate::messages::plain_error(&gridcraft_ui_egui::clean_error(&e)))?;
+        let i = at.unwrap_or(0);
+        self.shown = app.session.active().and_then(|x| x.wb.active()).and_then(|sh| sh.cond_formats.get(i).cloned()).map(|cf| (i, cf));
+        Ok(())
+    }
+
+    /// Applies the draft as it stands, when it changed. A draft that isn't complete yet (e.g. no
+    /// value typed) shows what was there before the panel.
     fn update_preview(&mut self, app: &mut SheetApp, d: &Draft) {
         let rule = rule_json(d);
-        let key = format!("{:?}|{}|{}", d.index, d.range.trim(), rule.as_ref().map(ToString::to_string).unwrap_or_default());
-        if self.preview.as_ref().is_some_and(|(k, ..)| *k == key) {
+        let key = format!("{}|{}", d.range.trim(), rule.as_ref().map(ToString::to_string).unwrap_or_default());
+        if self.key.as_ref() == Some(&key) {
             return;
         }
-        self.revert_preview(app);
-        let mut applied = 0;
-        if let Ok(rule) = rule {
-            if let Some(i) = d.index
-                && app.run("home.manageRules", json!({ "delete": i })).is_ok()
-            {
-                applied += 1;
+        match rule {
+            Ok(rule) => {
+                let _ = self.apply(app, d, rule);
             }
-            if app.run("home.conditionalFormat", json!({ "range": d.range.trim(), "rule": rule })).is_ok() {
-                applied += 1;
+            Err(_) => {
+                let original = self.original.clone();
+                self.revert(app);
+                // Still editing: the restored rule is where the next preview goes.
+                if let (Some(cf), Some(i)) = (original, d.index) {
+                    self.shown = Some((i, cf.clone()));
+                    self.original = Some(cf);
+                }
             }
         }
-        self.preview = Some((key, applied, wb_ptr(app)));
+        self.key = Some(key);
     }
 
-    /// Stores the draft through GridCraft's commands; an edited rule replaces the old one in the
-    /// same place. On failure the panel stays open with the reason.
+    /// Done: the draft stays on the sheet. On failure the panel stays open with the reason.
     fn save(&mut self, app: &mut SheetApp, d: &Draft) -> bool {
         let rule = match rule_json(d) {
             Ok(r) => r,
@@ -373,24 +398,16 @@ impl CfPanel {
                 return false;
             }
         };
-        let before = app.session.active().and_then(|x| x.wb.active()).map_or(0, |sh| sh.cond_formats.len());
-        if let Some(i) = d.index {
-            let _ = app.run("home.manageRules", json!({ "delete": i }));
-        }
-        match app.run("home.conditionalFormat", json!({ "range": d.range.trim(), "rule": rule })) {
-            Ok(_) => {
-                // A new rule goes to the end; an edited one moves back to its old place.
-                if let Some(i) = d.index {
-                    let last = before.saturating_sub(1);
-                    for k in (i..last).rev() {
-                        let _ = app.run("home.manageRules", json!({ "moveUp": k + 1 }));
-                    }
-                }
+        match self.apply(app, d, rule) {
+            Ok(()) => {
                 self.error = None;
+                self.shown = None;
+                self.original = None;
+                self.key = None;
                 true
             }
             Err(e) => {
-                self.error = Some(crate::messages::plain_error(&gridcraft_ui_egui::clean_error(&e)));
+                self.error = Some(e);
                 false
             }
         }
@@ -1006,9 +1023,4 @@ mod tests {
         assert_eq!(s["stops"].as_array().unwrap().len(), 3);
         assert_eq!(s["stops"][1]["type"], "percentile");
     }
-}
-
-/// Identifies the workbook as it is now (it is replaced on every change).
-fn wb_ptr(app: &SheetApp) -> usize {
-    app.session.active().map_or(0, |d| std::sync::Arc::as_ptr(&d.wb) as usize)
 }

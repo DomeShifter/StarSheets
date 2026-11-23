@@ -257,3 +257,27 @@ fn whole_workbooks_and_patches_round_trip_as_raw_text() {
     let ToClient::Applied { change: Change::State { patch }, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
     assert_eq!(fingerprint(&apply_patch(&before, &patch).unwrap()), fingerprint(&after));
 }
+
+#[test]
+fn clip_goes_into_the_section_and_comes_back() {
+    let mut s = Session::new();
+    s.execute("file.new", json!({})).unwrap();
+    s.execute("range.setValues", json!({"range": "A1", "values": [["a", "b"], ["c", "d"], ["e", "f"]]})).unwrap();
+    s.execute("home.wrapText", json!({"range": "A1:B2", "on": false, "clip": true})).unwrap();
+    s.execute("workbook.setHostData", json!({"data": "{\"v\":1,\"dv\":[]}"})).unwrap();
+    let mut wb = (*s.active().unwrap().wb).clone();
+    clip_into_host(&mut wb);
+    let host: Json = serde_json::from_str(wb.host_data.as_deref().unwrap()).unwrap();
+    assert_eq!(host["clip"], json!([{"sheet": "Sheet1", "ranges": "A1:B2"}]));
+    assert_eq!(host["dv"], json!([]), "other parts kept");
+    // Read back into a workbook without the style.
+    let mut t = Session::new();
+    t.execute("file.new", json!({})).unwrap();
+    t.execute("range.setValues", json!({"range": "A1", "values": [["a", "b"], ["c", "d"], ["e", "f"]]})).unwrap();
+    let mut back = (*t.active().unwrap().wb).clone();
+    back.host_data = wb.host_data.clone();
+    clip_from_host(&mut back);
+    let clip = |w: &gridcraft_engine::model::Workbook, a: &str| w.styles.get(w.sheets[0].style_id(gridcraft_engine::core::CellRef::parse(a).unwrap())).align.clip;
+    assert!(clip(&back, "A1") && clip(&back, "B2") && !clip(&back, "A3"));
+    assert!(!back.host_data.as_deref().unwrap_or("").contains("clip"));
+}

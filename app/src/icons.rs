@@ -53,6 +53,7 @@ const ICONS: &[(&str, &[u8])] = &[
     ("format_clear", include_bytes!("../icons/format_clear.svg")),
     ("format_color_fill", include_bytes!("../icons/format_color_fill.svg")),
     ("format_color_reset", include_bytes!("../icons/format_color_reset.svg")),
+    ("format_text_clip", include_bytes!("../icons/format_text_clip.svg")),
     ("format_color_text", include_bytes!("../icons/format_color_text.svg")),
     ("format_italic", include_bytes!("../icons/format_italic.svg")),
     ("format_paint", include_bytes!("../icons/format_paint.svg")),

@@ -197,7 +197,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     Cmd("Bottom", "home.alignBottom", ""),
                 ],
             ),
-            Sub("Wrapping", &[CmdWith("Overflow", "home.wrapText", "", r#"{"on":false}"#), CmdWith("Wrap", "home.wrapText", "", r#"{"on":true}"#)]),
+            Sub("Wrapping", &[CmdWith("Overflow", "home.wrapText", "", r#"{"on":false}"#), CmdWith("Wrap", "home.wrapText", "", r#"{"on":true}"#), CmdWith("Clip", "home.wrapText", "", r#"{"on":false,"clip":true}"#)]),
             Sub(
                 "Rotation",
                 &[
@@ -426,7 +426,11 @@ const V_ALIGN: &[(&str, &str, &str)] = &[
 ];
 
 // Sheets also has Clip; GridCraft has no clip mode yet.
-const WRAP: &[(&str, &str, &str)] = &[("icon:keyboard_tab|Overflow", "home.wrapText", r#"{"on":false}"#), ("icon:wrap_text|Wrap", "home.wrapText", r#"{"on":true}"#)];
+const WRAP: &[(&str, &str, &str)] = &[
+    ("icon:keyboard_tab|Overflow", "home.wrapText", r#"{"on":false}"#),
+    ("icon:wrap_text|Wrap", "home.wrapText", r#"{"on":true}"#),
+    ("icon:format_text_clip|Clip", "home.wrapText", r#"{"on":false,"clip":true}"#),
+];
 
 const ROTATION: &[(&str, &str, &str)] = &[
     ("icon:text_rotation_none|None", "home.orientation", r#"{"angle":0}"#),
