@@ -297,6 +297,8 @@ pub fn form_style(ui: &mut Ui) {
 
 /// Shows a dialog in the house style: title (with ✕ when `close` is given), then the body.
 pub fn dialog<R>(ctx: &egui::Context, id: &str, width: f32, title: &str, close: Option<&mut bool>, body: impl FnOnce(&mut Ui) -> R) -> R {
+    // While it shows, keys are the dialog's, not the grid's (input.rs).
+    crate::input::note_modal(ctx);
     egui::Modal::new(egui::Id::new(id))
         .frame(dialog_frame())
         .show(ctx, |ui| {

@@ -13,4 +13,21 @@ browser
 
 Each frame, `shell.ui` adds its top panels first. Then `SheetApp::ui` draws the formula bar, tabs and grid below them. GridCraft's own title bar, File tab and ribbon are turned off through `Chrome`.
 
+## Who gets the keyboard
+
+GridCraft's grid takes every key when no text box has the keyboard, and our dialogs are drawn
+after the grid. `app/src/input.rs` decides, just before the grid draws, whether the grid gets
+this frame's keys:
+
+| Situation | The grid… |
+|---|---|
+| A box let go of the keyboard this frame (Enter/Tab in a panel, menu or toolbar box) | doesn't see the keys: they were the box's |
+| A house dialog was showing last frame | doesn't see the keys: they go to the dialogs drawn after it; if the dialog had closed, they are replayed to the grid next frame |
+| Anything else | gets the keys |
+
+Every `house::dialog` marks itself, so a new dialog needs no extra code. Clicks behind a dialog
+are already blocked by egui's Modal. Widget-specific keys that must win before the grid (spelling
+suggestions' Esc, the find bar, Delete on drop-down cells) are handled just before this check in
+`web.rs`.
+
 Later phases add a small server (Rust, same engine) for the file list, autosave, version history and sharing. Design notes for that go here when phase 2 starts.

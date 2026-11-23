@@ -89,7 +89,7 @@ pub fn start() {
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
                     install_wake(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), spell: crate::spelling::Suggest::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), input: crate::input::Router::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), spell: crate::spelling::Suggest::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
                 }),
             )
             .await;
@@ -125,6 +125,8 @@ struct WebShell {
     custom_date: crate::customdate::CustomDate,
     custom_number: crate::customnumber::CustomNumber,
     settings: crate::settings::SettingsWindow,
+    /// Who gets the keyboard each frame: the grid or a dialog (input.rs).
+    input: crate::input::Router,
     notes: crate::notes::Notes,
     calc: crate::calcpreview::CalcPreview,
     merge: crate::merge::MergeGuard,
@@ -255,6 +257,7 @@ impl eframe::App for WebShell {
     /// Forwards a browser frame's raw input to the shared app before eframe handles it.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         drop_alt_text(raw);
+        self.input.raw_input(raw);
         self.autolink.saw_input(raw);
         self.app.raw_input_hook(ctx, raw);
     }
@@ -289,15 +292,11 @@ impl eframe::App for WebShell {
         self.spell.before(&ctx);
         self.find.keys(&self.app, &ctx);
         crate::dvpanel::delete_key(&mut self.app);
-        // A one-line box in a panel, menu or the toolbar (chart range, font size, find, rule
-        // formula…) lets go of the keyboard when Enter or Tab is pressed. The grid, drawn next,
-        // then finds nothing focused and would take that same key as its own: Enter started
-        // editing the active cell (to-do row 57). The key was the box's, so the grid doesn't see
-        // this frame's keys; from the next frame it has the keyboard as usual.
-        if focus_at_start.is_some() && ctx.memory(|m| m.focused()).is_none() {
-            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
-        }
+        // Whether the grid gets this frame's keys: not when a box just let go of them, nor while
+        // a dialog is showing (input.rs has the rules).
+        self.input.before_grid(&ctx, focus_at_start);
         self.app.ui(ui);
+        self.input.after_grid(&ctx);
         browser_double_click(&mut self.app, &ctx);
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
@@ -325,6 +324,7 @@ impl eframe::App for WebShell {
         self.spell.ui(&mut self.app, &ctx);
         crate::house::style_tooltips(&ctx);
         copy_without_https(ui.ctx());
+        self.input.end_frame(&ctx);
     }
 }
 
