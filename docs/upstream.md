@@ -71,3 +71,4 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 2026-11-21 | → v0.19.1 | first pin |
 | 0043 | ui-egui | "Insert row below" and "Insert column right" in the cell menu; `grid::insert_after` public for the Insert menu |
 | 0044 | ui-egui | The right-click menu of charts, pictures and shapes uses the host's menu look (padding, icons) |
+| 0045 | chart | A doughnut series with nothing to draw (text, blanks) gets no ring, so it no longer shrinks the real rings |

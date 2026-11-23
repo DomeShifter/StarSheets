@@ -25,6 +25,8 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- A doughnut chart whose range includes a column of text no longer shrinks: the text column used
+  to get an empty ring of its own that squeezed the real one.
 - Undo (Ctrl+Z) no longer jumps to the top of the sheet; you stay where you were working.
 - Pressing Enter in a side-panel box (a chart's data range, find, a rule's formula, the font
   size…) no longer also starts editing a cell on the sheet.
