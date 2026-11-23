@@ -124,6 +124,13 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
                     }
                     break (file, client);
                 }
+                // A tab older than protocol 3 sends `{"t": "hello", …}` without "c": it reads our
+                // Reload (`{"t": "reload"}`) the same as before, and gets the new app.
+                Err(_) if t.contains("\"hello\"") => {
+                    crate::log::note(&app.store, &format!("tab of {} on an older StarSheets asked to reload", who(&user)));
+                    let _ = socket.send(Message::Text(text(&ToClient::Reload).into())).await;
+                    return;
+                }
                 _ => return,
             },
             Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
@@ -339,8 +346,11 @@ impl Room {
         }
     }
 
-    fn snapshot(&self) -> serde_json::Value {
-        self.wb().map(|wb| sync::workbook_json(&wb)).unwrap_or_default()
+    fn snapshot(&self) -> sync::Whole {
+        match self.wb() {
+            Some(wb) => sync::workbook_json(&wb),
+            None => serde_json::value::to_raw_value(&serde_json::Value::Null).expect("null"),
+        }
     }
 
     fn handle(&mut self, msg: RoomMsg) {

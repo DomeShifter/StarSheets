@@ -19,7 +19,7 @@ gridcraft-chart = { path = "upstream/gridcraft/crates/chart" }
 egui = "0.37"
 eframe = { version = "0.37", default-features = false }
 log = "0.4"
-serde_json = { version = "1", features = ["float_roundtrip"] }
+serde_json = { version = "1", features = ["float_roundtrip", "raw_value"] }
 rfd = "0.17"
 
 # Same build profiles as upstream.

@@ -28,6 +28,10 @@ new features and the last one for fixes.
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Big files use far less memory:** the server sends a workbook as text instead of building a
+  copy of it in memory first. A 2-million-cell file took 3.3 GB on the server when opened; now
+  it takes about 360 MB, and undo on a big sheet no longer copies it the same way. (Open tabs on
+  an older version reload once.)
 - **Ctrl+D and Ctrl+R** copy drop-downs and other data validation along, like the fill handle.
 - The **borders menu** stays open while you pick borders, colours and line styles; click away to
   close it.

@@ -131,7 +131,7 @@ fn the_server_runs_only_editing_commands() {
 
 #[test]
 fn messages_round_trip() {
-    let m = ToServer::Change { cseq: 3, base: 9, change: Change::State { patch: json!({"sheets": []}) } };
+    let m = ToServer::Change { cseq: 3, base: 9, change: Change::State { patch: Patch { rest: serde_json::value::to_raw_value(&json!({})).unwrap(), sheets: vec![] } } };
     let t = serde_json::to_string(&m).unwrap();
     assert!(matches!(serde_json::from_str::<ToServer>(&t).unwrap(), ToServer::Change { cseq: 3, base: 9, .. }));
 }
@@ -236,4 +236,24 @@ fn a_sheet_copied_to_another_workbook_keeps_its_look() {
     assert!(dst.styles.get(copied.style_id(c)).font.bold, "bold survives the move");
     assert!(!dst.styles.get(copied.style_id(c)).font.italic);
     assert_ne!(copied.uid.get(), src.sheets[0].uid.get(), "a new identity");
+}
+
+/// Whole workbooks and sheets travel as raw JSON text (protocol 3): they survive the round trip
+/// through the tagged messages without a `serde_json::Value` tree.
+#[test]
+fn whole_workbooks_and_patches_round_trip_as_raw_text() {
+    let mut a = Session::new();
+    a.execute("file.new", json!({})).unwrap();
+    a.execute("cell.set", json!({"cell": "B2", "input": "=1+2"})).unwrap();
+    let before = a.active().unwrap().wb.clone();
+    let m = ToClient::Welcome { seq: 4, workbook: workbook_json(&before), can_edit: true };
+    let t = serde_json::to_string(&m).unwrap();
+    let ToClient::Welcome { workbook, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
+    assert_eq!(fingerprint(&workbook_from_json(&workbook, None).unwrap()), fingerprint(&before));
+    a.execute("cell.set", json!({"cell": "C3", "input": "x"})).unwrap();
+    let after = a.active().unwrap().wb.clone();
+    let m = ToClient::Applied { seq: 5, client: String::new(), cseq: 0, change: Change::State { patch: make_patch(&before, &after) } };
+    let t = serde_json::to_string(&m).unwrap();
+    let ToClient::Applied { change: Change::State { patch }, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
+    assert_eq!(fingerprint(&apply_patch(&before, &patch).unwrap()), fingerprint(&after));
 }

@@ -13,13 +13,13 @@ use gridcraft_engine::Session;
 use gridcraft_engine::model::{Sheet, Workbook};
 use gridcraft_engine::selection::Selection;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value as Json, json};
+use serde_json::Value as Json;
 
 /// Tabs and server must run the same engine. CI sets STARSHEETS_BUILD to the commit for both.
 /// How tabs and the server talk. Bump it when a message changes shape: only then must open tabs
 /// reload. (A tab on another build of the same protocol keeps working: replayed changes are
 /// checked by fingerprint, and a difference falls back to sending the finished state.)
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 
 pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
     Some(b) => b,
@@ -28,8 +28,11 @@ pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
 
 // ---------------------------------------------------------------- messages
 
+// Messages are adjacently tagged (`{"t": "welcome", "c": {…}}`): with the tag first, serde reads
+// the content straight from the text, so a whole workbook or sheet can stay raw JSON text
+// ([`Whole`]) instead of a `serde_json::Value` tree, which took about 1.5 KB a cell (protocol 3).
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "t", rename_all = "snake_case")]
+#[serde(tag = "t", content = "c", rename_all = "snake_case")]
 pub enum ToServer {
     /// First message: the file (its id), the tab's build and a random id for this tab.
     Hello {
@@ -60,12 +63,12 @@ pub struct Person {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "t", rename_all = "snake_case")]
+#[serde(tag = "t", content = "c", rename_all = "snake_case")]
 pub enum ToClient {
     /// The file as the server has it, at revision `seq`.
     Welcome {
         seq: u64,
-        workbook: Json,
+        workbook: Whole,
         /// False for someone who may only view the file.
         #[serde(default = "yes")]
         can_edit: bool,
@@ -78,7 +81,7 @@ pub enum ToClient {
     /// changes after it again.
     NeedState { cseq: u64 },
     /// Replace the whole file (undo, redo, or a tab that fell out of step).
-    Reset { seq: u64, workbook: Json },
+    Reset { seq: u64, workbook: Whole },
     /// The fingerprint of the whole file at `seq`, to check against.
     Check { seq: u64, hash: String },
     /// Saved to the server's folder (Unix seconds).
@@ -101,10 +104,32 @@ fn yes() -> bool {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "k", rename_all = "snake_case")]
+#[serde(tag = "k", content = "c", rename_all = "snake_case")]
 pub enum Change {
     Cmd { sheet: usize, sel: Selection, id: String, params: Json, locale: InputLocale, fp: String },
-    State { patch: Json },
+    State { patch: Patch },
+}
+
+/// A workbook (or sheet) as JSON text, sent and read as it is: never a `serde_json::Value`.
+pub type Whole = Box<serde_json::value::RawValue>;
+
+/// The finished state of a change: the workbook's parts other than sheets, and each sheet either
+/// unchanged (`keep`: its index in the workbook the change was made on) or in full.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Patch {
+    pub rest: Whole,
+    pub sheets: Vec<PatchSheet>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PatchSheet {
+    Keep(usize),
+    Sheet(Whole),
+}
+
+fn whole<T: Serialize + ?Sized>(v: &T) -> Whole {
+    serde_json::value::to_raw_value(v).unwrap_or_else(|_| serde_json::value::RawValue::from_string("null".into()).expect("null"))
 }
 
 /// How typed input is read (dates, number separators): the person's setting, which is
@@ -318,12 +343,12 @@ fn keep_unserialized(wb: &mut Workbook, from: &Workbook) {
     wb.vba_project = from.vba_project.clone();
 }
 
-pub fn workbook_json(wb: &Workbook) -> Json {
-    serde_json::to_value(wb).unwrap_or(Json::Null)
+pub fn workbook_json(wb: &Workbook) -> Whole {
+    whole(wb)
 }
 
-pub fn workbook_from_json(v: &Json, current: Option<&Workbook>) -> Result<Workbook, String> {
-    let mut wb: Workbook = serde_json::from_value(v.clone()).map_err(|e| format!("bad workbook: {e}"))?;
+pub fn workbook_from_json(v: &Whole, current: Option<&Workbook>) -> Result<Workbook, String> {
+    let mut wb: Workbook = serde_json::from_str(v.get()).map_err(|e| format!("bad workbook: {e}"))?;
     if let Some(c) = current {
         keep_unserialized(&mut wb, c);
     }
@@ -332,34 +357,30 @@ pub fn workbook_from_json(v: &Json, current: Option<&Workbook>) -> Result<Workbo
 
 /// The finished state of what a change altered: sheets it changed in full, the others as
 /// `{"keep": i}` (sheet `i` of the workbook it was made on), and the workbook's other parts.
-pub fn make_patch(before: &Workbook, after: &Workbook) -> Json {
+pub fn make_patch(before: &Workbook, after: &Workbook) -> Patch {
     let mut rest = after.clone();
     rest.sheets = Vec::new();
-    let mut v = serde_json::to_value(&rest).unwrap_or(json!({}));
-    let sheets: Vec<Json> = after
+    let sheets = after
         .sheets
         .iter()
         .map(|sh| match before.sheets.iter().position(|b| Arc::ptr_eq(b, sh)) {
-            Some(i) => json!({ "keep": i }),
-            None => json!({ "sheet": serde_json::to_value(&**sh).unwrap_or(Json::Null) }),
+            Some(i) => PatchSheet::Keep(i),
+            None => PatchSheet::Sheet(whole(&**sh)),
         })
         .collect();
-    v["sheets"] = Json::Array(sheets);
-    v
+    Patch { rest: whole(&rest), sheets }
 }
 
-pub fn apply_patch(current: &Workbook, patch: &Json) -> Result<Workbook, String> {
-    let mut p = patch.clone();
-    let entries = p.get_mut("sheets").map(Json::take).unwrap_or(json!([]));
-    p["sheets"] = json!([]);
-    let mut wb: Workbook = serde_json::from_value(p).map_err(|e| format!("bad change: {e}"))?;
+pub fn apply_patch(current: &Workbook, patch: &Patch) -> Result<Workbook, String> {
+    let mut wb: Workbook = serde_json::from_str(patch.rest.get()).map_err(|e| format!("bad change: {e}"))?;
     let mut sheets = Vec::new();
-    for e in entries.as_array().cloned().unwrap_or_default() {
-        if let Some(i) = e.get("keep").and_then(Json::as_u64) {
-            sheets.push(current.sheets.get(i as usize).cloned().ok_or("the change refers to a sheet that isn't there")?);
-        } else {
-            let sh: Sheet = serde_json::from_value(e.get("sheet").cloned().unwrap_or(Json::Null)).map_err(|e| format!("bad sheet: {e}"))?;
-            sheets.push(Arc::new(sh));
+    for e in &patch.sheets {
+        match e {
+            PatchSheet::Keep(i) => sheets.push(current.sheets.get(*i).cloned().ok_or("the change refers to a sheet that isn't there")?),
+            PatchSheet::Sheet(raw) => {
+                let sh: Sheet = serde_json::from_str(raw.get()).map_err(|e| format!("bad sheet: {e}"))?;
+                sheets.push(Arc::new(sh));
+            }
         }
     }
     if sheets.is_empty() {
