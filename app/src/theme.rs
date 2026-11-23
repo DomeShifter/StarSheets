@@ -14,6 +14,21 @@ pub const BLUE: Color32 = rgb(0x1A73E8);
 pub const PAGE: Color32 = rgb(0xF9FBFD);
 /// The toolbar pill.
 pub const TOOLBAR: Color32 = rgb(0xEDF2FA);
+
+thread_local! {
+    /// The toolbar background chosen in Settings › Style (None = TOOLBAR).
+    static TOOLBAR_CHOICE: std::cell::Cell<Option<Color32>> = const { std::cell::Cell::new(None) };
+}
+
+/// The toolbar's background: the Settings › Style choice, or Google's pale blue.
+pub fn toolbar() -> Color32 {
+    TOOLBAR_CHOICE.with(|c| c.get()).unwrap_or(TOOLBAR)
+}
+
+/// Sets (or with None, resets) the toolbar background; the next frame draws it.
+pub fn set_toolbar(colour: Option<Color32>) {
+    TOOLBAR_CHOICE.with(|c| c.set(colour));
+}
 /// The Share button.
 pub const SHARE: Color32 = rgb(0xC2E7FF);
 pub const TEXT: Color32 = rgb(0x1F1F1F);

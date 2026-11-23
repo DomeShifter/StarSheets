@@ -58,15 +58,38 @@ pub struct Bottom {
     /// The tab strip's scroll position and how far it can go, as of last frame (◀ ▶ buttons).
     tab_offset: f32,
     tab_max: f32,
-    /// Where a click on ◀ or ▶ moves the tab strip to.
-    tab_scroll_to: Option<f32>,
+    /// A slide of the tab strip started by ◀ or ▶: (from, to, start time).
+    tab_slide: Option<(f32, f32, f64)>,
     /// How wide the quick sum was last frame: the tabs get the rest (to-do 2 row 28: a fixed
     /// 220 px left a gap when it was short or hidden).
     quick_w: f32,
 }
 
-/// How far one click on the tab strip's ◀ or ▶ scrolls.
-const TAB_STEP: f32 = 160.0;
+/// How long the tab strip takes to slide after a click on ◀ or ▶ (seconds).
+const TAB_SLIDE: f64 = 0.25;
+
+/// Where ◀ or ▶ moves the tab strip (to-do 3 row 3): a page of whole tabs at a time.
+/// ▶: the last tab on screen (even partly) becomes the first one shown. ◀: the first tab on
+/// screen becomes the last one shown. `tabs` are (left, right) in strip coordinates, in order.
+/// A tab wider than the strip still moves on by one tab, so a click always does something.
+fn tab_page(tabs: &[(f32, f32)], offset: f32, view: f32, max: f32, forward: bool) -> f32 {
+    let target = if forward {
+        let last = tabs.iter().rposition(|(l, _)| *l < offset + view - 0.5);
+        match last {
+            Some(k) if tabs[k].0 > offset + 0.5 => tabs[k].0,
+            Some(k) => tabs.get(k + 1).map_or(max, |t| t.0),
+            None => max,
+        }
+    } else {
+        let first = tabs.iter().position(|(_, r)| *r > offset + 0.5);
+        match first {
+            Some(k) if tabs[k].1 - view < offset - 0.5 => tabs[k].1 - view,
+            Some(k) if k > 0 => tabs[k - 1].1 - view,
+            _ => 0.0,
+        }
+    };
+    target.clamp(0.0, max)
+}
 
 /// Where a dragged tab would land (its new position among the tabs): past every tab whose middle
 /// its own middle has crossed. Dragging right, a tab only gives way once the dragged tab's middle
@@ -173,8 +196,16 @@ impl Bottom {
                         .max_width(strip)
                         .id_salt("starsheets_tabs")
                         .scroll_source(egui::containers::scroll_area::ScrollSource { scroll_bar: false, ..Default::default() });
-                    if let Some(x) = self.tab_scroll_to.take() {
-                        area = area.horizontal_scroll_offset(x);
+                    // A ◀ ▶ slide: ease out, one step a frame.
+                    if let Some((from, to, t0)) = self.tab_slide {
+                        let t = ((ui.input(|i| i.time) - t0) / TAB_SLIDE).clamp(0.0, 1.0) as f32;
+                        let eased = 1.0 - (1.0 - t).powi(3);
+                        area = area.horizontal_scroll_offset(from + (to - from) * eased);
+                        if t >= 1.0 {
+                            self.tab_slide = None;
+                        } else {
+                            ui.ctx().request_repaint();
+                        }
                     }
                     let out = area.show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -188,12 +219,18 @@ impl Bottom {
                     if overflow {
                         ui.add_space(6.0);
                         let left = ui.add_enabled_ui(self.tab_offset > 0.5, |ui| icon_button(ui, "chevron_left", "Scroll sheet tabs left")).inner;
+                        let base = out.inner_rect.left() - self.tab_offset;
+                        let mut tabs: Vec<(f32, f32)> = self.tab_rects.iter().map(|(_, r)| (r.left() - base, r.right() - base)).collect();
+                        tabs.sort_by(|a, b| a.0.total_cmp(&b.0));
+                        let (offset, view, max) = (self.tab_offset, out.inner_rect.width(), self.tab_max);
+                        let page = |forward: bool| tab_page(&tabs, offset, view, max, forward);
+                        let now = ui.input(|i| i.time);
                         if left.clicked() {
-                            self.tab_scroll_to = Some((self.tab_offset - TAB_STEP).max(0.0));
+                            self.tab_slide = Some((self.tab_offset, page(false), now));
                         }
                         let right = ui.add_enabled_ui(self.tab_offset < self.tab_max - 0.5, |ui| icon_button(ui, "chevron_right", "Scroll sheet tabs right")).inner;
                         if right.clicked() {
-                            self.tab_scroll_to = Some((self.tab_offset + TAB_STEP).min(self.tab_max));
+                            self.tab_slide = Some((self.tab_offset, page(true), now));
                         }
                     }
                     let w = ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.quick_sum(app, ui)).inner;
@@ -587,5 +624,40 @@ mod tab_drag_tests {
         assert_eq!(to, 2);
         assert_eq!(make_room(2, 3, to, 86.0), 86.0);
         assert_eq!(make_room(1, 3, to, 86.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod tab_page_tests {
+    use super::tab_page;
+
+    /// Ten tabs 100 px wide, no gaps; the strip shows 250 px (two and a half tabs).
+    fn tabs() -> Vec<(f32, f32)> {
+        (0..10).map(|k| (k as f32 * 100.0, k as f32 * 100.0 + 100.0)).collect()
+    }
+    const VIEW: f32 = 250.0;
+    const MAX: f32 = 750.0;
+
+    #[test]
+    fn right_arrow_brings_the_last_tab_on_screen_to_the_front() {
+        // Tabs 0, 1 and half of 2 are shown: tab 2 becomes the first.
+        assert_eq!(tab_page(&tabs(), 0.0, VIEW, MAX, true), 200.0);
+        // Never past the end.
+        assert_eq!(tab_page(&tabs(), 700.0, VIEW, MAX, true), MAX);
+    }
+
+    #[test]
+    fn left_arrow_brings_the_first_tab_on_screen_to_the_back() {
+        // Tabs 4 (from 400) to half of 6 are shown: tab 4 ends at the right edge.
+        assert_eq!(tab_page(&tabs(), 400.0, VIEW, MAX, false), 250.0);
+        // Never before the start.
+        assert_eq!(tab_page(&tabs(), 100.0, VIEW, MAX, false), 0.0);
+    }
+
+    #[test]
+    fn a_tab_wider_than_the_strip_still_moves_on() {
+        let wide = vec![(0.0, 400.0), (400.0, 800.0), (800.0, 1200.0)];
+        assert_eq!(tab_page(&wide, 0.0, VIEW, 950.0, true), 400.0);
+        assert_eq!(tab_page(&wide, 400.0, VIEW, 950.0, false), 150.0);
     }
 }

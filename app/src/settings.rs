@@ -2,6 +2,7 @@
 //! dates are read, e.g. 05/08/2026 as 5 August in the UK), the default date, time and number
 //! formats new entries get, and how numbers are written (1,234.56 or 1.234,56). Kept in the
 //! browser, and handed to GridCraft's input reader and number display (patches 0026, 0033).
+//! The Style tab holds look-and-feel choices (to-do 3 row 6): for now the toolbar background.
 
 use gridcraft_engine::core::Value;
 use gridcraft_ui_egui::SheetApp;
@@ -56,12 +57,15 @@ pub struct Prefs {
     /// How numbers are written (an index into SEPARATORS).
     #[serde(default)]
     pub separators: usize,
+    /// Style: the toolbar background (None = Google's pale blue), 0xRRGGBB.
+    #[serde(default)]
+    pub toolbar: Option<u32>,
 }
 
 impl Default for Prefs {
     fn default() -> Prefs {
         let (_, _, date, time, _) = LOCALES[0];
-        Prefs { locale: 0, date: date.into(), time: time.into(), number: String::new(), separators: 0 }
+        Prefs { locale: 0, date: date.into(), time: time.into(), number: String::new(), separators: 0, toolbar: None }
     }
 }
 
@@ -101,8 +105,20 @@ impl Prefs {
         }
         .apply();
         let _ = app;
+        self.apply_style();
         DEFAULTS.with(|d| *d.borrow_mut() = (self.date.clone(), self.time.clone()));
     }
+}
+
+impl Prefs {
+    /// Hands the Style choices to the app's drawing (also while the window is open: live preview).
+    pub fn apply_style(&self) {
+        crate::theme::set_toolbar(self.toolbar.map(rgb));
+    }
+}
+
+fn rgb(c: u32) -> egui::Color32 {
+    egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
 
 thread_local! {
@@ -130,55 +146,27 @@ fn sample(code: &str) -> String {
 #[derive(Default)]
 pub struct SettingsWindow {
     draft: Option<Prefs>,
+    /// The tab shown: 0 General, 1 Style.
+    tab: usize,
 }
 
 impl SettingsWindow {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new(REQUEST))).is_some() {
             self.draft = Some(Prefs::load());
+            self.tab = 0;
         }
         let Some(d) = self.draft.as_mut() else { return };
+        let tab = &mut self.tab;
         let mut done = None;
         let mut closed = false;
         house::dialog(ctx, "starsheets_settings", 520.0, "Settings", Some(&mut closed), |ui| {
-            house::note(ui, "These apply to everything you open in this browser.");
-            house::gap(ui);
-            house::label(ui, "Locale", "How typed dates are read (05/08/2026 is 5 August in the UK, May 8 in the US), and the formats below.");
-            let before = d.locale;
-            let locales: Vec<&str> = LOCALES.iter().map(|l| l.0).collect();
-            house::select(ui, "set_locale", ui.available_width(), &mut d.locale, &locales, &[]);
-            if d.locale != before {
-                let (_, _, date, time, _) = LOCALES[d.locale];
-                d.date = date.into();
-                d.time = time.into();
-                d.separators = LOCALE_SEPARATORS.get(d.locale).copied().unwrap_or(0);
+            house::tabs(ui, tab, &["General", "Style"]);
+            if *tab == 1 {
+                style_tab(ui, d);
+            } else {
+                general_tab(ui, d);
             }
-            house::gap(ui);
-            ui.columns(3, |cols| {
-                for c in cols.iter_mut() {
-                    house::form_style(c);
-                }
-                let w = cols[0].available_width();
-                // Each list shows the sample date, time or number in that format.
-                let pick = |ui: &mut egui::Ui, id: &str, label: &str, codes: &[&str], now: &mut String, shown: &dyn Fn(&str) -> String| {
-                    house::label(ui, label, "");
-                    let labels: Vec<String> = codes.iter().map(|c| shown(c)).collect();
-                    let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
-                    let mut k = codes.iter().position(|c| *c == now.as_str()).unwrap_or(0);
-                    if house::select(ui, id, w, &mut k, &refs, &[]) {
-                        *now = codes[k].to_string();
-                    }
-                };
-                pick(&mut cols[0], "set_date", "Date", DATE_FORMATS, &mut d.date, &sample);
-                pick(&mut cols[1], "set_time", "Time", TIME_FORMATS, &mut d.time, &sample);
-                let codes: Vec<&str> = NUMBER_FORMATS.iter().map(|(_, c)| *c).collect();
-                pick(&mut cols[2], "set_number", "Numbers", &codes, &mut d.number, &|c: &str| NUMBER_FORMATS.iter().find(|(_, x)| *x == c).map_or("Automatic", |(l, _)| l).to_string());
-            });
-            house::note(ui, "New dates, times and numbers you type get these formats; cells already formatted keep theirs.");
-            house::gap(ui);
-            house::label(ui, "Numbers are written", "The decimal mark and thousands separator in cells (formulas keep 1.5 and commas).");
-            let labels: Vec<&str> = SEPARATORS.iter().map(|x| x.0).collect();
-            house::select(ui, "set_separators", ui.available_width(), &mut d.separators, &labels, &[]);
             match house::actions(ui, &["Cancel", "Save settings"]) {
                 Some(0) => done = Some(false),
                 Some(_) => done = Some(true),
@@ -188,6 +176,10 @@ impl SettingsWindow {
                 done = Some(false);
             }
         });
+        // Style choices show straight away, before Save (house rule: live preview).
+        if let Some(d) = &self.draft {
+            d.apply_style();
+        }
         if closed {
             done = Some(false);
         }
@@ -198,10 +190,85 @@ impl SettingsWindow {
                     p.apply(app);
                 }
             }
-            Some(false) => self.draft = None,
+            Some(false) => {
+                self.draft = None;
+                // Back to what was saved.
+                Prefs::load().apply_style();
+            }
             None => {}
         }
     }
+}
+
+/// The Style tab: look-and-feel choices, kept in this browser.
+fn style_tab(ui: &mut egui::Ui, d: &mut Prefs) {
+    house::note(ui, "How StarSheets looks in this browser. Changes show straight away; Cancel puts them back.");
+    house::gap(ui);
+    house::label(ui, "Toolbar background", "The rounded bar of buttons under the menus.");
+    let now = d.toolbar.map(rgb).unwrap_or(crate::theme::TOOLBAR);
+    let shown = match d.toolbar {
+        Some(_) => house::hex(now),
+        None => "Default (pale blue)".to_string(),
+    };
+    let field = egui::Button::new(egui::RichText::new(format!("      {shown}")).size(house::BODY).color(crate::theme::TEXT))
+        .right_text(egui::RichText::new("▾").size(house::BODY).color(crate::theme::TEXT_DIM))
+        .fill(egui::Color32::WHITE)
+        .stroke(egui::Stroke::new(1.0, crate::theme::BOX))
+        .corner_radius(egui::CornerRadius::same(house::FIELD_RADIUS))
+        .min_size(egui::vec2(240.0, house::FIELD_HEIGHT));
+    let r = ui.add(field);
+    let swatch = egui::Rect::from_center_size(r.rect.left_center() + egui::vec2(house::M + 9.0, 0.0), egui::vec2(18.0, 18.0));
+    ui.painter().rect_filled(swatch, 4, now);
+    ui.painter().rect_stroke(swatch, 4, egui::Stroke::new(1.0, crate::theme::DIVIDER), egui::StrokeKind::Inside);
+    egui::Popup::menu(&r).id(egui::Id::new("set_toolbar_colour")).show(|ui| {
+        match crate::colourpicker::palette(ui, d.toolbar, false, false) {
+            Some(crate::colourpicker::Choice::Colour(c)) => d.toolbar = Some(c),
+            Some(crate::colourpicker::Choice::Reset) => d.toolbar = None,
+            _ => {}
+        }
+    });
+}
+
+/// The General tab: locale and default formats.
+fn general_tab(ui: &mut egui::Ui, d: &mut Prefs) {
+    house::note(ui, "These apply to everything you open in this browser.");
+    house::gap(ui);
+    house::label(ui, "Locale", "How typed dates are read (05/08/2026 is 5 August in the UK, May 8 in the US), and the formats below.");
+    let before = d.locale;
+    let locales: Vec<&str> = LOCALES.iter().map(|l| l.0).collect();
+    house::select(ui, "set_locale", ui.available_width(), &mut d.locale, &locales, &[]);
+    if d.locale != before {
+        let (_, _, date, time, _) = LOCALES[d.locale];
+        d.date = date.into();
+        d.time = time.into();
+        d.separators = LOCALE_SEPARATORS.get(d.locale).copied().unwrap_or(0);
+    }
+    house::gap(ui);
+    ui.columns(3, |cols| {
+        for c in cols.iter_mut() {
+            house::form_style(c);
+        }
+        let w = cols[0].available_width();
+        // Each list shows the sample date, time or number in that format.
+        let pick = |ui: &mut egui::Ui, id: &str, label: &str, codes: &[&str], now: &mut String, shown: &dyn Fn(&str) -> String| {
+            house::label(ui, label, "");
+            let labels: Vec<String> = codes.iter().map(|c| shown(c)).collect();
+            let refs: Vec<&str> = labels.iter().map(String::as_str).collect();
+            let mut k = codes.iter().position(|c| *c == now.as_str()).unwrap_or(0);
+            if house::select(ui, id, w, &mut k, &refs, &[]) {
+                *now = codes[k].to_string();
+            }
+        };
+        pick(&mut cols[0], "set_date", "Date", DATE_FORMATS, &mut d.date, &sample);
+        pick(&mut cols[1], "set_time", "Time", TIME_FORMATS, &mut d.time, &sample);
+        let codes: Vec<&str> = NUMBER_FORMATS.iter().map(|(_, c)| *c).collect();
+        pick(&mut cols[2], "set_number", "Numbers", &codes, &mut d.number, &|c: &str| NUMBER_FORMATS.iter().find(|(_, x)| *x == c).map_or("Automatic", |(l, _)| l).to_string());
+    });
+    house::note(ui, "New dates, times and numbers you type get these formats; cells already formatted keep theirs.");
+    house::gap(ui);
+    house::label(ui, "Numbers are written", "The decimal mark and thousands separator in cells (formulas keep 1.5 and commas).");
+    let labels: Vec<&str> = SEPARATORS.iter().map(|x| x.0).collect();
+    house::select(ui, "set_separators", ui.available_width(), &mut d.separators, &labels, &[]);
 }
 
 #[cfg(test)]

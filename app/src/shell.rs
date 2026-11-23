@@ -557,7 +557,7 @@ impl Shell {
 
     fn toolbar(&mut self, app: &mut SheetApp, ui: &mut Ui) {
         let cur = current(app);
-        Frame::NONE.fill(theme::TOOLBAR).corner_radius(24.0).inner_margin(Margin::symmetric(12, 4)).show(ui, |ui| {
+        Frame::NONE.fill(theme::toolbar()).corner_radius(24.0).inner_margin(Margin::symmetric(12, 4)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal_centered(|ui| {
                 flat(ui);

@@ -460,6 +460,33 @@ pub fn select(ui: &mut Ui, id: &str, width: f32, current: &mut usize, labels: &[
     changed
 }
 
+/// A row of tabs (Google's dialog tabs): text labels, the chosen one blue with a 3 px blue bar
+/// under it, a 1 px divider under the whole row. Returns true when the choice changed.
+pub fn tabs(ui: &mut Ui, current: &mut usize, labels: &[&str]) -> bool {
+    let mut changed = false;
+    let row = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for (i, label) in labels.iter().enumerate() {
+            let on = i == *current;
+            let colour = if on { theme::BLUE } else { theme::TEXT_DIM };
+            let text = RichText::new(*label).size(BODY).color(colour);
+            let r = ui.add(egui::Button::new(if on { text.strong() } else { text }).frame_when_inactive(false).min_size(vec2(88.0, FIELD_HEIGHT + XS)));
+            if on {
+                let bar = egui::Rect::from_min_max(egui::pos2(r.rect.left() + S, r.rect.bottom() - 3.0), egui::pos2(r.rect.right() - S, r.rect.bottom()));
+                ui.painter().rect_filled(bar, CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, theme::BLUE);
+            }
+            if r.clicked() && !on {
+                *current = i;
+                changed = true;
+            }
+        }
+    });
+    let r = row.response.rect;
+    ui.painter().hline(ui.max_rect().x_range(), r.bottom(), Stroke::new(1.0, theme::DIVIDER));
+    ui.add_space(L);
+    changed
+}
+
 /// The most a menu's list may take before it scrolls: the window's height less a margin.
 pub fn menu_max_height(ctx: &egui::Context) -> f32 {
     (ctx.content_rect().height() - 2.0 * XL).max(160.0)

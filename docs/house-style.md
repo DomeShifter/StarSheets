@@ -40,6 +40,7 @@ Everything sits on a 4 px scale.
 | Text box, drop-down | 4 px | 12 px inside | 36 px high, 1 px grey outline (#747775), blue when open |
 | Button | pill (18 px) | 12 px inside | 36 px high, at least 88 px wide |
 | Divider | | 8 px above and below | 1 px #DADCE0 |
+| Tabs in a dialog (`house::tabs`) | | 16 px below the row | 14 px labels, at least 88 px wide; the chosen one blue and bold with a 3 px blue bar under it; 1 px #DADCE0 line under the row |
 
 ## Lists and drop-downs
 
