@@ -15,6 +15,8 @@ new features and the last one for fixes.
   last tab you could see to the front, ◀ does the same the other way.
 - Drop-down cells: only a click on the ▾ opens the list. Dragging from the ▾ or the fill handle
   now fills, selects or moves the cells, and the ▾ shows a pointing-hand cursor.
+- The name box list (left of fx) looks like the other menus, shows each named range's cells, and
+  has "Manage named ranges". Protected ranges no longer appear in it.
 
 ## [0.4.0] - 2026-11-23
 
