@@ -76,10 +76,9 @@ impl ErrorTip {
         let Some(cell) = app.grid.hover_cell else { return };
         let Some(d) = app.session.active() else { return };
         let Some(sh) = d.wb.active() else { return };
-        // A note shows on hover itself.
-        if sh.comments.contains_key(&cell) {
-            return;
-        }
+        // A note shows on hover itself, beside the cell: the error then shows above the cell, so
+        // both can be read (to-do 2 row 21).
+        let has_note = sh.comments.contains_key(&cell);
         let Value::Error(e) = sh.value(cell) else { return };
         // A picture in a cell keeps #VALUE! only as a fallback for formulas: not an error.
         if sh.cell_pictures.contains_key(&cell) {
@@ -96,9 +95,10 @@ impl ErrorTip {
         if app.grid.cells_rect.is_some_and(|r| !r.contains(rect.center())) {
             return;
         }
+        let (at, pivot) = if has_note { (rect.left_top() - vec2(0.0, 6.0), Align2::LEFT_BOTTOM) } else { (rect.right_top() + vec2(6.0, 0.0), Align2::LEFT_TOP) };
         egui::Area::new(egui::Id::new("starsheets_error_tip"))
-            .fixed_pos(rect.right_top() + vec2(6.0, 0.0))
-            .pivot(Align2::LEFT_TOP)
+            .fixed_pos(at)
+            .pivot(pivot)
             .order(egui::Order::Tooltip)
             .interactable(false)
             .show(ctx, |ui| {

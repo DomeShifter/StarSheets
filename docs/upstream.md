@@ -84,3 +84,5 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0055 | ui-egui | Sheets keys Ctrl+Shift+L/E/R set the alignment (`on: true`) instead of toggling back to General |
 | 0056 | engine | Deleting the active tab moves to the visible tab on its left (right only if none), as Sheets |
 | 0057 | ui-egui | Tick boxes 17 px at 100% (were 13): half the space above and below them in a default row |
+| 0058 | xlsx | Google Sheets export: a spill placeholder (`DUMMYFUNCTION("""COMPUTED_VALUE""")`) next to an unwrapped formula is left empty for the spill (was #SPILL!); placeholders of a still-wrapped formula keep their values |
+| 0059 | ui-egui | A picture in a cell is placed by the cell's alignment (left/right/centre; top/middle/bottom; General = centred across) |

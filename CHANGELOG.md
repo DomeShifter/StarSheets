@@ -34,6 +34,10 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Google Sheets files: array formulas (ARRAYFORMULA, QUERY…) work after import instead of
+  showing #SPILL! (the cells they fill are no longer blocked by Google's placeholders).
+- A picture in a cell follows the cell's alignment.
+- Hovering a cell with both a note and an error shows both.
 - Choosing an alignment a cell already has keeps it, from the toolbar, the menu or the keys
   (it used to switch back to the default).
 - Deleting the tab you're on takes you to the tab on its left.
