@@ -296,7 +296,7 @@ impl Live {
                 self.can_edit = can_edit;
                 app.session.read_only = !can_edit;
                 let current = app.session.active().map(|d| d.wb.clone());
-                match sync::workbook_from_json(&workbook, current.as_deref()) {
+                match sync::workbook_from_json_recalc(&workbook, current.as_deref()) {
                     Ok(wb) => {
                         self.confirmed = Some(Arc::new(wb));
                         self.acked.clear();
@@ -367,7 +367,7 @@ impl Live {
             }
             ToClient::Reset { seq, workbook } => {
                 let current = app.session.active().map(|d| d.wb.clone());
-                if let Ok(wb) = sync::workbook_from_json(&workbook, current.as_deref()) {
+                if let Ok(wb) = sync::workbook_from_json_recalc(&workbook, current.as_deref()) {
                     self.confirmed = Some(Arc::new(wb));
                     self.acked.clear();
                     self.seq = seq;

@@ -281,3 +281,22 @@ fn clip_goes_into_the_section_and_comes_back() {
     assert!(clip(&back, "A1") && clip(&back, "B2") && !clip(&back, "A3"));
     assert!(!back.host_data.as_deref().unwrap_or("").contains("clip"));
 }
+
+/// A tab that gets the whole file from the server shows what array formulas spill, not only
+/// their first cell (James's to-do: `={A2:C2;SORTN(SORT(A3:C,2,0),9^9,2,1,TRUE)}` showed "Item").
+#[test]
+fn whole_workbook_from_the_server_shows_spilled_values() {
+    let mut a = session();
+    for (cell, input) in [("A1", "Item"), ("B1", "Cost"), ("A2", "Pears"), ("B2", "2"), ("A3", "Apples"), ("B3", "1")] {
+        a.execute("cell.set", json!({"cell": cell, "input": input})).unwrap();
+    }
+    a.execute("cell.set", json!({"cell": "D1", "input": "={A1:B1;SORT(A2:B3,1,TRUE)}"})).unwrap();
+    let shown = |w: &Workbook, at: &str| w.sheet(0).unwrap().value(gridcraft_engine::core::CellRef::parse(at).unwrap());
+    assert_eq!(format!("{:?}", shown(&wb(&a), "D2")), format!("{:?}", shown(&wb(&a), "A3")));
+    let plain = workbook_from_json(&workbook_json(&wb(&a)), None).unwrap();
+    let fixed = workbook_from_json_recalc(&workbook_json(&wb(&a)), None).unwrap();
+    assert_ne!(format!("{:?}", shown(&plain, "D2")), format!("{:?}", shown(&wb(&a), "A3")), "JSON drops spills");
+    for at in ["D1", "E1", "D2", "E2", "D3", "E3"] {
+        assert_eq!(format!("{:?}", shown(&fixed, at)), format!("{:?}", shown(&wb(&a), at)), "{at}");
+    }
+}

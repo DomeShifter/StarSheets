@@ -229,7 +229,8 @@ pub fn apply(s: &mut Session, change: &Change) -> Result<(), String> {
         Change::State { patch } => {
             let current = s.active().map(|d| d.wb.clone()).ok_or("no workbook")?;
             let wb = apply_patch(&current, patch)?;
-            set_workbook(s, wb);
+            // Sheets that came as JSON lost their spilled values (calc state, not saved).
+            set_workbook_recalc(s, wb);
             Ok(())
         }
     }
@@ -352,6 +353,16 @@ pub fn workbook_from_json(v: &Whole, current: Option<&Workbook>) -> Result<Workb
     if let Some(c) = current {
         keep_unserialized(&mut wb, c);
     }
+    Ok(wb)
+}
+
+/// [`workbook_from_json`], recalculated: what a tab shows when the server sends it the whole
+/// file. JSON doesn't carry the values array formulas spill (`{A2:C2;SORTN(…)}` would show only
+/// its first cell until an edit reached it), so they are worked out again here, as opening a
+/// file does. Formula results never count in fingerprints, so this can't upset the check.
+pub fn workbook_from_json_recalc(v: &Whole, current: Option<&Workbook>) -> Result<Workbook, String> {
+    let mut wb = workbook_from_json(v, current)?;
+    gridcraft_engine::calc::Calc::new().recalc_all(&mut wb);
     Ok(wb)
 }
 
