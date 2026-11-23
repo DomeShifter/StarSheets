@@ -80,3 +80,4 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0051 | ui-egui | `MenuLook.list_style` / `list_row`: the data-validation drop-down list is only as wide as its choices |
 | 0052 | ui-egui | Solid borders wider than 1 px get square ends, so thick outlines meet at the corners |
 | 0053 | engine | `insert.link` with `remove` + `plain`: removes the link and its link look (colour + underline) in one undo step |
+| 0054 | engine | A border drawn on a shared edge removes the neighbouring cell's line on that edge, so the newest line shows (as Sheets) |

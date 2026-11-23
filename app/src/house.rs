@@ -164,6 +164,10 @@ pub fn install(ctx: &egui::Context) {
         s.visuals.window_fill = Color32::WHITE;
         s.visuals.window_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 24, spread: 0, color: Color32::from_black_alpha(60) };
         s.visuals.popup_shadow = egui::epaint::Shadow { offset: [0, 2], blur: 10, spread: 0, color: Color32::from_black_alpha(45) };
+        // Menus, pop-ups and tooltips appear at once, as in Sheets: egui fades every new area in
+        // over `animation_time` (0.2 s by default), which made menus feel slow (to-do row 80).
+        // Also ends the expand/collapse glide on sections; scrolling keeps its own smoothing.
+        s.animation_time = 0.0;
     });
 }
 
@@ -171,7 +175,7 @@ pub fn install(ctx: &egui::Context) {
 /// sets up fonts). Cheap: a check of two values most frames.
 pub fn keep(ctx: &egui::Context) {
     let st = ctx.global_style();
-    if st.spacing.scroll.bar_width != 10.0 || st.visuals.window_corner_radius != CornerRadius::same(PANEL_RADIUS) || st.visuals.widgets.inactive.bg_fill != SCROLL_HANDLE {
+    if st.spacing.scroll.bar_width != 10.0 || st.visuals.window_corner_radius != CornerRadius::same(PANEL_RADIUS) || st.visuals.widgets.inactive.bg_fill != SCROLL_HANDLE || st.animation_time != 0.0 {
         install(ctx);
     }
 }

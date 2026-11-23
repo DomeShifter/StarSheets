@@ -88,6 +88,7 @@ pub fn start() {
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
+                    install_wake(&cc.egui_ctx);
                     Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), spell: crate::spelling::Suggest::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
                 }),
             )
@@ -718,4 +719,18 @@ fn drop_alt_text(raw: &mut egui::RawInput) {
             i += 1;
         }
     }
+}
+
+/// `window.__ssWake()` asks for a frame at once. index.html calls it after counting something the
+/// app reads each frame (the mouse's back and forward buttons, the sign-up link): a synthetic
+/// window event doesn't wake eframe, so those waited for the next timed repaint, up to a second
+/// (to-do row 81: Back was sometimes slow, sometimes quick).
+fn install_wake(ctx: &egui::Context) {
+    let ctx = ctx.clone();
+    let wake = wasm_bindgen::closure::Closure::<dyn Fn()>::new(move || ctx.request_repaint());
+    if let Some(w) = web_sys::window() {
+        let _ = js_sys::Reflect::set(&w, &"__ssWake".into(), wake.as_ref());
+    }
+    // Lives as long as the page.
+    wake.forget();
 }

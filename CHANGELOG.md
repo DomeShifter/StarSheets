@@ -34,6 +34,10 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Menus and pop-ups open instantly (they used to fade in over a fifth of a second).
+- The mouse's back and forward buttons in the file browser act at once every time (they could
+  wait up to a second).
+- A border drawn on an edge two cells share replaces the other cell's line there.
 - Emptying a linked cell (Delete, Backspace or editing the text away) now removes its link and
   its blue underline too, as in Sheets.
 - Drop-down lists are only as wide as their longest choice, with the choices on the left.

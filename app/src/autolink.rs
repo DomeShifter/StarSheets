@@ -212,3 +212,25 @@ mod refit_tests {
         assert_eq!(st.font.color, gridcraft_engine::model::Color::Auto);
     }
 }
+
+#[cfg(test)]
+mod border_tests {
+    use gridcraft_engine::Session;
+    use gridcraft_engine::core::CellRef;
+    use serde_json::json;
+
+    /// Patch 0054 (to-do row 79): a border drawn on a shared edge replaces the neighbour's line.
+    #[test]
+    fn a_drawn_edge_replaces_the_neighbours_line() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        s.execute("home.borders", json!({ "range": "B2", "preset": "right", "style": "thick", "color": "#FF0000" })).unwrap();
+        s.execute("home.borders", json!({ "range": "C2", "preset": "left", "style": "thin" })).unwrap();
+        let d = s.active().unwrap();
+        let sh = d.wb.active().unwrap();
+        let b2 = d.wb.styles.get(sh.style_id(CellRef::new(1, 1))).borders;
+        let c2 = d.wb.styles.get(sh.style_id(CellRef::new(1, 2))).borders;
+        assert!(b2.right.is_none(), "B2's thick red right edge gave way");
+        assert!(!c2.left.is_none(), "C2's new thin left edge is the line now");
+    }
+}
