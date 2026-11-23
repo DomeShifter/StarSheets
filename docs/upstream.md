@@ -76,3 +76,7 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0047 | ui-egui | With a host menu look, a cell's drop-down list shows every choice as tall as the window allows (below or above the cell), then a visible scroll bar |
 | 0048 | ui-egui | Host option `paste_pictures_in_cell`: a pasted picture goes inside the active cell |
 | 0049 | ui-egui | No red error corner on a cell holding a picture (its #VALUE! is only a fallback) |
+| 0050 | engine | A column width change (drag, set width, autofit) refits the rows holding wrapped cells in those columns, as Sheets does |
+| 0051 | ui-egui | `MenuLook.list_style` / `list_row`: the data-validation drop-down list is only as wide as its choices |
+| 0052 | ui-egui | Solid borders wider than 1 px get square ends, so thick outlines meet at the corners |
+| 0053 | engine | `insert.link` with `remove` + `plain`: removes the link and its link look (colour + underline) in one undo step |

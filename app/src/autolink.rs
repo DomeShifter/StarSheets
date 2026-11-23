@@ -11,7 +11,12 @@ pub struct AutoLink {
     editing: Option<(u64, usize, CellRef)>,
     /// Frames left in which to check the selection after a paste (the pasted block is selected).
     after_paste: u8,
+    /// Linked cells with text in (or being edited in) the selection last frame: (document, sheet, cells).
+    linked: Option<(u64, usize, Vec<CellRef>)>,
 }
+
+/// The most links looked at per frame for the unlink check (a sheet with more skips it).
+const LINK_SCAN_MAX: usize = 5_000;
 
 /// The most cells one paste is checked over (a pasted whole column stays cheap).
 const PASTE_SCAN_MAX: u64 = 20_000;
@@ -30,6 +35,7 @@ impl AutoLink {
             self.after_paste -= 1;
             link_pasted(app);
         }
+        self.unlink_emptied(app);
         let now = app.editor.as_ref().map(|e| (e.doc, e.sheet, e.cell));
         if let Some((doc, sheet, cell)) = self.editing
             && now != self.editing
@@ -37,6 +43,43 @@ impl AutoLink {
             link_if_address(app, doc, sheet, cell);
         }
         self.editing = now;
+    }
+}
+
+impl AutoLink {
+    /// Sheets drops a cell's link, and its blue underline, when its text goes (Delete, Backspace, or
+    /// editing it away). GridCraft keeps both on the empty cell, so: a linked cell with text in the selection that is empty
+    /// a frame later loses its link. Only selected cells are watched, so a link on an empty cell
+    /// from a file, or one emptied by someone else elsewhere, is left alone.
+    fn unlink_emptied(&mut self, app: &mut SheetApp) {
+        let editing = app.editor.as_ref().map(|e| e.cell);
+        let now = app.session.active().and_then(|d| {
+            let sh = d.wb.active()?;
+            if sh.hyperlinks.len() > LINK_SCAN_MAX {
+                return None;
+            }
+            let mut text = Vec::new();
+            let mut emptied = Vec::new();
+            let before = self.linked.as_ref().filter(|(doc, sheet, _)| *doc == d.uid && *sheet == d.wb.active_sheet());
+            for &c in sh.hyperlinks.keys() {
+                let has_text = sh.cell(c).is_some_and(|x| !x.value.is_empty() || x.formula.is_some());
+                if has_text && (Some(c) == editing || d.selection.ranges.iter().any(|r| r.contains(c))) {
+                    text.push(c);
+                } else if !has_text && before.is_some_and(|(_, _, cells)| cells.contains(&c)) {
+                    emptied.push(c);
+                }
+            }
+            Some(((d.uid, d.wb.active_sheet(), text), emptied))
+        });
+        let Some((now, emptied)) = now else {
+            self.linked = None;
+            return;
+        };
+        self.linked = Some(now);
+        for c in emptied {
+            // One step: the link and its blue underline go together (patch 0053).
+            app.run_or_alert("insert.link", json!({ "cell": c.a1(), "remove": true, "plain": true }));
+        }
     }
 }
 
@@ -128,5 +171,44 @@ mod tests {
         for no in ["hello", "http://", "https://localhost", "see www.x.com", "www.", "3.14", "mailto:nobody"] {
             assert_eq!(address(no), None, "{no}");
         }
+    }
+}
+
+#[cfg(test)]
+mod refit_tests {
+    use gridcraft_engine::Session;
+    use serde_json::json;
+
+    /// Patch 0050 (to-do row 76): widening a column shrinks a wrapped row back to one line.
+    #[test]
+    fn widening_a_column_refits_wrapped_rows() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        s.execute("cell.set", json!({ "cell": "B2", "input": "Please make drop-down lists only as wide as they need to be to fit the options" })).unwrap();
+        s.execute("home.wrapText", json!({ "range": "B2", "on": true })).unwrap();
+        let h = |s: &Session| s.active().unwrap().wb.active().unwrap().row_height(1);
+        let one_line = s.active().unwrap().wb.active().unwrap().default_row_height;
+        assert!(h(&s) > one_line, "wraps in a 100 px column");
+        s.execute("home.columnWidth", json!({ "cols": "B:B", "width": 900 })).unwrap();
+        assert_eq!(h(&s), one_line, "fits on one line once the column is wide");
+        s.execute("home.columnWidth", json!({ "cols": "B:B", "width": 100 })).unwrap();
+        assert!(h(&s) > one_line, "grows again when narrowed");
+    }
+
+    /// Patch 0053 (to-do row 74): removing a link with `plain` also takes off its blue underline.
+    #[test]
+    fn removing_a_link_plainly_drops_its_look() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        s.execute("insert.link", json!({ "cell": "A1", "target": "https://example.com" })).unwrap();
+        s.execute("edit.clearContents", json!({ "range": "A1" })).unwrap();
+        s.execute("insert.link", json!({ "cell": "A1", "remove": true, "plain": true })).unwrap();
+        let d = s.active().unwrap();
+        let sh = d.wb.active().unwrap();
+        let a1 = gridcraft_engine::core::CellRef::new(0, 0);
+        assert!(sh.hyperlinks.is_empty());
+        let st = d.wb.styles.get(sh.style_id(a1));
+        assert_eq!(st.font.underline, gridcraft_engine::model::Underline::None);
+        assert_eq!(st.font.color, gridcraft_engine::model::Color::Auto);
     }
 }

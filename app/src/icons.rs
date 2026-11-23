@@ -14,6 +14,8 @@ const ICONS: &[(&str, &[u8])] = &[
     ("aspect_ratio", include_bytes!("../icons/aspect_ratio.svg")),
     ("border_all", include_bytes!("../icons/border_all.svg")),
     ("border_color", include_bytes!("../icons/border_color.svg")),
+    // border_color without its built-in bar: the toolbar draws the bar in the chosen colour.
+    ("border_color_pen", include_bytes!("../icons/border_color_pen.svg")),
     ("line_style", include_bytes!("../icons/line_style.svg")),
     ("border_bottom", include_bytes!("../icons/border_bottom.svg")),
     ("border_clear", include_bytes!("../icons/border_clear.svg")),

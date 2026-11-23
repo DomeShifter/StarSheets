@@ -34,6 +34,14 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Emptying a linked cell (Delete, Backspace or editing the text away) now removes its link and
+  its blue underline too, as in Sheets.
+- Drop-down lists are only as wide as their longest choice, with the choices on the left.
+- Changing a column's width refits the rows of wrapped cells in it, so a row no longer stays two
+  lines tall when its text fits on one.
+- The border colour button no longer draws its colour bar over a second, black bar.
+- Thick and medium borders meet properly at the corners.
+- New app icon and favicon.
 - **Print** works in Firefox: Firefox won't let a page print a PDF shown inside it, so the
   print-ready PDF opens in a new tab with the browser's print button (Chrome prints directly).
 - Double-clicking a cell to edit it follows your computer's double-click speed, so slower

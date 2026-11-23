@@ -684,7 +684,7 @@ impl Shell {
                 ui.vertical(|ui| {
                     // The colour button shows the colour in a bar under the pencil.
                     let colour = self.border_colour.map_or(theme::TEXT, |rgb| egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
-                    let cr = match icons::icon("border_color") {
+                    let cr = match icons::icon("border_color_pen") {
                         Some(img) => ui.menu_button(img, |ui| match crate::colourpicker::palette(ui, self.border_colour, false, false) {
                             Some(crate::colourpicker::Choice::Colour(rgb)) => self.border_colour = Some(rgb),
                             Some(crate::colourpicker::Choice::Reset) => self.border_colour = None,
@@ -693,7 +693,11 @@ impl Shell {
                         None => ui.menu_button("Colour", |_| {}),
                     }
                     .response;
-                    ui.painter().hline(cr.rect.x_range().shrink(6.0), cr.rect.bottom() - 4.0, Stroke::new(3.0, colour));
+                    // Where border_color's own bar sits in the 18 px icon (the icon starts one button
+                    // padding in from the left, centred top to bottom): 1.5-16.5 px across, the
+                    // bottom 3 px (to-do row 77).
+                    let (x, y) = (cr.rect.left() + ui.spacing().button_padding.x, cr.rect.center().y - 9.0);
+                    ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(x + 1.5, y + 15.0), egui::pos2(x + 16.5, y + 18.0)), 0.0, colour);
                     cr.on_hover_text("Border colour");
                     let sr = match icons::icon("line_style") {
                         Some(img) => ui.menu_button(img, |ui| {
@@ -1078,7 +1082,20 @@ pub const MENU_LOOK: gridcraft_ui_egui::MenuLook = gridcraft_ui_egui::MenuLook {
     style: |ui| menu_style(ui, true),
     row: |label, keys| menu_row(label, keys, true),
     sep: |ui| menu_sep_width(ui, 320.0),
+    list_style: list_style,
+    // The empty shortcut's stretch keeps the label at the left (as in menu_row).
+    list_row: |label| Button::new(RichText::new(label.to_string()).size(14.0).color(theme::TEXT)).shortcut_text(""),
 };
+
+/// A data-validation drop-down list: only as wide as its longest choice, plus the 16 px row
+/// padding each side and room for the scroll bar (James, to-do row 75).
+fn list_style(ui: &mut Ui, items: &[String]) -> f32 {
+    let font = egui::FontId::proportional(14.0);
+    let widest = items.iter().map(|t| ui.painter().layout_no_wrap(t.clone(), font.clone(), theme::TEXT).size().x).fold(0.0_f32, f32::max);
+    let width = (widest + 2.0 * f32::from(crate::house::MENU_INSET) + 12.0).clamp(80.0, 480.0).ceil();
+    menu_style_width(ui, width);
+    width
+}
 
 /// The spreadsheet's name: click it to rename, like Sheets (Enter keeps, Esc cancels).
 fn rename_box(app: &mut SheetApp, ui: &mut Ui, name: &str, draft: &mut Option<String>) {
