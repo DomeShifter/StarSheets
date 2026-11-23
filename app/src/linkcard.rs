@@ -14,9 +14,45 @@ pub struct LinkCard {
     at: Option<(CellRef, egui::Pos2)>,
     /// Closed with ✕ for this cell.
     dismissed: Option<CellRef>,
+    /// A web or e-mail link waiting for "Open" (GridCraft's Open Hyperlink box, in the house
+    /// style: to-do row 63).
+    confirm: Option<String>,
 }
 
 impl LinkCard {
+    /// Takes GridCraft's Open Hyperlink box (runs before and after the grid; draws nothing).
+    pub fn intercept(&mut self, app: &mut SheetApp) {
+        if let Some(d) = app.dialog.as_ref().filter(|d| d.name == "openLink") {
+            self.confirm = d.values.get("url").and_then(serde_json::Value::as_str).map(str::to_string);
+            app.dialog = None;
+        }
+    }
+
+    /// "Open this link?" in the house style; Open hands the address to GridCraft, which opens
+    /// only web and e-mail addresses.
+    pub fn confirm_ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+        let Some(url) = self.confirm.clone() else { return };
+        let mut closed = false;
+        let hit = crate::house::dialog(ctx, "starsheets_open_link", 420.0, "Open this link?", Some(&mut closed), |ui| {
+            crate::house::note(ui, "It opens in a new tab. Only open links you trust: a link can lead to a harmful site.");
+            ui.add_space(crate::house::S);
+            ui.add(egui::Label::new(RichText::new(&url).size(crate::house::BODY).color(theme::BLUE)).wrap());
+            crate::house::actions(ui, &["Cancel", "Open"])
+        });
+        match hit {
+            Some(1) => {
+                if let Err(e) = app.session.open_confirmed_link(&url) {
+                    app.message = Some(("Open this link?".into(), e.to_string()));
+                }
+                app.after_engine();
+                self.confirm = None;
+            }
+            Some(_) => self.confirm = None,
+            None if closed || ctx.input(|i| i.key_pressed(egui::Key::Escape)) => self.confirm = None,
+            None => {}
+        }
+    }
+
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
         let Some((cell, target)) = app.session.active().and_then(|d| {
             let c = d.selection.active;

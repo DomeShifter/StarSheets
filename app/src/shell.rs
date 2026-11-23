@@ -579,11 +579,10 @@ impl Shell {
                         FontSize => self.font_size(app, ui, cur.size),
                         Zoom => {
                             ui.menu_button(RichText::new(format!("{}%  ▾", cur.zoom)).size(13.0).color(theme::TEXT), |ui| {
-                                for z in ZOOMS {
-                                    if ui.add(Button::new(format!("{z}%")).selected(u32::from(cur.zoom) == *z)).clicked() {
-                                        app.run_or_alert("view.zoom", json!({ "percent": z }));
-                                        ui.close();
-                                    }
+                                let labels: Vec<String> = ZOOMS.iter().map(|z| format!("{z}%")).collect();
+                                let now = ZOOMS.iter().position(|z| *z == u32::from(cur.zoom));
+                                if let Some(i) = pick_rows(ui, 120.0, &labels, now) {
+                                    app.run_or_alert("view.zoom", json!({ "percent": ZOOMS[i] }));
                                 }
                             })
                             .response
@@ -614,15 +613,32 @@ impl Shell {
             app.run_or_alert("home.decreaseFontSize", json!({}));
         }
         let mut text = self.size_draft.clone().unwrap_or_else(|| shown.clone());
-        // Sheets keeps a thin grey box round the size, unlike the flat buttons beside it.
-        let r = ui
-            .scope(|ui| {
-                let w = &mut ui.style_mut().visuals.widgets;
-                w.inactive.bg_stroke = Stroke::new(1.0, theme::BOX);
-                w.hovered.bg_stroke = Stroke::new(1.0, theme::TEXT_DIM);
-                ui.add(egui::TextEdit::singleline(&mut text).desired_width(30.0).horizontal_align(Align::Center))
+        // Sheets' size box: the number and its ▾ inside one thin grey box (to-do row 68).
+        let (r, picked) = Frame::NONE
+            .stroke(Stroke::new(1.0, theme::BOX))
+            .corner_radius(f32::from(crate::house::FIELD_RADIUS))
+            .inner_margin(Margin { left: 2, right: 0, top: 0, bottom: 0 })
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.x = 0.0;
+                ui.horizontal(|ui| {
+                    let r = ui.add(egui::TextEdit::singleline(&mut text).frame(Frame::NONE).desired_width(26.0).min_size(vec2(26.0, 24.0)).horizontal_align(Align::Center).vertical_align(Align::Center));
+                    let mut picked = None;
+                    ui.spacing_mut().button_padding.x = 3.0;
+                    ui.menu_button(RichText::new("▾").size(11.0).color(theme::TEXT_DIM), |ui| {
+                        let labels: Vec<String> = FONT_SIZES.iter().map(u32::to_string).collect();
+                        let now = FONT_SIZES.iter().position(|s| f64::from(*s) == f64::from(size));
+                        picked = pick_rows(ui, 96.0, &labels, now).map(|i| FONT_SIZES[i]);
+                    })
+                    .response
+                    .on_hover_text("Font sizes");
+                    (r, picked)
+                })
+                .inner
             })
             .inner;
+        if let Some(s) = picked {
+            app.run_or_alert("home.fontSize", json!({ "size": s }));
+        }
         if r.changed() {
             self.size_draft = Some(text.clone());
         }
@@ -635,14 +651,6 @@ impl Shell {
             self.size_draft = None;
         }
         r.on_hover_text("Font size");
-        ui.menu_button("▾", |ui| {
-            for s in FONT_SIZES {
-                if ui.button(s.to_string()).clicked() {
-                    app.run_or_alert("home.fontSize", json!({ "size": s }));
-                    ui.close();
-                }
-            }
-        });
         if icon_or_text(ui, "add", "Increase font size").clicked() {
             app.run_or_alert("home.increaseFontSize", json!({}));
         }
@@ -921,6 +929,25 @@ pub fn menu_style(ui: &mut Ui, with_icons: bool) -> f32 {
 /// The Sheets menu look for a menu of any width (house.rs: 16 px side padding, 32 px rows).
 pub fn menu_style_width(ui: &mut Ui, width: f32) {
     crate::house::menu(ui, width);
+}
+
+/// A toolbar drop-down list in the house style (docs/house-style.md, "Drop-down lists"): 32 px
+/// rows, 16 px side padding, a ✓ by the current entry. Closes the menu on a pick.
+pub fn pick_rows(ui: &mut Ui, width: f32, items: &[String], current: Option<usize>) -> Option<usize> {
+    menu_style_width(ui, width);
+    ui.spacing_mut().button_padding.x = 40.0;
+    let mut hit = None;
+    for (i, label) in items.iter().enumerate() {
+        let r = ui.add(Button::new(RichText::new(label).size(crate::house::BODY).color(theme::TEXT)).frame_when_inactive(false).min_size(vec2(width, crate::house::ROW_HEIGHT)));
+        if Some(i) == current {
+            ui.painter().text(r.rect.left_center() + vec2(14.0, 0.0), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), theme::TEXT);
+        }
+        if r.clicked() {
+            hit = Some(i);
+            ui.close();
+        }
+    }
+    hit
 }
 
 /// A Sheets menu divider: a light line with 8 px above and below.

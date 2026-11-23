@@ -73,15 +73,9 @@ fn merge(app: &mut SheetApp, cmd: &str) {
             )
         })
         .unwrap_or_default();
-    let selection = app.session.active().map(|d| d.selection.clone());
-    for (from, to) in moves {
-        app.run_or_alert("range.move", json!({ "range": from.a1(), "to": to.a1(), "overwrite": true }));
-    }
-    // Moving changes the selection; merge what was selected.
-    if let (Some(sel), Some(d)) = (selection, app.session.active_mut()) {
-        d.selection = sel;
-    }
-    app.run_or_alert(cmd, json!({}));
+    // One command (patch 0046), so one Undo also puts the value back where it was (to-do row 65).
+    let moves: Vec<[String; 2]> = moves.into_iter().map(|(from, to)| [from.a1(), to.a1()]).collect();
+    app.run_or_alert(cmd, if moves.is_empty() { json!({}) } else { json!({ "moves": moves }) });
 }
 
 impl MergeGuard {
@@ -140,12 +134,25 @@ mod tests {
         let mut s = Session::new();
         s.execute("file.new", json!({})).unwrap();
         s.execute("cell.set", json!({ "cell": "B1", "input": "kept" })).unwrap();
-        // What merge() does for A1:B1 with only B1 filled.
-        s.execute("range.move", json!({ "range": "B1", "to": "A1", "overwrite": true })).unwrap();
-        s.execute("home.mergeCells", json!({ "range": "A1:B1" })).unwrap();
+        // What merge() sends for A1:B1 with only B1 filled.
+        s.execute("home.mergeCells", json!({ "range": "A1:B1", "moves": [["B1", "A1"]] })).unwrap();
         let sh = s.active().unwrap().wb.active().unwrap();
         assert_eq!(sh.value(CellRef::parse("A1").unwrap()), Value::text("kept"));
         assert_eq!(sh.merges.len(), 1);
+    }
+
+    #[test]
+    fn one_undo_puts_a_moved_value_back() {
+        // To-do row 65: undoing the merge left the value in the top-left cell.
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        s.execute("cell.set", json!({ "cell": "B2", "input": "kept" })).unwrap();
+        s.execute("home.mergeCells", json!({ "range": "A1:B2", "moves": [["B2", "A1"]] })).unwrap();
+        s.execute("edit.undo", json!({})).unwrap();
+        let sh = s.active().unwrap().wb.active().unwrap();
+        assert_eq!(sh.value(CellRef::parse("B2").unwrap()), Value::text("kept"));
+        assert_eq!(sh.value(CellRef::parse("A1").unwrap()), Value::Empty);
+        assert!(sh.merges.is_empty());
     }
 
     #[test]

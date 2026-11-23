@@ -288,14 +288,25 @@ pub fn dialog<R>(ctx: &egui::Context, id: &str, width: f32, title: &str, close: 
         .show(ctx, |ui| {
             form_style(ui);
             ui.set_width(width);
+            // The ✕ is placed first so a long title is cut short ("…", full title on hover)
+            // instead of running under it (to-do row 73).
             ui.horizontal(|ui| {
-                ui.label(RichText::new(title).size(TITLE).color(theme::TEXT));
-                if let Some(close) = close {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if close_button(ui) {
-                            *close = true;
-                        }
-                    });
+                let label = egui::Label::new(RichText::new(title).size(TITLE).color(theme::TEXT));
+                match close {
+                    Some(close) => {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if close_button(ui) {
+                                *close = true;
+                            }
+                            ui.add_space(S);
+                            ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                ui.add(label.truncate()).on_hover_text(title);
+                            });
+                        });
+                    }
+                    None => {
+                        ui.add(label.wrap());
+                    }
                 }
             });
             ui.add_space(L - S);

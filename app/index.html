@@ -51,6 +51,12 @@
     </form>
   </div>
   <script>
+    // Double-click to edit a cell (web.rs): the browser's own double-click follows the computer's
+    // double-click speed and touchpad taps, which a fixed timer in the app didn't (to-do row 64).
+    window.__ssDbl = null;
+    document.getElementById('starsheets_canvas').addEventListener('dblclick', function (e) {
+      if (e.button === 0) window.__ssDbl = [e.clientX, e.clientY];
+    });
     // Sign-in box: account.rs calls __ssSignIn(true, signupAllowed) to show it and
     // __ssSignIn(false) to hide it; "Create an account" sets __ssWantSignUp for the app.
     // Signing in reloads the page (as the app's own sign-in did).
@@ -129,6 +135,21 @@
         if (k.length === 1 && (e.shiftKey ? shifted : plain).indexOf(k) >= 0) e.preventDefault();
       }, true);
     })();
+    // Ctrl/Alt+Shift+digit shortcuts (Alt+Shift+5 strikethrough, Ctrl+Shift+5 percent, the
+    // border keys): the browser names the key after the symbol Shift makes ("%", "£", "&"), which
+    // the app's toolkit doesn't know, so the press was dropped and only the symbol was typed
+    // (to-do row 67). Hand the app the plain digit with the same modifiers instead.
+    window.addEventListener('keydown', function (e) {
+      if (!e.isTrusted || !e.shiftKey || !(e.ctrlKey || e.metaKey || e.altKey)) return;
+      var m = /^Digit([0-9])$/.exec(e.code || '');
+      if (!m || e.key === m[1]) return;
+      if (e.target && e.target.closest && e.target.closest('#ss_signin')) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      var o = { key: m[1], code: e.code, shiftKey: true, ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, bubbles: true, cancelable: true };
+      var t = document.activeElement || document;
+      t.dispatchEvent(new KeyboardEvent('keydown', o));
+      t.dispatchEvent(new KeyboardEvent('keyup', o));
+    }, true);
     // Home screen (home.rs): the mouse's back and forward buttons go back and forward through the
     // folders you visited (like a browser, but inside StarSheets) instead of leaving the page.
     // While the home screen is up (__ssHomeActive) the browser's own handling is stopped and the

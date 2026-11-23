@@ -72,3 +72,4 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0043 | ui-egui | "Insert row below" and "Insert column right" in the cell menu; `grid::insert_after` public for the Insert menu |
 | 0044 | ui-egui | The right-click menu of charts, pictures and shapes uses the host's menu look (padding, icons) |
 | 0045 | chart | A doughnut series with nothing to draw (text, blanks) gets no ring, so it no longer shrinks the real rings |
+| 0046 | engine | Merge commands take `moves`: a lone value is moved to the top-left inside the same command, so one Undo reverses both |

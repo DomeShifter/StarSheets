@@ -48,6 +48,11 @@ Everything sits on a 4 px scale.
 - When it still doesn't fit (a small window or a low-resolution screen), it scrolls with a
   **solid scroll bar** that is always visible, so it's obvious there is more. Every scrolling
   list uses solid bars; only the sheet tab strip keeps a thin bar that shows on hover.
+- **Toolbar drop-downs** (zoom, font size, and any new one) use `shell::pick_rows`: the same
+  32 px rows, 16 px side padding and ✓ as the menus. A box with a list (font size) keeps its ▾
+  **inside** the box.
+- **Never** fill a menu with plain `egui` buttons: every list is `house::select` (in panels and
+  dialogs) or `shell::pick_rows` (in the toolbar), so a new one can't miss the house style.
 
 ## Buttons
 

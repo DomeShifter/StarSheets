@@ -158,6 +158,7 @@ impl WebShell {
         self.chart.intercept(&mut self.app, ctx);
         self.names.intercept(&mut self.app);
         self.protect.intercept(&mut self.app, ctx);
+        self.link.intercept(&mut self.app);
         // Only one side panel at a time: the one that just opened wins.
         let opened = if self.chart.just_opened {
             "chart"
@@ -250,6 +251,7 @@ impl eframe::App for WebShell {
 
     /// Forwards a browser frame's raw input to the shared app before eframe handles it.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        drop_alt_text(raw);
         self.autolink.saw_input(raw);
         self.app.raw_input_hook(ctx, raw);
     }
@@ -289,9 +291,11 @@ impl eframe::App for WebShell {
             ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { .. } | egui::Event::Text(_))));
         }
         self.app.ui(ui);
+        browser_double_click(&mut self.app, &ctx);
         self.side_panels(&ctx);
         self.autolink.after_frame(&mut self.app);
         self.link.ui(&mut self.app, ui);
+        self.link.confirm_ui(&mut self.app, &ctx);
         // Other people's cursors on the grid, and the account dialogs (sign-in on top of all).
         self.live.draw(&self.app, &ctx);
         self.share.ui(&ctx);
@@ -661,4 +665,40 @@ fn trigger_anchor_download(window: &web_sys::Window, name: &str, bytes: &[u8]) -
     });
     window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 10_000).map_err(js)?;
     Ok(())
+}
+
+/// A double-click on a cell that GridCraft's own timer missed (a slow touchpad double-tap) still
+/// starts editing it: the browser reports its `dblclick` (index.html), which follows the
+/// computer's double-click speed. The first click has already selected the cell.
+fn browser_double_click(app: &mut SheetApp, ctx: &egui::Context) {
+    let Some(w) = web_sys::window() else { return };
+    let v = js_sys::Reflect::get(&w, &"__ssDbl".into()).unwrap_or(JsValue::NULL);
+    if v.is_null() || v.is_undefined() {
+        return;
+    }
+    let _ = js_sys::Reflect::set(&w, &"__ssDbl".into(), &JsValue::NULL);
+    let arr = js_sys::Array::from(&v);
+    let (Some(x), Some(y)) = (arr.get(0).as_f64(), arr.get(1).as_f64()) else { return };
+    let p = egui::pos2(x as f32, y as f32) / ctx.zoom_factor();
+    let on_grid = app.grid.cells_rect.is_some_and(|r| r.contains(p)) && ctx.layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background);
+    if on_grid && app.editor.is_none() && app.dialog.is_none() && app.selected_object.is_none() && app.grid.list_picker.is_none() {
+        app.begin_edit(None, false);
+        ctx.request_repaint();
+    }
+}
+
+/// For Alt (without Ctrl) the browser layer sends the typed character before the key press, so
+/// the grid started editing with "5" or "%" and Alt+Shift+5 (strikethrough) never ran (to-do row
+/// 67). The character right before an Alt shortcut key is dropped. AltGr typing (é, €) is left
+/// alone: browsers report it with Ctrl+Alt or as AltGraph, not as Alt alone.
+fn drop_alt_text(raw: &mut egui::RawInput) {
+    let mut i = 1;
+    while i < raw.events.len() {
+        let alt_key = matches!(&raw.events[i], egui::Event::Key { pressed: true, modifiers: m, .. } if m.alt && !m.ctrl && !m.command);
+        if alt_key && matches!(raw.events[i - 1], egui::Event::Text(_)) {
+            raw.events.remove(i - 1);
+        } else {
+            i += 1;
+        }
+    }
 }

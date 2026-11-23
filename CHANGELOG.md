@@ -18,6 +18,9 @@ new features and the last one for fixes.
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Open a link** asks in a house-style box ("Open this link?") instead of GridCraft's.
+- **Font size and zoom** lists have the house style; the font size's ▾ sits inside its box.
+- **Long dialog titles** (a long file name in Share) end in "…" instead of running under the ✕.
 - **Sign-in** is now a real web form, so password managers (Keeper, Bitwarden, the browser's own)
   can fill in your username and password.
 - **Chart menu** (right-click a chart) has the same padding and icons as the other menus.
@@ -25,6 +28,11 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Double-clicking a cell to edit it follows your computer's double-click speed, so slower
+  touchpad double-taps work too.
+- Undoing a merge that moved a value into the top-left cell now puts the value back where it was.
+- Alt+Shift+5 (strikethrough) and the other Ctrl/Alt+Shift+number shortcuts work instead of
+  typing a symbol into the cell.
 - A doughnut chart whose range includes a column of text no longer shrinks: the text column used
   to get an empty ring of its own that squeezed the real one.
 - Undo (Ctrl+Z) no longer jumps to the top of the sheet; you stay where you were working.
