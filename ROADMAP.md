@@ -1,6 +1,6 @@
 # StarSheets roadmap
 
-> **Last updated:** 2026-11-22 · **Now:** files and folders (home screen, sharing folders, previews) released in 0.3.0; next: desktop apps
+> **Last updated:** 2026-11-23 · **Now:** Sheets polish (find bar, Clip, Google formulas saved Excel-safe, pictures in cells) released in 0.4.0; next: desktop apps
 
 | Phase | Goal | Done when | Status |
 |---|---|---|---|

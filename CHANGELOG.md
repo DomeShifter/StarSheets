@@ -6,6 +6,8 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-23
+
 ### Added
 - **Ctrl+F find bar** (top right): finds on this sheet, "n of N", arrows or Enter/Shift+Enter
   through the matches, ⋮ for the full Find and replace (Ctrl+H), ✕ or Esc to close.
@@ -75,6 +77,13 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- **Ctrl+Enter** (Cmd+Enter on a Mac) in a cell starts a new line, as in Google Sheets, instead
+  of finishing the edit.
+- Long wrapped text no longer leaves an empty line above it: rows were sized with letter widths
+  that were too generous, so they could get one line too many. (A row made too tall by an older
+  version fits itself the next time anything in it changes.)
+- A formula being edited in a bold, italic or other-font cell shows in the formula bar's plain
+  font, so it is as easy to read as in the formula bar.
 - Delete on empty cells no longer adds an undo step.
 - Editing a drop-down no longer makes conditional formatting rules vanish and come back, and a
   rule of your own on the same cells is no longer taken for a drop-down colour.
@@ -329,7 +338,8 @@ about them.
 - One Docker image (`ghcr.io/domeshifter/starsheets`) with the app and its file storage.
 - A password login, on by default (a random password is printed on first start if you don't set one).
 
-[Unreleased]: https://github.com/DomeShifter/StarSheets/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/DomeShifter/StarSheets/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.4.0
 [0.3.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.3.0
 [0.2.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.2.0
 [0.1.0]: https://github.com/DomeShifter/StarSheets/releases/tag/v0.1.0

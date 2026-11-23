@@ -4045,7 +4045,7 @@ dependencies = [
 
 [[package]]
 name = "sheets-functions"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "gridcraft-core",
  "gridcraft-numfmt",
@@ -4197,7 +4197,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "starsheets"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4220,7 +4220,7 @@ dependencies = [
 
 [[package]]
 name = "starsheets-server"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "ab_glyph",
  "argon2",
@@ -4241,7 +4241,7 @@ dependencies = [
 
 [[package]]
 name = "starsheets-sync"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "gridcraft-engine",
  "serde",

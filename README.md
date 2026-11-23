@@ -19,18 +19,51 @@ the things Google Sheets users reach for.
 
 ## What you get
 
-- **Google Sheets' layout and habits**: menu bar, one-row toolbar, side panels, right-click menus,
-  sheet tabs, Google's sizes, fonts and keyboard shortcuts.
-- **Conditional formatting and data validation** in Google-style side panels, previewed live as
-  you choose. Drop-down lists with coloured items, date pickers, colour scales.
-- **Google Sheets formulas** on top of GridCraft's hundreds of Excel-compatible ones: `QUERY`,
-  `ARRAYFORMULA` and `{…}` arrays.
-- **Files without a Save button**: every change saves itself a moment later, into plain `.xlsx`
-  files. A file window with folders, copy and paste, drag and drop, a bin and version history.
+### Feels like Google Sheets
+- **The same layout and habits**: menu bar, one-row toolbar, side panels, right-click menus,
+  sheet tabs with ◀ ▶ when there are many, Google's sizes, fonts and keyboard shortcuts
+  (Enter to edit, Ctrl+Enter for a new line in a cell, Ctrl+F to find, and so on).
+- **Work together**: open a spreadsheet in several tabs or with other people and everyone sees
+  every change as it happens, with each other's cursors. Share files and folders as "can edit"
+  or "can view".
+- **No Save button**: every change saves itself a moment later. A home screen with your folders
+  and file previews, a bin, and version history to go back to an earlier copy.
+
+### Formulas
+- **Google Sheets formulas**, on top of GridCraft's hundreds of Excel ones:
+  - `QUERY`: ask a range questions in a SQL-like language
+    (`=QUERY(A1:D, "select A, sum(D) where B = 'Paid' group by A")`).
+  - `ARRAYFORMULA`, `{…}` arrays (`={A2:A, B2:B}`), `SORTN`, and `SORT` with Google's
+    TRUE/FALSE and several sort columns.
+  - **Open-ended ranges** such as `A2:A` or `A3:C`, which run to the bottom of the sheet and keep
+    up as you add rows.
+  - Modern functions both apps share, such as `FILTER`, `UNIQUE`, `XLOOKUP`, `LET` and `LAMBDA`.
+- **Formulas you can read**: while you type, each range has its own colour that matches the
+  outline drawn round it on the sheet, and functions, numbers, text and errors are coloured like a
+  code editor, the same in the cell and in the formula bar. Suggestions with a short description
+  pop up as you type a function name.
+- **Your Google formulas survive Excel**: formulas Excel can't read are saved the way Google Sheets
+  saves them, so Excel shows their last results and StarSheets gets the formulas back unchanged.
+
+### Tidy, checked data
+- **Conditional formatting** in a Google-style side panel, previewed live as you choose: colour
+  scales, "date is" rules (today, past week…), custom formulas and preset styles.
+- **Data validation**: drop-down lists with coloured items, tick boxes, date pickers, number, text,
+  email and URL rules, with a warning or a refusal for anything that doesn't fit.
+- **Find and replace** (with regular expressions), **named ranges**, **protected sheets and
+  ranges**, and **spelling suggestions** while you type.
+- **Pictures in cells** as well as over them, charts with a colour for each pie slice, and
+  Overflow, Wrap or Clip for long text.
+
+### Your files stay yours
+- Spreadsheets are **ordinary `.xlsx` files** in a folder you choose, readable by Excel and
+  LibreOffice. What Excel has no place for (Google-style drop-down colours, Clip, protected-range
+  settings) goes in a small extra part inside the same file that other programs ignore.
 - **Excel files open well**, because GridCraft was built to match Excel.
 
-What's not here (yet): working on one sheet together with others in real time, sharing links,
-comments with mentions, add-ons, and desktop apps. See the [roadmap](ROADMAP.md).
+What's not here (yet): comments with mentions, add-ons, desktop apps, a phone layout, and some
+Google-only functions (`SPLIT`, `REGEXMATCH`, `IMPORTRANGE`, `GOOGLEFINANCE` and others). See the
+[roadmap](ROADMAP.md).
 
 ## Try it with Docker
 
@@ -74,7 +107,7 @@ with `SITE=app/dist` to get the app and the file storage together. More in [docs
 | Formula engine, xlsx/csv import and export, grid, charts | [GridCraft](https://github.com/storytold/gridcraft), pinned to one release, with small patches (`patches/`, listed in [docs/upstream.md](docs/upstream.md)) |
 | Google Sheets look: title, menus, toolbar, side panels | `app/` |
 | Google-only functions (QUERY) | `crates/sheets-functions` |
-| File storage, login (and soon live editing) | `crates/server` (Rust) |
+| File storage, accounts, sharing and live editing | `crates/server` (Rust) |
 
 Design choices and the reasons for them are in [docs/decisions.md](docs/decisions.md).
 
