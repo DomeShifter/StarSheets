@@ -80,6 +80,7 @@ pub fn start() {
                     // no gliding selection outline, Google's cell keys (Enter edits, Backspace only clears).
                     app.ui.animations = false;
                     app.ui.sheets_keys = true;
+                    app.ui.paste_pictures_in_cell = true;
                     app.ui.menu_look = Some(crate::shell::MENU_LOOK);
                     crate::settings::Prefs::load().apply(&mut app);
                     gridcraft_ui_egui::spelling::set(crate::spelling::known);
@@ -231,6 +232,7 @@ impl eframe::App for WebShell {
         self.files.take_imports(&mut self.app, &self.inbox, ctx);
         self.webfonts.logic(&self.app, ctx);
         crate::spelling::logic(&self.app, ctx);
+        crate::images::logic(&mut self.app, ctx);
         crate::house::keep(ctx);
         self.app.logic(ctx);
         // Store changed preferences straight away: a reload or closed tab runs no exit code (#1562).
@@ -478,8 +480,23 @@ fn print_pdf(bytes: &[u8]) -> Result<(), String> {
     let on_load = wasm_bindgen::closure::Closure::once_into_js(move || {
         iframe_for_load.set_onload(None);
         if let Err(e) = print_loaded_pdf(&iframe_for_load, &url_for_cleanup) {
-            cleanup_print(&iframe_for_load, &url_for_cleanup);
-            log::error!("print failed: {e:?}");
+            // Firefox shows a PDF in a frame with its own viewer, which a page may not ask to
+            // print ("Permission denied … cross-origin object"): open the PDF in a new tab
+            // instead, where the browser's print button is one click away (to-do row 70).
+            iframe_for_load.remove();
+            log::info!("printing in the page isn't allowed here ({e:?}); opening the PDF in a new tab");
+            let opened = web_sys::window().and_then(|w| w.open_with_url_and_target(&url_for_cleanup, "_blank").ok().flatten()).is_some();
+            if !opened {
+                log::error!("print failed: the browser blocked the new tab");
+            }
+            // The new tab has its own copy once loaded; let go of ours a minute later.
+            let url = url_for_cleanup.clone();
+            let revoke = wasm_bindgen::closure::Closure::once_into_js(move || {
+                web_sys::Url::revoke_object_url(&url).ok();
+            });
+            if let Some(w) = web_sys::window() {
+                let _ = w.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 60_000);
+            }
         }
     });
     iframe.set_onload(Some(on_load.unchecked_ref()));

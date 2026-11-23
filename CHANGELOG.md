@@ -7,6 +7,10 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Added
+- **Border colour and line style** in the borders menu (thin, medium, thick, dashed, dotted,
+  double), used by the next border you pick, as in Sheets.
+- **Pictures in cells:** Insert › Image › "Insert image in cell" or "over cells" opens your file
+  chooser straight away; pasting a picture (Ctrl+V) puts it inside the selected cell, fitted to it.
 - **Spelling suggestions:** while typing in a cell, click a word underlined in red to see up to
   five corrections, add it to your own dictionary (kept in this browser), or ignore it.
 - **Insert row below / column right** in the cell right-click menu and in Insert › Rows and
@@ -18,6 +22,8 @@ new features and the last one for fixes.
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Drop-down lists in cells** (data validation) show every choice, as tall as the window allows,
+  then scroll with a visible bar; they have the house menu look.
 - **Open a link** asks in a house-style box ("Open this link?") instead of GridCraft's.
 - **Font size and zoom** lists have the house style; the font size's ▾ sits inside its box.
 - **Long dialog titles** (a long file name in Share) end in "…" instead of running under the ✕.
@@ -28,6 +34,8 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- **Print** works in Firefox: Firefox won't let a page print a PDF shown inside it, so the
+  print-ready PDF opens in a new tab with the browser's print button (Chrome prints directly).
 - Double-clicking a cell to edit it follows your computer's double-click speed, so slower
   touchpad double-taps work too.
 - Undoing a merge that moved a value into the top-left cell now puts the value back where it was.

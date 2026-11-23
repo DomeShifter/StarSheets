@@ -31,6 +31,8 @@ mod findreplace;
 mod fonts;
 mod house;
 mod icons;
+#[cfg(target_arch = "wasm32")]
+mod images;
 mod linkcard;
 #[cfg(target_arch = "wasm32")]
 mod live;

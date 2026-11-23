@@ -121,7 +121,13 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sep,
             Cmd("Chart", "panel:chart", ""),
             Cmd("Pivot table", "insert.pivotTable", ""),
-            Cmd("Image", "insert.picture", ""),
+            Sub(
+                "Image",
+                &[
+                    Cmd("Insert image in cell", "panel:imageInCell", ""),
+                    Cmd("Insert image over cells", "panel:imageOverCells", ""),
+                ],
+            ),
             Sep,
             Sub(
                 "Function",
@@ -280,12 +286,14 @@ pub enum Tool {
     Menu(&'static str, &'static str, &'static [(&'static str, &'static str, &'static str)]),
     /// Icon, tooltip, command id taking `color`, the "reset" label and value.
     Colour(&'static str, &'static str, &'static str, &'static str, &'static str),
+    /// Sheets' borders menu: the presets, plus border colour and line style for the next one.
+    Borders,
     Font,
     FontSize,
     Zoom,
     Gap,
 }
-use Tool::{Btn, Colour, Font, FontSize, Gap, Menu, Txt, Zoom};
+use Tool::{Borders, Btn, Colour, Font, FontSize, Gap, Menu, Txt, Zoom};
 
 /// The toolbar, left to right (docs/sheets-reference.md §3).
 pub const TOOLBAR: &[Tool] = &[
@@ -311,7 +319,7 @@ pub const TOOLBAR: &[Tool] = &[
     Colour("format_color_text", "Text colour", "home.fontColor", "Reset", "auto"),
     Gap,
     Colour("format_color_fill", "Fill colour", "home.fillColor", "Reset", "none"),
-    Menu("border_all", "Borders", BORDERS),
+    Borders,
     Menu("cell_merge", "Merge cells", MERGE),
     Gap,
     Menu("format_align_left", "Horizontal align", H_ALIGN),
@@ -346,6 +354,43 @@ const NUMBER_FORMATS: &[(&str, &str, &str)] = &[
     ("Custom date and time", "panel:customdate", "{}"),
     ("Custom number format", "panel:customnumber", "{}"),
 ];
+
+/// Border line styles: menu name and GridCraft's style id.
+const BORDER_STYLES: &[(&str, &str)] =
+    &[("Thin", "thin"), ("Medium", "medium"), ("Thick", "thick"), ("Dashed", "dashed"), ("Dotted", "dotted"), ("Double", "double")];
+
+/// Draws one border style as a line across `r`, with a ✓ on the left when it's the current one.
+fn line_sample(ui: &Ui, r: egui::Rect, k: usize, on: bool) {
+    let p = ui.painter();
+    let (x0, x1, y) = (r.left(), r.right(), r.center().y);
+    let c = theme::TEXT;
+    match BORDER_STYLES[k].1 {
+        "medium" => {
+            p.hline(x0..=x1, y, Stroke::new(2.0, c));
+        }
+        "thick" => {
+            p.hline(x0..=x1, y, Stroke::new(3.0, c));
+        }
+        "dashed" | "dotted" => {
+            let (dash, gap) = if BORDER_STYLES[k].1 == "dashed" { (6.0, 3.0) } else { (1.5, 2.5) };
+            let mut x = x0;
+            while x < x1 {
+                p.hline(x..=(x + dash).min(x1), y, Stroke::new(1.0, c));
+                x += dash + gap;
+            }
+        }
+        "double" => {
+            p.hline(x0..=x1, y - 1.5, Stroke::new(1.0, c));
+            p.hline(x0..=x1, y + 1.5, Stroke::new(1.0, c));
+        }
+        _ => {
+            p.hline(x0..=x1, y, Stroke::new(1.0, c));
+        }
+    }
+    if on {
+        p.text(egui::pos2(r.left() - 20.0, y), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), c);
+    }
+}
 
 const BORDERS: &[(&str, &str, &str)] = &[
     ("icon:border_all|All borders", "home.borders", r#"{"preset":"all"}"#),
@@ -425,6 +470,9 @@ pub struct Shell {
     title_draft: Option<String>,
     /// The custom colour picker (⊕ in the colour menus).
     custom: crate::colourpicker::CustomPicker,
+    /// Borders menu: the colour and line style the next border is drawn with (to-do row 66).
+    border_colour: Option<u32>,
+    border_style: usize,
 }
 
 /// What the toolbar shows for the active cell.
@@ -543,6 +591,7 @@ impl Shell {
                             };
                             r.on_hover_text(*tip);
                         }
+                        Borders => self.borders(app, ui),
                         Font => {
                             let label = RichText::new(format!("{}  ▾", cur.font)).size(13.0).color(theme::TEXT);
                             ui.menu_button(label, |ui| {
@@ -604,6 +653,72 @@ impl Shell {
                 });
             });
         });
+    }
+
+    /// Sheets' borders menu: the border presets on the left; on the right the colour and the
+    /// line style (thin, medium, thick, dashed, dotted, double) that the next preset uses.
+    fn borders(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        let body = |ui: &mut Ui| {
+            flat(ui);
+            ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+            ui.horizontal_top(|ui| {
+                egui::Grid::new("starsheets_border_presets").spacing(vec2(4.0, 4.0)).show(ui, |ui| {
+                    for (i, (label, id, p)) in BORDERS.iter().enumerate() {
+                        let (name, tip) = label.trim_start_matches("icon:").split_once('|').unwrap_or((label, ""));
+                        if icon_or_text(ui, name, tip).clicked() {
+                            let mut params = params(p);
+                            params["style"] = json!(BORDER_STYLES[self.border_style].1);
+                            if let Some(rgb) = self.border_colour {
+                                params["color"] = json!(format!("#{rgb:06X}"));
+                            }
+                            app.run_or_alert(id, params);
+                            ui.close();
+                        }
+                        if (i + 1) % 5 == 0 {
+                            ui.end_row();
+                        }
+                    }
+                });
+                let (r, _) = ui.allocate_exact_size(vec2(1.0, 64.0), Sense::hover());
+                ui.painter().vline(r.center().x, r.y_range(), Stroke::new(1.0, theme::DIVIDER));
+                ui.vertical(|ui| {
+                    // The colour button shows the colour in a bar under the pencil.
+                    let colour = self.border_colour.map_or(theme::TEXT, |rgb| egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
+                    let cr = match icons::icon("border_color") {
+                        Some(img) => ui.menu_button(img, |ui| match crate::colourpicker::palette(ui, self.border_colour, false, false) {
+                            Some(crate::colourpicker::Choice::Colour(rgb)) => self.border_colour = Some(rgb),
+                            Some(crate::colourpicker::Choice::Reset) => self.border_colour = None,
+                            _ => {}
+                        }),
+                        None => ui.menu_button("Colour", |_| {}),
+                    }
+                    .response;
+                    ui.painter().hline(cr.rect.x_range().shrink(6.0), cr.rect.bottom() - 4.0, Stroke::new(3.0, colour));
+                    cr.on_hover_text("Border colour");
+                    let sr = match icons::icon("line_style") {
+                        Some(img) => ui.menu_button(img, |ui| {
+                            menu_style_width(ui, 120.0);
+                            for (k, (name, _)) in BORDER_STYLES.iter().enumerate() {
+                                let r = ui.add_sized([120.0, crate::house::ROW_HEIGHT], Button::new("").frame_when_inactive(false)).on_hover_text(*name);
+                                line_sample(ui, r.rect.shrink2(vec2(28.0, 0.0)), k, self.border_style == k);
+                                if r.clicked() {
+                                    self.border_style = k;
+                                    ui.close();
+                                }
+                            }
+                        }),
+                        None => ui.menu_button("Style", |_| {}),
+                    }
+                    .response;
+                    sr.on_hover_text("Border style");
+                });
+            });
+        };
+        let r = match icons::icon("border_all") {
+            Some(img) => ui.menu_button(img, body).response,
+            None => ui.menu_button("Borders", body).response,
+        };
+        r.on_hover_text("Borders");
     }
 
     /// Sheets' size box: − [10] +, type a size and press Enter; the arrow lists common sizes.
@@ -1048,6 +1163,9 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::chartpanel::REQUEST), true));
                     } else if *id == "panel:dropdown" {
                         ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
+                    } else if *id == "panel:imageInCell" || *id == "panel:imageOverCells" {
+                        #[cfg(target_arch = "wasm32")]
+                        crate::images::pick(if *id == "panel:imageInCell" { "cell" } else { "overCells" });
                     } else if *id == "panel:insertBelow" || *id == "panel:insertRight" {
                         gridcraft_ui_egui::grid::insert_after(app, *id == "panel:insertBelow");
                     } else if let Some(what) = id.strip_prefix("panel:") {
@@ -1123,6 +1241,16 @@ mod tests {
                         if !id.is_empty() {
                             all.push(id);
                         }
+                    }
+                }
+                Borders => {
+                    for icon in ["border_all", "border_color", "line_style"] {
+                        assert!(icons::has(icon), "missing icon {icon}");
+                    }
+                    for (label, id, _) in BORDERS {
+                        let icon = label.trim_start_matches("icon:").split('|').next().unwrap_or(label);
+                        assert!(icons::has(icon), "missing icon {icon}");
+                        all.push(id);
                     }
                 }
                 Font | FontSize | Zoom | Gap => {}

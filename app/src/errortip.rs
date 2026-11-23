@@ -81,6 +81,10 @@ impl ErrorTip {
             return;
         }
         let Value::Error(e) = sh.value(cell) else { return };
+        // A picture in a cell keeps #VALUE! only as a fallback for formulas: not an error.
+        if sh.cell_pictures.contains_key(&cell) {
+            return;
+        }
         let mut text = explain(&e).to_string();
         if let Some(f) = sh.cell(cell).and_then(|c| c.formula.as_ref()) {
             let broken: Vec<String> = cells_in(&f.text).into_iter().filter(|c| *c != cell && matches!(sh.value(*c), Value::Error(_))).map(|c| c.a1()).take(3).collect();

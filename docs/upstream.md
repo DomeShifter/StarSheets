@@ -73,3 +73,6 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0044 | ui-egui | The right-click menu of charts, pictures and shapes uses the host's menu look (padding, icons) |
 | 0045 | chart | A doughnut series with nothing to draw (text, blanks) gets no ring, so it no longer shrinks the real rings |
 | 0046 | engine | Merge commands take `moves`: a lone value is moved to the top-left inside the same command, so one Undo reverses both |
+| 0047 | ui-egui | With a host menu look, a cell's drop-down list shows every choice as tall as the window allows (below or above the cell), then a visible scroll bar |
+| 0048 | ui-egui | Host option `paste_pictures_in_cell`: a pasted picture goes inside the active cell |
+| 0049 | ui-egui | No red error corner on a cell holding a picture (its #VALUE! is only a fallback) |

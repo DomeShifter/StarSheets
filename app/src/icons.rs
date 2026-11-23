@@ -13,6 +13,8 @@ const ICONS: &[(&str, &[u8])] = &[
     ("arrow_upward", include_bytes!("../icons/arrow_upward.svg")),
     ("aspect_ratio", include_bytes!("../icons/aspect_ratio.svg")),
     ("border_all", include_bytes!("../icons/border_all.svg")),
+    ("border_color", include_bytes!("../icons/border_color.svg")),
+    ("line_style", include_bytes!("../icons/line_style.svg")),
     ("border_bottom", include_bytes!("../icons/border_bottom.svg")),
     ("border_clear", include_bytes!("../icons/border_clear.svg")),
     ("border_horizontal", include_bytes!("../icons/border_horizontal.svg")),
