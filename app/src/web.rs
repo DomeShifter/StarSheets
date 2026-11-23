@@ -260,6 +260,8 @@ impl eframe::App for WebShell {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let open = (!self.home.active).then(|| self.app.session.active().map(|d| d.display_title())).flatten();
+        set_tab_title(open.as_deref());
         if self.home.active {
             let ctx = ui.ctx().clone();
             self.home.ui(ui);
@@ -286,6 +288,7 @@ impl eframe::App for WebShell {
         self.messages.ui(&mut self.app, &ctx);
         self.spell.before(&ctx);
         self.find.keys(&self.app, &ctx);
+        crate::dvpanel::delete_key(&mut self.app);
         // A one-line box in a panel, menu or the toolbar (chart range, font size, find, rule
         // formula…) lets go of the keyboard when Enter or Tab is pressed. The grid, drawn next,
         // then finds nothing focused and would take that same key as its own: Enter started
@@ -735,4 +738,28 @@ fn install_wake(ctx: &egui::Context) {
     }
     // Lives as long as the page.
     wake.forget();
+}
+
+/// The browser tab's title: the open file's name only (no ".xlsx", no "StarSheets"), as Google
+/// Sheets' tab shows the file's name; "StarSheets" on the home screen. eframe's web runner
+/// ignores `ViewportCommand::Title`, so the page's own `document.title` is set here, and only
+/// when it changes.
+fn set_tab_title(file: Option<&str>) {
+    thread_local!(static SHOWN: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) });
+    let title = match file {
+        Some(name) => {
+            let lower = name.to_ascii_lowercase();
+            let stem = [".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".ods"].iter().find(|e| lower.ends_with(*e)).map_or(name, |e| &name[..name.len() - e.len()]);
+            if stem.trim().is_empty() { "Untitled spreadsheet".to_string() } else { stem.to_string() }
+        }
+        None => "StarSheets".to_string(),
+    };
+    SHOWN.with(|s| {
+        if *s.borrow() != title
+            && let Some(doc) = web_sys::window().and_then(|w| w.document())
+        {
+            doc.set_title(&title);
+            *s.borrow_mut() = title;
+        }
+    });
 }

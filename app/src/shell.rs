@@ -1087,7 +1087,9 @@ pub fn menu_sep_width(ui: &mut Ui, width: f32) {
 pub const MENU_LOOK: gridcraft_ui_egui::MenuLook = gridcraft_ui_egui::MenuLook {
     style: |ui| menu_style(ui, true),
     row: |label, keys| menu_row(label, keys, true),
-    sep: |ui| menu_sep_width(ui, 320.0),
+    // As wide as the menu itself (320 for cell menus; a drop-down list is only as wide as its
+    // choices, and a fixed 320 made it wider than its rows' highlight).
+    sep: |ui| menu_sep_width(ui, ui.min_rect().width().max(1.0)),
     list_style: list_style,
     // The empty shortcut's stretch keeps the label at the left (as in menu_row).
     list_row: |label| Button::new(RichText::new(label.to_string()).size(14.0).color(theme::TEXT)).shortcut_text(""),
@@ -1096,7 +1098,8 @@ pub const MENU_LOOK: gridcraft_ui_egui::MenuLook = gridcraft_ui_egui::MenuLook {
 /// A data-validation drop-down list: only as wide as its longest choice, plus the 16 px row
 /// padding each side and room for the scroll bar (James, to-do row 75).
 fn list_style(ui: &mut Ui, items: &[String]) -> f32 {
-    let width = crate::house::fit_width(ui, items.iter().map(String::as_str), false);
+    // "Edit rule" sits under the choices (patch 0074): the list is at least as wide as it.
+    let width = crate::house::fit_width(ui, items.iter().map(String::as_str).chain(["Edit rule"]), false);
     menu_style_width(ui, width);
     width
 }

@@ -675,6 +675,42 @@ fn commands(d: &Draft) -> Result<Vec<(&'static str, Json)>, String> {
     Ok(out)
 }
 
+/// Delete on cells that hold nothing but have a drop-down or other rule takes the rule off them
+/// (to-do 2 row 27). As in Google Sheets it is a second press: the first Delete clears what the
+/// cells hold (GridCraft), a Delete on cells already empty removes their rule. A rule wholly
+/// inside the selection goes with its item colours and its entry in StarSheets' section; one
+/// only partly inside keeps its other cells.
+pub fn delete_key(app: &mut SheetApp) {
+    // Set by the grid's Delete when the selection held nothing (patch 0076).
+    if !std::mem::take(&mut app.grid.delete_on_empty) {
+        return;
+    }
+    let Some(d) = app.session.active() else { return };
+    let Some(sh) = d.wb.active() else { return };
+    let sel = d.selection.ranges.clone();
+    let holds = sel.iter().any(|r| sh.cells.iter_range(*r).any(|(_, x)| !x.value.is_empty() || x.formula.is_some() || x.py.is_some()));
+    let touched: Vec<Validation> = sh.validations.iter().filter(|v| v.ranges.iter().any(|r| sel.iter().any(|s| s.intersects(r)))).cloned().collect();
+    if holds || touched.is_empty() {
+        return;
+    }
+    let (cfs, theme_colours, sheet) = (sh.cond_formats.clone(), d.wb.theme.clone(), active_sheet_name(app));
+    let mut h = crate::hostdata::read(app);
+    let mut partly = false;
+    for v in &touched {
+        if v.ranges.iter().all(|r| sel.iter().any(|s| s.contains_range(r))) {
+            let draft = draft_from(v, &cfs, &theme_colours, h.dv_for(&sheet, &crate::hostdata::ranges_text(&v.ranges)));
+            remove(app, &orig_of(&draft), &mut h);
+        } else {
+            partly = true;
+        }
+    }
+    if partly {
+        let range = sel.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",");
+        app.run_or_alert("data.validation", json!({ "range": range, "clear": true }));
+    }
+    crate::hostdata::write(app, h);
+}
+
 /// Takes a rule off: its validation, the colours of its items (found by what they are, at the
 /// moment of removing), its tick boxes and its entry in StarSheets' section (`h`, written by the
 /// caller).

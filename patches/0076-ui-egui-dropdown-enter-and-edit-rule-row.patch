@@ -1,0 +1,60 @@
+diff --git a/crates/ui-egui/src/grid.rs b/crates/ui-egui/src/grid.rs
+index e19e4a6..2a3b23e 100644
+--- a/crates/ui-egui/src/grid.rs
++++ b/crates/ui-egui/src/grid.rs
+@@ -287,6 +287,9 @@ pub struct GridState {
+     /// "Edit rule" was chosen at the bottom of a drop-down list: the host opens that cell's
+     /// data validation rule (StarSheets' side panel) and clears this.
+     pub edit_validation: Option<CellRef>,
++    /// Delete was pressed on cells that hold nothing (Sheets keys): the host may take their
++    /// drop-down or other rule off (Google Sheets' second Delete) and clears this.
++    pub delete_on_empty: bool,
+     /// Open task pane: comments, watch, selection, formatChart.
+     pub pane: Option<String>,
+     /// Ink stroke being drawn (sheet points).
+diff --git a/crates/ui-egui/src/grid/editor.rs b/crates/ui-egui/src/grid/editor.rs
+index 3505efe..447e34b 100644
+--- a/crates/ui-egui/src/grid/editor.rs
++++ b/crates/ui-egui/src/grid/editor.rs
+@@ -223,7 +223,7 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
+             // Sheets: under the choices, a way to the rule itself.
+             if let Some(l) = look {
+                 (l.sep)(ui);
+-                if ui.add_sized([width, 32.0], (l.row)("Edit rule", "").selected(key == Some(items.len()))).clicked() {
++                if ui.add_sized([width, 32.0], (l.list_row)("Edit rule").wrap_mode(egui::TextWrapMode::Extend).selected(key == Some(items.len()))).clicked() {
+                     chosen = Some(items.len());
+                 }
+             }
+diff --git a/crates/ui-egui/src/grid/keyboard.rs b/crates/ui-egui/src/grid/keyboard.rs
+index a3b1551..4ca13bc 100644
+--- a/crates/ui-egui/src/grid/keyboard.rs
++++ b/crates/ui-egui/src/grid/keyboard.rs
+@@ -123,6 +123,9 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
+                             let a = app.session.active().map(|d| d.selection.active).unwrap_or_default();
+                             app.grid.list_picker = Some(a);
+                             app.grid.list_key = None;
++                            // The list drawn this frame reads the same input: an Enter with no
++                            // row chosen closes it, so take this one away.
++                            ctx.input_mut(|i| i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Enter, .. })));
+                         } else if app.ui.sheets_keys && !shift && !m.alt && !m.ctrl {
+                             app.begin_edit(None, false);
+                             // The editor opened this frame reads the same input: take this Enter
+@@ -138,7 +141,17 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
+                     Key::F2 => app.begin_edit(None, false),
+                     // With an object selected, Delete and Backspace delete it, not the cells.
+                     Key::Delete if app.delete_selected_object() => {}
+-                    Key::Delete => app.run_or_alert("edit.clearContents", json!({})),
++                    Key::Delete => {
++                        let empty = app.ui.sheets_keys
++                            && app.session.active().is_some_and(|d| {
++                                d.selection.ranges.iter().all(|r| sh.cells.iter_range(*r).all(|(_, x)| x.value.is_empty() && x.formula.is_none() && x.py.is_none()))
++                            });
++                        app.run_or_alert("edit.clearContents", json!({}));
++                        if empty {
++                            app.grid.delete_on_empty = true;
++                            ctx.request_repaint();
++                        }
++                    }
+                     Key::Backspace if app.delete_selected_object() => {}
+                     Key::Backspace => {
+                         // Excel for Mac: Delete clears the cell and starts editing it (Sheets: only clears).

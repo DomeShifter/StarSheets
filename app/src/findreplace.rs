@@ -306,7 +306,10 @@ impl FindReplace {
         if app.session.active().is_some_and(|d| d.wb.active_sheet() != sheet) {
             app.run_or_alert("sheet.activate", json!({ "sheet": sheet }));
         }
-        let _ = app.run("edit.goTo", json!({ "reference": format!("'{}'!{}", name.replace('\'', "''"), c.a1()) }));
+        if app.run("edit.goTo", json!({ "reference": format!("'{}'!{}", name.replace('\'', "''"), c.a1()) })).is_ok() {
+            // Scroll the match into view, as the Name Box and Go To do (to-do 2 row 31).
+            app.grid.ensure_visible = true;
+        }
     }
 
     /// Moves to the next match after the active cell (wrapping round).

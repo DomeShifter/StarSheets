@@ -102,3 +102,4 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0073 | engine | Clear contents (Delete) over cells with nothing in them changes nothing, so it adds no undo step |
 | 0074 | ui-egui | Sheets: Enter on a drop-down cell opens its list; ↓ ↑ Enter choose; a host menu look adds "Edit rule" under the choices (`grid.edit_validation`) |
 | 0075 | ui-egui | Formulas coloured like a code editor (references, strings, numbers, functions, TRUE/FALSE, errors, dimmed operators), the same in the cell, the formula bar and the formula bar at rest |
+| 0076 | ui-egui | Enter on a drop-down cell keeps its list open (the same Enter no longer reaches the list and closes it); "Edit rule" under the choices drawn like the choices (one line, same left edge); Delete on cells that hold nothing sets `GridState.delete_on_empty` so the host can take their drop-down off (Google's second Delete). | StarSheets-only (Sheets keys + host menu look) |

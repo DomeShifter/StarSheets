@@ -84,6 +84,15 @@ only as wide as its longest row: `house::fit_width(ui, labels, icon_column)` = t
 16 px padding each side + the icon column if there is one + 12 px, between 80 and 480 px. The
 fixed 220 / 320 px widths are only for command menus.
 
+**Every row of a menu is the same kind of row, and every divider is as wide as its menu (rule
+since 2026-11-23, after "Edit rule" in drop-down lists came out on two lines, further right than
+the choices, under a divider wider than the rows).** A row added to a list menu (a command under
+the choices, such as "Edit rule") is drawn with the list's own row (`MENU_LOOK.list_row`), not a
+command row with an icon column, and counts towards `fit_width`. A divider never has a width of
+its own: `menu_sep_width` takes the menu's width (`ui.min_rect().width()`). **Check:** before a menu
+change is marked Done, take one screenshot of it open (ff-shot) and look at three things: every
+label on one line, every label on the same left edge, the highlight as wide as the menu.
+
 ## Folder colours
 
 Folders can be given one of 14 colours (`house::FOLDER_COLOURS`), chosen to be muted, easy to tell
