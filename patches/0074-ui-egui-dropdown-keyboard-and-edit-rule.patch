@@ -1,0 +1,120 @@
+diff --git a/crates/ui-egui/src/grid.rs b/crates/ui-egui/src/grid.rs
+index cd1273c..e19e4a6 100644
+--- a/crates/ui-egui/src/grid.rs
++++ b/crates/ui-egui/src/grid.rs
+@@ -282,6 +282,11 @@ pub struct GridState {
+     pub renaming_tab: Option<usize>,
+     pub rename_text: String,
+     pub list_picker: Option<CellRef>,
++    /// The list row chosen with the arrow keys (Sheets: Enter opens a drop-down's list).
++    pub list_key: Option<usize>,
++    /// "Edit rule" was chosen at the bottom of a drop-down list: the host opens that cell's
++    /// data validation rule (StarSheets' side panel) and clears this.
++    pub edit_validation: Option<CellRef>,
+     /// Open task pane: comments, watch, selection, formatChart.
+     pub pane: Option<String>,
+     /// Ink stroke being drawn (sheet points).
+diff --git a/crates/ui-egui/src/grid/editor.rs b/crates/ui-egui/src/grid/editor.rs
+index d8314e4..3505efe 100644
+--- a/crates/ui-egui/src/grid/editor.rs
++++ b/crates/ui-egui/src/grid/editor.rs
+@@ -181,6 +181,21 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
+         (true, true) => (geo.mirror_pos(r.left_top()), Align2::RIGHT_BOTTOM),
+     };
+     let mut close = false;
++    // Keyboard (Sheets): ↓ ↑ move through the choices (and the host's "Edit rule" row), Enter
++    // picks, Esc closes (see popup_dismissed).
++    let rows = items.len() + usize::from(look.is_some());
++    let (down, up, enter) = ui.input_mut(|i| {
++        (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
++    });
++    if rows > 0 && down {
++        app.grid.list_key = Some(app.grid.list_key.map_or(0, |k| (k + 1).min(rows - 1)));
++    }
++    if rows > 0 && up {
++        app.grid.list_key = Some(app.grid.list_key.map_or(0, |k| k.saturating_sub(1)));
++    }
++    let key = app.grid.list_key;
++    let mut chosen = if enter { key } else { None };
++    close |= enter && key.is_none();
+     let response = egui::Area::new(egui::Id::unique("dv_list")).fixed_pos(at).pivot(pivot).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+         let frame = if look.is_some() { egui::Frame::menu(ui.style()) } else { egui::Frame::popup(ui.style()).inner_margin(2.0) };
+         frame.show(ui, |ui| {
+@@ -191,20 +206,42 @@ pub(super) fn list_picker(app: &mut SheetApp, ui: &mut egui::Ui, geo: &Geo, was_
+             ui.set_min_width(width);
+             let visibility = if look.is_some() { egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded } else { egui::scroll_area::ScrollBarVisibility::default() };
+             egui::ScrollArea::vertical().max_height(height).min_scrolled_height(height).scroll_bar_visibility(visibility).show(ui, |ui| {
+-                for it in &items {
++                for (k, it) in items.iter().enumerate() {
++                    let on = key == Some(k);
+                     let row = match look {
+-                        Some(l) => ui.add_sized([width, 32.0], (l.list_row)(it.as_str())),
+-                        None => ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).min_size(vec2(width, LIST_PICKER_ROW_H))),
++                        Some(l) => ui.add_sized([width, 32.0], (l.list_row)(it.as_str()).selected(on)),
++                        None => ui.add(egui::Button::new(it.as_str()).frame_when_inactive(false).selected(on).min_size(vec2(width, LIST_PICKER_ROW_H))),
+                     };
++                    if on && (up || down) {
++                        row.scroll_to_me(None);
++                    }
+                     if row.clicked() {
+-                        app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": it}));
+-                        close = true;
++                        chosen = Some(k);
+                     }
+                 }
+             });
++            // Sheets: under the choices, a way to the rule itself.
++            if let Some(l) = look {
++                (l.sep)(ui);
++                if ui.add_sized([width, 32.0], (l.row)("Edit rule", "").selected(key == Some(items.len()))).clicked() {
++                    chosen = Some(items.len());
++                }
++            }
+         });
+     });
++    match chosen {
++        Some(k) if k < items.len() => {
++            app.run_or_alert("cell.set", json!({"cell": c.a1(), "input": items[k]}));
++            close = true;
++        }
++        Some(_) => {
++            app.grid.edit_validation = Some(c);
++            close = true;
++        }
++        None => {}
++    }
+     if close || popup_dismissed(&response.response, was_open) {
+         app.grid.list_picker = None;
++        app.grid.list_key = None;
+     }
+ }
+diff --git a/crates/ui-egui/src/grid/keyboard.rs b/crates/ui-egui/src/grid/keyboard.rs
+index 70f0644..a3b1551 100644
+--- a/crates/ui-egui/src/grid/keyboard.rs
++++ b/crates/ui-egui/src/grid/keyboard.rs
+@@ -20,6 +20,7 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
+         || app.message.is_some()
+         || app.grid.filter_menu.is_some()
+         || app.grid.fill_menu.is_some()
++        || app.grid.list_picker.is_some()
+         || matches!(app.grid.drag, Drag::Fill { menu: true, .. })
+         || app.macros.question.is_some()
+     {
+@@ -113,7 +114,16 @@ pub(super) fn keyboard(app: &mut SheetApp, ctx: &egui::Context, resp: &egui::Res
+                         app.grid.ensure_visible = true;
+                     }
+                     Key::Enter => {
+-                        if app.ui.sheets_keys && !shift && !m.alt && !m.ctrl {
++                        // Sheets: Enter on a drop-down cell opens its list (arrows and Enter pick).
++                        let dropdown = app.ui.sheets_keys && !shift && !m.alt && !m.ctrl && {
++                            let a = app.session.active().map(|d| d.selection.active).unwrap_or_default();
++                            super::editor::sheets_dropdown_hit(sh, geo, a).is_some()
++                        };
++                        if dropdown {
++                            let a = app.session.active().map(|d| d.selection.active).unwrap_or_default();
++                            app.grid.list_picker = Some(a);
++                            app.grid.list_key = None;
++                        } else if app.ui.sheets_keys && !shift && !m.alt && !m.ctrl {
+                             app.begin_edit(None, false);
+                             // The editor opened this frame reads the same input: take this Enter
+                             // away, or it would commit straight away and move down.

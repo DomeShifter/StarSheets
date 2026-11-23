@@ -93,7 +93,7 @@ pub fn ranges_text(ranges: &[gridcraft_engine::core::RangeRef]) -> String {
 
 /// Ranges typed in a panel (`b2:b9, d2`) in the section's form (`B2:B9,D2`).
 pub fn normalise_ranges(text: &str) -> String {
-    text.split(',').filter_map(|r| gridcraft_engine::core::RangeRef::parse(r.trim())).map(|r| r.a1()).collect::<Vec<_>>().join(",")
+    crate::refs::plain(text)
 }
 
 impl HostData {

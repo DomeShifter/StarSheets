@@ -1,7 +1,9 @@
 //! Edit › Find and replace (Ctrl+H), after Google Sheets: Find, Replace with, Search (all sheets,
 //! this sheet or a range), Match case, Match entire cell contents, Search using regular
 //! expressions, Also search within formulas; Find, Replace, Replace all and Done. Takes over
-//! GridCraft's Find dialog.
+//! GridCraft's Find dialog. Ctrl+F opens Sheets' small find bar instead (top right): this sheet
+//! only, "n of N", ↑ ↓ (or Enter / Shift+Enter) through the matches, ⋮ for the full Find and
+//! replace, ✕ (or Esc) to close.
 
 use egui::{RichText, vec2};
 use gridcraft_engine::core::{CellRef, RangeRef, Value};
@@ -26,6 +28,12 @@ pub struct FindReplace {
     /// What happened last ("3 instances of x replaced", "No more results").
     status: String,
     focus: bool,
+    /// The Ctrl+F bar: open, its text, focus wanted, the match shown and how many there are.
+    bar: bool,
+    bar_text: String,
+    bar_focus: bool,
+    bar_at: Option<usize>,
+    bar_count: usize,
 }
 
 /// One search, compiled once.
@@ -49,6 +57,118 @@ impl FindReplace {
             self.open = true;
             self.focus = true;
             self.status.clear();
+        }
+    }
+
+    /// Ctrl+F (before the grid sees it): the find bar.
+    pub fn keys(&mut self, app: &SheetApp, ctx: &egui::Context) {
+        if app.editor.is_none() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)) {
+            self.bar = true;
+            self.bar_focus = true;
+        }
+    }
+
+    /// This sheet's cells that show `bar_text` (any case), row by row.
+    fn bar_matches(&self, app: &SheetApp) -> Vec<CellRef> {
+        let Some(d) = app.session.active() else { return vec![] };
+        let needle = self.bar_text.trim().to_lowercase();
+        if needle.is_empty() {
+            return vec![];
+        }
+        let sheet = d.wb.active_sheet();
+        let Some(sh) = d.wb.sheets.get(sheet) else { return vec![] };
+        let mut cells: Vec<CellRef> = sh
+            .cells
+            .iter()
+            .filter(|(_, c)| !matches!(c.value, Value::Empty))
+            .map(|(at, c)| (at, gridcraft_engine::display::format(&c.value, d.wb.styles.get(c.style).num_fmt.as_str(), &d.wb).text))
+            .filter(|(_, t)| t.to_lowercase().contains(&needle))
+            .map(|(at, _)| at)
+            .collect();
+        cells.sort_by_key(|c| (c.row, c.col));
+        cells
+    }
+
+    /// The Ctrl+F bar, top right of the sheet.
+    pub fn bar_ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+        if !self.bar {
+            return;
+        }
+        let (mut go, mut close, mut full) = (None::<i32>, false, false);
+        egui::Area::new(egui::Id::new("starsheets_find_bar")).anchor(egui::Align2::RIGHT_TOP, vec2(-24.0, 136.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+            house::card_frame().show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let r = ui.add(egui::TextEdit::singleline(&mut self.bar_text).desired_width(200.0).margin(vec2(house::M, house::S + 1.0)).hint_text("Find in sheet"));
+                    if self.bar_focus {
+                        r.request_focus();
+                        self.bar_focus = false;
+                    }
+                    if r.changed() {
+                        self.bar_at = None;
+                        go = Some(0);
+                    }
+                    let (enter, shift, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.modifiers.shift, i.key_pressed(egui::Key::Escape)));
+                    if r.lost_focus() && enter {
+                        go = Some(if shift { -1 } else { 1 });
+                        self.bar_focus = true;
+                    }
+                    if esc && (r.has_focus() || r.lost_focus()) {
+                        close = true;
+                    }
+                    let shown = match (self.bar_at, self.bar_count) {
+                        (_, 0) => "0 of 0".to_string(),
+                        (Some(i), n) => format!("{} of {n}", i + 1),
+                        (None, n) => format!("{n} found"),
+                    };
+                    ui.label(RichText::new(shown).size(house::BODY).color(crate::theme::TEXT_DIM));
+                    let icon = |ui: &mut egui::Ui, name: &str, fallback: &str, tip: &str| match crate::icons::icon(name) {
+                        Some(img) => ui.add(egui::Button::image(img).frame(false)).on_hover_text(tip),
+                        None => ui.add(egui::Button::new(fallback).frame(false)).on_hover_text(tip),
+                    };
+                    if icon(ui, "keyboard_arrow_up", "▲", "Previous (Shift+Enter)").clicked() {
+                        go = Some(-1);
+                    }
+                    if icon(ui, "keyboard_arrow_down", "▼", "Next (Enter)").clicked() {
+                        go = Some(1);
+                    }
+                    if ui.add(egui::Button::new(RichText::new("⋮").size(16.0)).frame(false)).on_hover_text("Find and replace (Ctrl+H)").clicked() {
+                        full = true;
+                    }
+                    if icon(ui, "close", "✕", "Close (Esc)").clicked() {
+                        close = true;
+                    }
+                });
+            });
+        });
+        if let Some(step) = go {
+            let all = self.bar_matches(app);
+            self.bar_count = all.len();
+            if all.is_empty() {
+                self.bar_at = None;
+            } else {
+                let n = all.len();
+                let i = match (self.bar_at, step) {
+                    (Some(i), 1) => (i + 1) % n,
+                    (Some(i), -1) => (i + n - 1) % n,
+                    (Some(i), _) => i.min(n - 1),
+                    (None, -1) => n - 1,
+                    (None, _) => 0,
+                };
+                self.bar_at = Some(i);
+                let sheet = app.session.active().map_or(0, |d| d.wb.active_sheet());
+                Self::select(app, sheet, all[i]);
+            }
+        }
+        if full {
+            self.find = self.bar_text.clone();
+            self.open = true;
+            self.focus = true;
+            self.status.clear();
+            close = true;
+        }
+        if close {
+            self.bar = false;
+            self.bar_at = None;
         }
     }
 

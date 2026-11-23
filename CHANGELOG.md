@@ -7,6 +7,10 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Added
+- **Ctrl+F find bar** (top right): finds on this sheet, "n of N", arrows or Enter/Shift+Enter
+  through the matches, ⋮ for the full Find and replace (Ctrl+H), ✕ or Esc to close.
+- **Enter on a drop-down cell** opens its list; arrow keys and Enter choose; "Edit rule" under
+  the choices opens the rule.
 - **Clip** text wrapping beside Overflow and Wrap (Format › Wrapping and the toolbar), as in
   Google Sheets; kept in StarSheets' section of the file, since Excel has no such setting.
 - **StarSheets' own section in your files:** what Excel has no place for (which kind of rule a
@@ -33,6 +37,11 @@ new features and the last one for fixes.
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Formulas are coloured like a code editor** (functions, numbers, TRUE/FALSE, errors,
+  operators, as well as references and text), the same in the cell, in the formula bar while
+  editing and when just looking.
+- Range boxes in the data validation and conditional formatting panels accept sheet names,
+  `$` signs and open ranges (`'My sheet'!$A$2:A`).
 - **Pictures in cells from Google Sheets files** open as pictures in the cells (they follow the
   cell's alignment); floating pictures and charts slide under frozen rows and columns.
 - **Google-style formulas** (`{…}`, `SORTN`, `ARRAYFORMULA`, `QUERY`, open ranges like `A3:C`)

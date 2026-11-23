@@ -285,6 +285,7 @@ impl eframe::App for WebShell {
         // Before GridCraft draws: its alerts are shown as house dialogs instead.
         self.messages.ui(&mut self.app, &ctx);
         self.spell.before(&ctx);
+        self.find.keys(&self.app, &ctx);
         // A one-line box in a panel, menu or the toolbar (chart range, font size, find, rule
         // formula…) lets go of the keyboard when Enter or Tab is pressed. The grid, drawn next,
         // then finds nothing focused and would take that same key as its own: Enter started
@@ -312,6 +313,7 @@ impl eframe::App for WebShell {
         self.custom_number.ui(&mut self.app, &ctx);
         self.find.intercept(&mut self.app);
         self.find.ui(&mut self.app, &ctx);
+        self.find.bar_ui(&mut self.app, &ctx);
         self.calc.ui(&self.app, ui);
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);

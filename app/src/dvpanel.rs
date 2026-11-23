@@ -213,6 +213,23 @@ impl DvPanel {
             self.preview = None;
             self.open(app, true);
         }
+        // "Edit rule" at the bottom of a drop-down list: that cell's rule, in the editor.
+        if let Some(c) = app.grid.edit_validation.take() {
+            self.open(app, false);
+            let found = app.session.active().and_then(|d| {
+                let sh = d.wb.active()?;
+                let dv = sh.validations.iter().find(|v| v.ranges.iter().any(|r| r.contains(c)))?.clone();
+                Some((dv, sh.cond_formats.clone(), d.wb.theme.clone()))
+            });
+            if let Some((dv, cfs, theme_colours)) = found {
+                let h = crate::hostdata::read(app);
+                let d = draft_from(&dv, &cfs, &theme_colours, h.dv_for(&active_sheet_name(app), &crate::hostdata::ranges_text(&dv.ranges)));
+                self.applied = d.orig.clone();
+                self.preview = None;
+                self.draft = Some(d);
+                self.just_opened = true;
+            }
+        }
     }
 
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
@@ -381,7 +398,10 @@ impl DvPanel {
     /// Applies the draft as it stands (Sheets applies a rule as you build it), replacing what is
     /// on the sheet for it. An incomplete draft changes nothing and says what is missing.
     fn update_preview(&mut self, app: &mut SheetApp, d: &Draft) {
-        let plan = commands(d);
+        let plan = match crate::refs::other_sheet(&d.range, &active_sheet_name(app)) {
+            Some(other) => Err(format!("The range must be on this sheet, not \"{other}\".")),
+            None => commands(d),
+        };
         let key = format!("{:?}", plan.as_ref().map_err(|_| ()).ok());
         if self.preview.as_ref() == Some(&key) {
             self.error = plan.err();
@@ -506,8 +526,7 @@ fn clip(s: &str, n: usize) -> String {
 
 /// The top-left cell of a range list, written relatively (custom formulas are relative to it).
 fn top_left(range: &str) -> Option<String> {
-    let first = range.split(',').next()?.trim();
-    Some(RangeRef::parse(first)?.start.a1())
+    crate::refs::top_left(range)
 }
 
 /// A formula string literal.
@@ -564,7 +583,8 @@ fn default_help(d: &Draft) -> String {
 
 /// The commands that put the draft on the sheet, in order.
 fn commands(d: &Draft) -> Result<Vec<(&'static str, Json)>, String> {
-    let range = d.range.trim().to_string();
+    // Sheet names and `$` are allowed in the box (`Sheet1!$A$2:A`); the rule goes on this sheet.
+    let range = crate::refs::plain(&d.range);
     let tl = top_left(&range).ok_or("Choose the cells the rule applies to (e.g. A1:A10).")?;
     let need = |v: &str| if v.trim().is_empty() { Err("Enter a value for the rule.".to_string()) } else { Ok(()) };
     let mut p = json!({ "range": range, "errorStyle": if d.reject { "stop" } else { "warning" }, "dropdown": !d.plain });

@@ -100,3 +100,5 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0071 | core, engine, xlsx | `RangeRef::tidy`: a data validation rule's areas are merged into rectangles and covered ones dropped (after fills, edits and on reading a file) |
 | 0072 | ui-egui | With `sheets_keys` the browser tab title is only the file name (no "— Edited") |
 | 0073 | engine | Clear contents (Delete) over cells with nothing in them changes nothing, so it adds no undo step |
+| 0074 | ui-egui | Sheets: Enter on a drop-down cell opens its list; ↓ ↑ Enter choose; a host menu look adds "Edit rule" under the choices (`grid.edit_validation`) |
+| 0075 | ui-egui | Formulas coloured like a code editor (references, strings, numbers, functions, TRUE/FALSE, errors, dimmed operators), the same in the cell, the formula bar and the formula bar at rest |

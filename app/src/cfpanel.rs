@@ -353,7 +353,10 @@ impl CfPanel {
     /// Puts the draft on the sheet: in place of the preview (or the edited rule), or as a new
     /// rule (GridCraft adds new rules first). Returns the engine's complaint, if any.
     fn apply(&mut self, app: &mut SheetApp, d: &Draft, rule: Json) -> Result<(), String> {
-        let mut p = json!({ "range": d.range.trim(), "rule": rule });
+        if let Some(other) = crate::refs::other_sheet(&d.range, &app.session.active().and_then(|x| x.wb.active()).map(|sh| sh.name.clone()).unwrap_or_default()) {
+            return Err(format!("The range must be on this sheet, not \"{other}\"."));
+        }
+        let mut p = json!({ "range": crate::refs::plain(&d.range), "rule": rule });
         let at = self.shown.as_ref().and_then(|at| Self::locate(app, at));
         if let Some(i) = at {
             p["replace"] = json!(i);
@@ -711,7 +714,7 @@ fn read_date_choice(d: &mut Draft) {
 }
 
 fn top_left(range: &str) -> Option<String> {
-    Some(gridcraft_engine::core::RangeRef::parse(range.split(',').next()?.trim())?.start.a1())
+    crate::refs::top_left(range)
 }
 
 /// Google Sheets reads a whole column in a custom formula (`=$A:$A=12`) as that column's cell in
@@ -812,7 +815,7 @@ fn rule_json(d: &Draft) -> Result<Json, String> {
         "cellIs" if boxes == 2 => json!({ "type": "cellIs", "operator": op, "value": v1, "value2": d.value2.trim(), "style": style }),
         "cellIs" => json!({ "type": "cellIs", "operator": op, "value": v1, "style": style }),
         "expression" => {
-            let row = gridcraft_engine::core::RangeRef::parse(d.range.split(',').next().unwrap_or("").trim()).map_or(1, |r| r.start.row + 1);
+            let row = crate::refs::area(d.range.split(',').next().unwrap_or("")).map_or(1, |(_, r)| r.start.row + 1);
             json!({ "type": "expression", "formula": sheets_rows(&v1, row), "style": style })
         }
         "blanks" | "noBlanks" => json!({ "type": kind, "style": style }),
