@@ -234,3 +234,24 @@ mod border_tests {
         assert!(!c2.left.is_none(), "C2's new thin left edge is the line now");
     }
 }
+
+#[cfg(test)]
+mod tab_tests {
+    use gridcraft_engine::Session;
+    use serde_json::json;
+
+    /// Patch 0056 (to-do 2 row 19): deleting the middle tab you're on goes to the tab on its left.
+    #[test]
+    fn deleting_the_middle_tab_goes_left() {
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        s.execute("home.insertSheet", json!({})).unwrap();
+        s.execute("home.insertSheet", json!({})).unwrap();
+        let order: Vec<String> = s.active().unwrap().wb.sheets.iter().map(|x| x.name.clone()).collect();
+        assert_eq!(order.len(), 3);
+        s.execute("sheet.activate", json!({ "sheet": 1 })).unwrap();
+        s.execute("home.deleteSheet", json!({})).unwrap();
+        let d = s.active().unwrap();
+        assert_eq!(d.wb.sheet(d.wb.active_sheet()).unwrap().name, order[0]);
+    }
+}

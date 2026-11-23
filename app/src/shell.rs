@@ -188,9 +188,9 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sub(
                 "Alignment",
                 &[
-                    Cmd("Left", "home.alignLeft", "Ctrl+Shift+L"),
-                    Cmd("Centre", "home.alignCenter", "Ctrl+Shift+E"),
-                    Cmd("Right", "home.alignRight", "Ctrl+Shift+R"),
+                    CmdWith("Left", "home.alignLeft", "Ctrl+Shift+L", r#"{"on":true}"#),
+                    CmdWith("Centre", "home.alignCenter", "Ctrl+Shift+E", r#"{"on":true}"#),
+                    CmdWith("Right", "home.alignRight", "Ctrl+Shift+R", r#"{"on":true}"#),
                     Sep,
                     Cmd("Top", "home.alignTop", ""),
                     Cmd("Middle", "home.alignMiddle", ""),
@@ -412,10 +412,11 @@ const MERGE: &[(&str, &str, &str)] = &[
     ("Unmerge", "home.unmergeCells", "{}"),
 ];
 
+// `on`: picking the alignment a cell already has keeps it (Sheets), not back to General.
 const H_ALIGN: &[(&str, &str, &str)] = &[
-    ("icon:format_align_left|Left", "home.alignLeft", "{}"),
-    ("icon:format_align_center|Centre", "home.alignCenter", "{}"),
-    ("icon:format_align_right|Right", "home.alignRight", "{}"),
+    ("icon:format_align_left|Left", "home.alignLeft", r#"{"on":true}"#),
+    ("icon:format_align_center|Centre", "home.alignCenter", r#"{"on":true}"#),
+    ("icon:format_align_right|Right", "home.alignRight", r#"{"on":true}"#),
 ];
 
 const V_ALIGN: &[(&str, &str, &str)] = &[
@@ -1090,9 +1091,7 @@ pub const MENU_LOOK: gridcraft_ui_egui::MenuLook = gridcraft_ui_egui::MenuLook {
 /// A data-validation drop-down list: only as wide as its longest choice, plus the 16 px row
 /// padding each side and room for the scroll bar (James, to-do row 75).
 fn list_style(ui: &mut Ui, items: &[String]) -> f32 {
-    let font = egui::FontId::proportional(14.0);
-    let widest = items.iter().map(|t| ui.painter().layout_no_wrap(t.clone(), font.clone(), theme::TEXT).size().x).fold(0.0_f32, f32::max);
-    let width = (widest + 2.0 * f32::from(crate::house::MENU_INSET) + 12.0).clamp(80.0, 480.0).ceil();
+    let width = crate::house::fit_width(ui, items.iter().map(String::as_str), false);
     menu_style_width(ui, width);
     width
 }

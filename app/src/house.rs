@@ -80,6 +80,16 @@ pub fn menu(ui: &mut Ui, width: f32) {
     }
 }
 
+/// HOUSE RULE (James, to-do 2 row 8): a list menu (sheets, drop-down choices, anything whose rows
+/// are names) is only as wide as its longest row, plus the 16 px row padding each side, the icon
+/// column when it has one, and a little room. Fixed widths (220 / 320) are for command menus.
+pub fn fit_width<'a>(ui: &Ui, labels: impl IntoIterator<Item = &'a str>, icon_column: bool) -> f32 {
+    let font = egui::FontId::proportional(BODY);
+    let widest = labels.into_iter().map(|t| ui.painter().layout_no_wrap(t.to_string(), font.clone(), theme::TEXT).size().x).fold(0.0_f32, f32::max);
+    let icon = if icon_column { 20.0 + 14.0 } else { 0.0 };
+    (widest + 2.0 * f32::from(MENU_INSET) + icon + 12.0).clamp(80.0, 480.0).ceil()
+}
+
 /// A menu row: an icon (Material Symbols name, or none), the label, and a grey shortcut at the
 /// right. Returns true when clicked.
 pub fn menu_row(ui: &mut Ui, icon: Option<&str>, label: &str, keys: &str, enabled: bool) -> bool {

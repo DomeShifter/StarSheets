@@ -77,6 +77,9 @@ pub struct Live {
     /// Our changes the server confirmed since `confirmed` was last brought up to date.
     acked: Vec<Change>,
     pending: VecDeque<Pending>,
+    /// A column or row resize still being dragged: its steps are merged into one change, sent when
+    /// the mouse is released, so one drag is one undo step on the server (to-do 2 row 13).
+    held: Option<gridcraft_engine::SyncStep>,
     cseq: u64,
     retry_at: f64,
     failures: u32,
@@ -110,6 +113,7 @@ impl Default for Live {
             confirmed: None,
             acked: Vec::new(),
             pending: VecDeque::new(),
+            held: None,
             cseq: 0,
             retry_at: 0.0,
             failures: 0,
@@ -131,6 +135,38 @@ fn now_ms() -> f64 {
 }
 
 impl Live {
+    /// Drag-resizing a column or row runs the width command every frame. Those steps are held and
+    /// merged (first `before`, latest width and `after`) while the button is down, then go as one.
+    fn merge_resizes(&mut self, steps: Vec<gridcraft_engine::SyncStep>, doc: u64, dragging: bool) -> Vec<gridcraft_engine::SyncStep> {
+        let resize = |id: &str| matches!(id, "home.columnWidth" | "home.rowHeight");
+        let same_lines = |a: &gridcraft_engine::SyncStep, b: &gridcraft_engine::SyncStep| {
+            a.id == b.id && a.sheet == b.sheet && a.params.get("cols") == b.params.get("cols") && a.params.get("rows") == b.params.get("rows")
+        };
+        let mut out = Vec::with_capacity(steps.len());
+        for st in steps {
+            if st.doc == doc && resize(&st.id) {
+                match self.held.take() {
+                    Some(mut h) if same_lines(&h, &st) => {
+                        h.params = st.params;
+                        h.after = st.after;
+                        self.held = Some(h);
+                    }
+                    other => {
+                        out.extend(other);
+                        self.held = Some(st);
+                    }
+                }
+            } else {
+                out.extend(self.held.take());
+                out.push(st);
+            }
+        }
+        if !dragging {
+            out.extend(self.held.take());
+        }
+        out
+    }
+
     pub fn logic(&mut self, app: &mut SheetApp, ctx: &egui::Context, files: &crate::files::Files) {
         let target = files.linked().filter(|(doc, _)| app.session.document_index(*doc).is_some());
         if target != self.file {
@@ -157,7 +193,7 @@ impl Live {
         }
         let views = sheet_views(app);
         let log = app.session.sync_log.get_or_insert_with(Vec::new);
-        let steps = std::mem::take(log);
+        let steps = self.merge_resizes(std::mem::take(log), doc, ctx.input(|i| i.pointer.primary_down()));
         let mut changed = false;
         for st in steps.into_iter().filter(|s| s.doc == doc) {
             match st.id.as_str() {

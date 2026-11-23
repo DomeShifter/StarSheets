@@ -53,6 +53,8 @@ pub struct Bottom {
     settle: Option<(String, f32)>,
     /// The pointer's x when the drag began (egui forgets the press position on release).
     drag_origin: Option<f32>,
+    /// A tab whose Delete was clicked, waiting for "Are you sure?" (its name: indexes can move).
+    confirm_delete: Option<String>,
 }
 
 /// Where a dragged tab would land (its new position among the tabs): past every tab whose middle
@@ -124,6 +126,7 @@ fn fmt(v: f64) -> String {
 
 impl Bottom {
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        self.confirm_delete_dialog(app, ui.ctx());
         egui::Panel::bottom("starsheets_bottom")
             .exact_size(40.0)
             .frame(Frame::NONE.fill(theme::PAGE).inner_margin(Margin { left: 8, right: 12, top: 4, bottom: 4 }).stroke(Stroke::new(1.0, theme::HOVER)))
@@ -164,9 +167,11 @@ impl Bottom {
     }
 
     fn all_sheets(&mut self, app: &mut SheetApp, ui: &mut Ui, list: &[Tab], active: usize) {
-        let width = crate::shell::menu_style(ui, true);
-        for tab in list {
-            let label = if tab.hidden { format!("{} (hidden)", tab.name) } else { tab.name.clone() };
+        // Only as wide as the longest name (house rule, house::fit_width).
+        let labels: Vec<String> = list.iter().map(|t| if t.hidden { format!("{} (hidden)", t.name) } else { t.name.clone() }).collect();
+        let width = crate::house::fit_width(ui, labels.iter().map(String::as_str), true);
+        crate::shell::menu_style_width(ui, width);
+        for (tab, label) in list.iter().zip(labels) {
             // Sheets ticks the current sheet.
             let row = match (tab.index == active, icons::icon("check")) {
                 (true, Some(tick)) => Button::image_and_text(tick, RichText::new(label).size(14.0).color(theme::TEXT)).shortcut_text(""),
@@ -372,13 +377,37 @@ impl Bottom {
         self.tab(app, &mut child, tab, tab.index == active, count);
     }
 
+    /// Sheets asks before deleting a sheet (to-do 2 row 9): Cancel, or OK to delete it. Ctrl+Z
+    /// still brings it back afterwards.
+    fn confirm_delete_dialog(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+        let Some(name) = self.confirm_delete.clone() else { return };
+        let (mut close, mut cancel, mut delete) = (false, false, false);
+        crate::house::dialog(ctx, "starsheets_delete_sheet", 420.0, "Delete this sheet?", Some(&mut close), |ui| {
+            ui.label(RichText::new(format!("\"{name}\" and everything on it will be deleted. You can undo this with Ctrl+Z.")).size(crate::house::BODY).color(theme::TEXT));
+            match crate::house::actions(ui, &["Cancel", "Delete"]) {
+                Some(1) => delete = true,
+                Some(_) => cancel = true,
+                None => {}
+            }
+        });
+        if delete {
+            let index = app.session.active().and_then(|d| d.wb.sheets.iter().position(|sh| sh.name == name));
+            if let Some(i) = index {
+                app.run_or_alert("home.deleteSheet", json!({ "sheet": i }));
+            }
+        }
+        if close || cancel || delete {
+            self.confirm_delete = None;
+        }
+    }
+
     fn tab_menu(&mut self, app: &mut SheetApp, ui: &mut Ui, tab: &Tab, count: usize) {
         // Sheets' tab menu: plain rows, no icons (docs/sheets-menus.md).
         let width = crate::shell::menu_style(ui, false);
         let row = |label: &str| crate::shell::menu_row(label, "", false).min_size(vec2(width, 32.0));
         let s = tab.index;
         if ui.add_enabled(count > 1, row("Delete")).clicked() {
-            app.run_or_alert("home.deleteSheet", json!({ "sheet": s }));
+            self.confirm_delete = Some(tab.name.clone());
             ui.close();
         }
         if ui.add(row("Duplicate")).clicked() {

@@ -19,10 +19,14 @@ use tiny_skia::{Color, Paint, Pixmap, Rect, Transform};
 
 use crate::store::Store;
 
-/// The picture's size in pixels, and how much smaller than the sheet it's drawn.
-pub const WIDTH: u32 = 480;
-pub const HEIGHT: u32 = 320;
-const SCALE: f32 = 0.75;
+/// The picture's size in pixels, and how much smaller than the sheet it's drawn: 720 px at 0.6
+/// is 1200 px of sheet, columns A to L at the default 100 px (to-do 2 row 15; was 480 at 0.75).
+pub const WIDTH: u32 = 720;
+pub const HEIGHT: u32 = 480;
+const SCALE: f32 = 0.6;
+/// Goes up whenever the drawing changes, so pictures kept by an older server (and browsers'
+/// copies, through the ETag) are drawn again rather than shown until the file next changes.
+pub const DRAW_TAG: &str = "d2";
 /// Files bigger than this aren't read only to draw a picture.
 pub const MAX_READ: u64 = 8 * 1024 * 1024;
 
@@ -41,7 +45,7 @@ fn dir(store: &Store) -> PathBuf {
 /// The kept picture of `file` if it shows `version`.
 pub fn cached(store: &Store, file: &str, version: &str) -> Option<Vec<u8>> {
     let d = dir(store);
-    (std::fs::read_to_string(d.join(format!("{file}.ver"))).ok()?.trim() == version).then(|| std::fs::read(d.join(format!("{file}.png"))).ok()).flatten()
+    (std::fs::read_to_string(d.join(format!("{file}.ver"))).ok()?.trim() == format!("{DRAW_TAG}/{version}")).then(|| std::fs::read(d.join(format!("{file}.png"))).ok()).flatten()
 }
 
 /// Keeps a picture of `file` at `version`.
@@ -51,7 +55,7 @@ pub fn keep(store: &Store, file: &str, version: &str, png: &[u8]) -> std::io::Re
     let tmp = d.join(format!(".{file}.tmp"));
     std::fs::write(&tmp, png)?;
     std::fs::rename(&tmp, d.join(format!("{file}.png")))?;
-    std::fs::write(d.join(format!("{file}.ver")), version)
+    std::fs::write(d.join(format!("{file}.ver")), format!("{DRAW_TAG}/{version}"))
 }
 
 pub fn forget(store: &Store, file: &str) {

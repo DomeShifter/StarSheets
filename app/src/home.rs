@@ -1140,8 +1140,7 @@ impl Home {
         let order = self.order();
         self.select_click(ui, item, resp, &order);
         if resp.double_clicked() {
-            let new_tab = ui.input(|i| i.modifiers.command);
-            self.activate(item, new_tab);
+            self.activate(item);
         }
         if resp.drag_started() {
             let set = if self.selected.contains(item) { self.selected.clone() } else { vec![item.clone()] };
@@ -1226,10 +1225,9 @@ impl Home {
         p.rect_filled(pic, 6, Color32::WHITE);
         match self.thumbs.get(&f.id).map(|(_, t)| t) {
             Some(Thumb::Ready(tex)) => {
-                // The top-left corner at a size you can read (as Sheets does), cut off at the
-                // right and bottom; a small sheet is enlarged to fill the box.
+                // The picture's full width (columns A to L, as Drive shows), cut off at the bottom.
                 let tw = tex.size_vec2();
-                let scale = (pic.width() / tw.x).max(pic.height() / tw.y).max(0.8);
+                let scale = pic.width() / tw.x;
                 let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2((pic.width() / (tw.x * scale)).min(1.0), (pic.height() / (tw.y * scale)).min(1.0)));
                 p.image(tex.id(), pic, uv, Color32::WHITE);
             }
@@ -1366,16 +1364,15 @@ impl Home {
         }
     }
 
-    fn activate(&mut self, item: &Item, new_tab_please: bool) {
+    fn activate(&mut self, item: &Item) {
         match item {
             Item::Folder(f) => {
                 let f = f.clone();
                 self.go_folder(&f);
             }
-            Item::File(id) => {
-                let url = page(&format!("?file={id}"));
-                if new_tab_please { new_tab(&url) } else { go(&url) }
-            }
+            // Files always open in a new tab, as from Google Drive, so the file browser stays
+            // where it was (to-do 2 row 5; the separate "Open in new tab" entry went with it).
+            Item::File(id) => new_tab(&page(&format!("?file={id}"))),
         }
     }
 
@@ -1397,13 +1394,7 @@ impl Home {
         let is_space = matches!(item, Item::Folder(f) if !f.contains('/') && self.accounts);
         let row = |ui: &mut Ui, icon: &str, label: &str, keys: &str, enabled: bool| house::menu_row(ui, Some(icon), label, keys, enabled);
         if row(ui, "", "Open", "Enter", single) {
-            self.activate(item, false);
-            ui.close();
-        }
-        if let Item::File(_) = item
-            && row(ui, "", "Open in new tab", "Ctrl+Enter", single)
-        {
-            self.activate(item, true);
+            self.activate(item);
             ui.close();
         }
         house::menu_sep(ui);
@@ -1932,7 +1923,7 @@ impl Home {
                 egui::Event::Key { key, pressed: true, modifiers, .. } => match key {
                     Key::Enter if self.selected.len() == 1 => {
                         let item = self.selected[0].clone();
-                        self.activate(&item, modifiers.command);
+                        self.activate(&item);
                     }
                     Key::F2 if self.selected.len() == 1 => {
                         let item = self.selected[0].clone();

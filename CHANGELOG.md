@@ -34,6 +34,15 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Choosing an alignment a cell already has keeps it, from the toolbar, the menu or the keys
+  (it used to switch back to the default).
+- Deleting the tab you're on takes you to the tab on its left.
+- Deleting a sheet asks first.
+- Files open in a new browser tab from the file browser, as from Google Drive.
+- The all-sheets list is only as wide as its names.
+- Tick boxes are bigger in their cells.
+- Dragging a column or row edge is one step for undo (Ctrl+Z put back only the last pixel).
+- File previews show columns A to L.
 - Menus and pop-ups open instantly (they used to fade in over a fifth of a second).
 - The mouse's back and forward buttons in the file browser act at once every time (they could
   wait up to a second).

@@ -78,6 +78,12 @@ the label, a grey shortcut at the right); a row without an icon in a menu that h
 below). Menus are 220 px plain, 260–320 px with icons or shortcuts. Anything that isn't a row
 (a palette, a heading) sits inside `house::menu_inset`.
 
+**List menus fit their content (rule since 2026-11-23).** A menu whose rows are names rather than
+commands (the all-sheets list, a drop-down cell's choices, any list of the user's own items) is
+only as wide as its longest row: `house::fit_width(ui, labels, icon_column)` = the widest label +
+16 px padding each side + the icon column if there is one + 12 px, between 80 and 480 px. The
+fixed 220 / 320 px widths are only for command menus.
+
 ## Folder colours
 
 Folders can be given one of 14 colours (`house::FOLDER_COLOURS`), chosen to be muted, easy to tell

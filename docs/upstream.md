@@ -81,3 +81,6 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0052 | ui-egui | Solid borders wider than 1 px get square ends, so thick outlines meet at the corners |
 | 0053 | engine | `insert.link` with `remove` + `plain`: removes the link and its link look (colour + underline) in one undo step |
 | 0054 | engine | A border drawn on a shared edge removes the neighbouring cell's line on that edge, so the newest line shows (as Sheets) |
+| 0055 | ui-egui | Sheets keys Ctrl+Shift+L/E/R set the alignment (`on: true`) instead of toggling back to General |
+| 0056 | engine | Deleting the active tab moves to the visible tab on its left (right only if none), as Sheets |
+| 0057 | ui-egui | Tick boxes 17 px at 100% (were 13): half the space above and below them in a default row |

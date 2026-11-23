@@ -663,7 +663,7 @@ async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &Hea
             }
         }
     };
-    let etag = format!("\"{version}\"");
+    let etag = format!("\"{}/{version}\"", thumbs::DRAW_TAG);
     if headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) == Some(etag.as_str()) {
         return Response::builder().status(304).header(header::ETAG, etag).body(Body::empty()).unwrap();
     }
