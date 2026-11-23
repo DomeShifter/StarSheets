@@ -29,7 +29,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch GridCraft at the pinned tag and apply our patches
+      - name: Fetch GridCraft at the pinned commit of our fork
         run: scripts/fetch-upstream.sh
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -64,7 +64,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch GridCraft at the pinned tag and apply our patches
+      - name: Fetch GridCraft at the pinned commit of our fork
         run: scripts/fetch-upstream.sh
       - uses: actions/cache@v6
         with:
@@ -103,7 +103,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch GridCraft at the pinned tag and apply our patches
+      - name: Fetch GridCraft at the pinned commit of our fork
         run: scripts/fetch-upstream.sh
       - name: System libraries for egui's native backends
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libxkbcommon-dev libwayland-dev pkg-config
@@ -112,12 +112,33 @@ jobs:
         with:
           key: test
       - name: Test
-        run: cargo test -p starsheets -p sheets-functions -p starsheets-server -p starsheets-sync
+        run: cargo test -p starsheets -p starsheets-server -p starsheets-sync
+
+  gridcraft:
+    # GridCraft's own tests, on our fork's pinned commit: every crate, including the Google
+    # functions (sheets-functions). Our changes to the engine, the xlsx reader/writer and the
+    # grid are only proven by these. A test set aside says why in its #[ignore = "..."].
+    name: GridCraft tests (our fork)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch GridCraft at the pinned commit of our fork
+        run: scripts/fetch-upstream.sh
+      - name: System libraries for egui's native backends
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libgtk-3-dev libxkbcommon-dev libwayland-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: gridcraft
+          workspaces: upstream/gridcraft
+      - name: Test every GridCraft crate
+        run: scripts/test-gridcraft.sh
 
   release:
     name: Release (Docker image + draft release)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web, test, server]
+    needs: [web, test, server, gridcraft]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

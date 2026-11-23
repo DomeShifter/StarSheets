@@ -6,6 +6,10 @@ new features and the last one for fixes.
 
 ## [Unreleased]
 
+### Fixed
+- Excel files: rows of ordinary 11 pt text open at Excel's height again (they were 2 px too
+  tall), and fonts in files without a theme keep their link to the theme when saved.
+
 ### Added
 - **Settings › Style** tab: choose the toolbar's background colour (shows straight away; Cancel
   puts it back). The first of the look-and-feel settings.

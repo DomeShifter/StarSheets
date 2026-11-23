@@ -20,12 +20,12 @@ matching Google Sheets is the goal.
    scripts/fetch-upstream.sh             # GridCraft at the pinned commit of our fork
    python3 scripts/fetch-fonts.py        # the web fonts (needed for a full build)
    cd app && trunk build --release       # the web app, in app/dist/
-   cargo test -p starsheets -p sheets-functions
+   cargo test -p starsheets
    ```
 3. Keep pull requests small and about one thing. Say what it changes for someone using StarSheets.
 4. Menus and the toolbar are tables in `app/src/shell.rs`; a test checks that every entry names a
    real command.
-5. Google-only functions (like QUERY) live in `crates/sheets-functions`, with their own tests.
+5. Google-only functions (like QUERY) live in the fork's `crates/sheets-functions` (in `upstream/gridcraft` once fetched), with their own tests.
 
 Where Google Sheets and Excel behave differently, StarSheets follows Google Sheets, but we try not
 to break opening and saving Excel files.

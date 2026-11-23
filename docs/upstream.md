@@ -20,8 +20,10 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 ## Changing GridCraft
 1. In a clone of the fork, on `starsheets`: make the change as one commit, subject
    `<crate>: <what> (StarSheets NNNN)` (next number), with a test where the engine changes.
-2. Push the branch, put the new commit hash in `upstream.pin`, add a row below.
-3. Never edit `upstream/gridcraft` itself: the next fetch resets it.
+2. Run `scripts/test-gridcraft.sh` (GridCraft's own tests; CI runs them too). A test that our
+   change makes wrong is updated to the new behaviour, or set aside with `#[ignore = "why"]`.
+3. Push the branch, put the new commit hash in `upstream.pin`, add a row below.
+4. Never edit `upstream/gridcraft` itself: the next fetch resets it.
 
 ## Updating to a newer GridCraft release (monthly, not nightly)
 1. In the fork: `git fetch upstream --tags`, then `git rebase --onto vX.Y.Z vOLD starsheets`
@@ -124,3 +126,7 @@ the fork commit marked "(StarSheets NNNN)".
 | 0078 | ui-egui | In Sheets mode (`Tokens.sheets_formula_bar`) Ctrl/Cmd+Enter breaks the line like Alt+Enter instead of filling the selection; the in-cell editor shows a formula (text starting with `=`) in the UI font at the cell's size, not the cell's bold/italic/typeface. | StarSheets-only (Sheets keys); the formula font could be offered upstream |
 | 0079 | ui-egui | In Sheets mode the ▾ of a drop-down cell opens its list only on a click: a drag that starts on it selects, fills or moves, and the fill handle (which overlaps the ▾) wins; the ▾ shows a pointing-hand cursor. | Offer upstream (Sheets mode only) |
 | 0080 | ui-egui | The Name Box list leaves out names starting with "_" (host/Excel bookkeeping, e.g. StarSheets' protected ranges) and, with a host menu look, shows Sheets-style rows (name, range on the right) and "Manage named ranges". | Offer upstream (the "_" filter) |
+| 0081 | xlsx | A file without a theme part is read against Excel's theme (Calibri), not the new-workbook one: Calibri fonts kept their `<scheme val="minor"/>` link on save only by luck before. | Offer upstream (a real bug once a host changes the default font) |
+| 0082 | engine | Row fitting judges a font against Excel's 11 pt (`EXCEL_FONT_SIZE`) and the sheet's own default height: with a 10 pt default, Excel rows of 11 pt text opened at 22 px instead of 20. | Offer upstream (same reason) |
+| 0083 | functions | `sheets-functions` (QUERY) moved into the fork's workspace from this repo, so the fork builds and tests on its own. | StarSheets-only |
+| 0084 | tests | GridCraft's tests follow StarSheets' deliberate changes; `Session::use_excel_defaults()` for tests laid out for Excel's sizes; 6 set aside with a reason in `#[ignore = "…"]`. CI job "GridCraft tests (our fork)" runs them all (`scripts/test-gridcraft.sh`). | StarSheets-only |
