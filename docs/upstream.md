@@ -90,3 +90,5 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0061 | ui-egui | Google Sheets cell menu: "Data validation" under "Conditional formatting" |
 | 0062 | ui-egui | A one-line in-cell edit too long for the room to the right wraps at the grid edge and grows down (as Sheets) |
 | 0063 | formula, functions, xlsx | Google Sheets: SORTN; SORT with is_ascending TRUE/FALSE and column pairs; open-ended ranges `A3:C` (printed back as typed, written to files as `A3:C1048576`) |
+| 0064 | xlsx | Formulas Excel can't read (Google-only functions, `{…}` with ranges) are saved the way Google Sheets saves them: `IFERROR(__xludf.DUMMYFUNCTION("…"),last result)`, spilled cells as `COMPUTED_VALUE` placeholders; they read back unchanged |
+| 0065 | model, engine, xlsx | `Workbook::host_data`: text a host app keeps with the file (command `workbook.setHostData`, undoable), saved as a custom XML part (`urn:gridcraft:host-data:1`) that Excel and LibreOffice keep |

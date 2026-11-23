@@ -7,6 +7,9 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Added
+- **StarSheets' own section in your files:** what Excel has no place for (which kind of rule a
+  drop-down was made with, which colours belong to its items, protected-range settings) is kept
+  inside the .xlsx in a part Excel and LibreOffice keep but don't show. Files stay ordinary .xlsx.
 - **Google Sheets formulas:** `SORTN`, `SORT` with TRUE/FALSE for ascending/descending and several
   sort columns, and open-ended ranges such as `A3:C` (to the bottom of the sheet). Saved .xlsx
   files spell those ranges the way Excel reads them.
@@ -28,6 +31,9 @@ new features and the last one for fixes.
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Google Sheets formulas in .xlsx files open in Excel:** formulas Excel can't read (`{A1:B1;…}`
+  with ranges, `SORTN`, `QUERY`, `ARRAYFORMULA`…) are saved the way Google Sheets saves them, so
+  Excel shows their last results and StarSheets gets the formulas back unchanged.
 - **Big files use far less memory:** the server sends a workbook as text instead of building a
   copy of it in memory first. A 2-million-cell file took 3.3 GB on the server when opened; now
   it takes about 360 MB, and undo on a big sheet no longer copies it the same way. (Open tabs on
@@ -49,6 +55,8 @@ new features and the last one for fixes.
   into the list, and the buttons above the list have the same padding as everywhere else.
 
 ### Fixed
+- Editing a drop-down no longer makes conditional formatting rules vanish and come back, and a
+  rule of your own on the same cells is no longer taken for a drop-down colour.
 - Google Sheets files: array formulas (ARRAYFORMULA, QUERY…) work after import instead of
   showing #SPILL! (the cells they fill are no longer blocked by Google's placeholders).
 - A picture in a cell follows the cell's alignment.

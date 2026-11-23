@@ -134,7 +134,8 @@ impl CfPanel {
     pub fn open(&mut self, app: &SheetApp) {
         self.open = true;
         self.error = None;
-        let has_rules = app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| sh.cond_formats.iter().any(|cf| !crate::dvpanel::is_item_colour(sh, cf)));
+        let h = crate::hostdata::read(app);
+        let has_rules = app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| sh.cond_formats.iter().any(|cf| !crate::dvpanel::is_item_colour(sh, cf, &h)));
         self.draft = if has_rules { None } else { Some(Draft::new(selection_text(app))) };
     }
 
@@ -191,7 +192,8 @@ impl CfPanel {
                             Some(false) => {
                                 self.revert_preview(app);
                                 self.error = None;
-                                let none_left = app.session.active().and_then(|d| d.wb.active()).is_none_or(|sh| sh.cond_formats.iter().all(|cf| crate::dvpanel::is_item_colour(sh, cf)));
+                                let h = crate::hostdata::read(app);
+                                let none_left = app.session.active().and_then(|d| d.wb.active()).is_none_or(|sh| sh.cond_formats.iter().all(|cf| crate::dvpanel::is_item_colour(sh, cf, &h)));
                                 if none_left {
                                     self.open = false;
                                 }
@@ -214,11 +216,12 @@ impl CfPanel {
             return;
         };
         let mut delete = None;
+        let h = crate::hostdata::read(app);
         let hidden: Vec<usize> = app
             .session
             .active()
             .and_then(|d| d.wb.active())
-            .map(|sh| sh.cond_formats.iter().enumerate().filter(|(_, cf)| crate::dvpanel::is_item_colour(sh, cf)).map(|(i, _)| i).collect())
+            .map(|sh| sh.cond_formats.iter().enumerate().filter(|(_, cf)| crate::dvpanel::is_item_colour(sh, cf, &h)).map(|(i, _)| i).collect())
             .unwrap_or_default();
         for (i, cf) in rules.iter().enumerate() {
             // A drop-down item's colour is kept as a rule of this kind, but it belongs to the

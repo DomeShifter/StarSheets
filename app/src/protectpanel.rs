@@ -4,7 +4,9 @@
 //!
 //! How it maps onto the spreadsheet (and so onto Excel files):
 //! - each entry is a hidden name `_sc_protect<n>` holding the range (so it follows inserted rows
-//!   and columns) and, in its comment, the description and settings;
+//!   and columns); its description and settings are in StarSheets' section of the file
+//!   (hostdata.rs), and the name's comment holds the description in plain words (older files
+//!   kept the settings there as JSON, still read when the section has no entry);
 //! - "Restrict editing" protects the sheet for real. A protected range is everything locked
 //!   except the rest of the sheet, which becomes one allowed edit range; a protected sheet keeps
 //!   its "except" cells as that allowed range;
@@ -78,6 +80,7 @@ pub struct ProtectPanel {
 
 fn entries(app: &SheetApp) -> Vec<Entry> {
     let Some(d) = app.session.active() else { return vec![] };
+    let h = d.wb.host_data.as_deref().map(crate::hostdata::parse).unwrap_or_default();
     d.wb.names
         .iter()
         .filter(|n| n.name.starts_with(PREFIX))
@@ -85,7 +88,11 @@ fn entries(app: &SheetApp) -> Vec<Entry> {
             let (sheet, body) = n.formula.trim_start_matches('=').rsplit_once('!')?;
             let si = d.wb.sheet_index(sheet.trim_matches('\'').replace("''", "'").as_str())?;
             let range = RangeRef::parse(&body.replace('$', ""))?;
-            let meta = serde_json::from_str(&n.comment).unwrap_or_default();
+            let meta = h
+                .protect_for(&n.name)
+                .and_then(|m| serde_json::from_value(m.clone()).ok())
+                .or_else(|| serde_json::from_str(&n.comment).ok())
+                .unwrap_or_default();
             Some(Entry { name: n.name.clone(), sheet: si, range, meta })
         })
         .collect()
@@ -301,6 +308,9 @@ impl ProtectPanel {
                 if let Some(old) = d.old.clone() {
                     let sheet = d.sheet;
                     app.run_or_alert("formulas.deleteName", json!({ "name": old, "force": true }));
+                    // Drops the entry's settings from the section (its name is gone).
+                    let h = crate::hostdata::read(app);
+                    crate::hostdata::write(app, h);
                     self.draft = None;
                     sync(app, sheet);
                 }
@@ -319,13 +329,16 @@ impl ProtectPanel {
                     let have: Vec<String> = entries(app).into_iter().map(|e| e.name).collect();
                     (1..).map(|i| format!("{PREFIX}{i}")).find(|n| !have.contains(n)).unwrap_or_default()
                 });
-                let mut p = json!({ "name": name, "refersTo": refers, "comment": serde_json::to_string(&meta).unwrap_or_default(), "force": true });
+                let mut p = json!({ "name": name, "refersTo": refers, "comment": meta.d, "force": true });
                 if let Some(old) = &d.old {
                     p["oldName"] = json!(old);
                 }
                 let was_on = d.old.as_ref().and_then(|o| entries(app).into_iter().find(|e| &e.name == o)).map(|e| e.sheet);
                 match app.run("formulas.defineName", p) {
                     Ok(_) => {
+                        let mut h = crate::hostdata::read(app);
+                        h.set_protect(&name, serde_json::to_value(&meta).unwrap_or_default());
+                        crate::hostdata::write(app, h);
                         sync(app, sheet);
                         // An entry moved to another sheet: that sheet's protection changes too.
                         if let Some(w) = was_on.filter(|w| *w != sheet) {
@@ -431,6 +444,23 @@ fn sync(app: &mut SheetApp, sheet: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_come_from_the_section_and_older_files_still_read() {
+        let mut s = gridcraft_engine::Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        let old = Meta { d: "Old".into(), sheet: false, warn: true, except: String::new() };
+        s.execute("formulas.defineName", json!({ "name": format!("{PREFIX}1"), "refersTo": "=Sheet1!$A$1:$B$2", "comment": serde_json::to_string(&old).unwrap(), "force": true })).unwrap();
+        s.execute("formulas.defineName", json!({ "name": format!("{PREFIX}2"), "refersTo": "=Sheet1!$C$1:$C$2", "comment": "Totals", "force": true })).unwrap();
+        let mut h = crate::hostdata::HostData::default();
+        h.set_protect(&format!("{PREFIX}2"), serde_json::to_value(Meta { d: "Totals".into(), sheet: false, warn: false, except: "C2".into() }).unwrap());
+        s.execute("workbook.setHostData", json!({ "data": serde_json::to_string(&h).unwrap() })).unwrap();
+        let app = SheetApp::new(s, gridcraft_ui_egui::Services::default());
+        let e = entries(&app);
+        let (a, b) = (e.iter().find(|x| x.name.ends_with('1')).unwrap(), e.iter().find(|x| x.name.ends_with('2')).unwrap());
+        assert!(a.meta.warn && a.meta.d == "Old", "an older file: settings from the comment");
+        assert!(!b.meta.warn && b.meta.except == "C2", "from the section");
+    }
 
     #[test]
     fn an_entry_is_kept_as_a_hidden_name_with_its_settings() {

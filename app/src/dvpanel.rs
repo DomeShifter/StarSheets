@@ -3,7 +3,13 @@
 //! "Advanced options" (help text, warning or reject, display style). Rules are stored by
 //! GridCraft (`data.validation`); Sheets' text and tick-box criteria become custom formulas, and
 //! drop-down item colours become ordinary conditional-formatting rules, so both survive in .xlsx.
-//! Like Sheets, every change is applied to the sheet at once (undone again on Cancel).
+//! Which criterion a rule was made with, and which conditional-formatting rules are its item
+//! colours, is kept in StarSheets' section of the file (hostdata.rs); files without it are read
+//! back from the formulas' shapes as before.
+//! Like Sheets, every change is applied to the sheet at once. The live preview takes its own last
+//! version off with ordinary commands (never undo: with live editing undo is the server's, and a
+//! run of undos and edits in one frame came back out of step, so other rules vanished and
+//! reappeared: to-do row 14).
 
 use egui::{Color32, RichText, Sense, Stroke, Ui, vec2};
 use gridcraft_engine::core::RangeRef;
@@ -112,12 +118,14 @@ struct Item {
     colour: Option<u32>,
 }
 
-/// What an edited rule was, so it can be taken off before the new one goes on.
-#[derive(Clone, PartialEq)]
+/// A rule as it is on the sheet, so it can be taken off before the new one goes on.
+#[derive(Clone, Debug, PartialEq)]
 struct Orig {
+    /// Its ranges, in the section's form (`B2:B9,D2`).
     range: String,
-    /// Conditional-formatting rules that colour its drop-down items.
-    colour_rules: Vec<usize>,
+    /// Drop-down items whose colour is a conditional-formatting rule ("is equal to" the item, on
+    /// the same cells): found again by what they are, never by their place in the list.
+    coloured: Vec<String>,
     tick_box: bool,
 }
 
@@ -163,10 +171,10 @@ pub struct DvPanel {
     pub open: bool,
     draft: Option<Draft>,
     error: Option<String>,
-    /// Live apply: (what was applied, how many undo steps it took).
-    /// (what was applied, how many undo steps it took, the workbook it left: an edit made since
-    /// means undo would take back the user's edit instead, so the preview is kept then).
-    preview: Option<(String, usize, usize)>,
+    /// The plan last applied for the open draft (applying the same again is skipped).
+    preview: Option<String>,
+    /// What is on the sheet for the open draft (the rule being edited, then each preview).
+    applied: Option<Orig>,
     /// Set on the frame the panel opened, so the other side panel can close.
     pub just_opened: bool,
     /// Done was pressed on this draft: only then does an incomplete rule say what's missing.
@@ -182,11 +190,14 @@ impl DvPanel {
         self.tried = false;
         let has_rules = app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| !sh.validations.is_empty());
         self.draft = if has_rules && !dropdown { None } else { Some(Draft::new(selection_text(app))) };
+        self.preview = None;
+        self.applied = None;
     }
 
     /// Closes the panel, keeping what was applied (Sheets has no Cancel for a live rule).
     pub fn close(&mut self) {
         self.preview = None;
+        self.applied = None;
         self.draft = None;
         self.open = false;
     }
@@ -226,7 +237,6 @@ impl DvPanel {
                     crate::house::form_style(ui);
                     ui.set_width(PANEL_W);
                     if let Some(mut d) = self.draft.take() {
-                        self.adopt_if_edited(app, &mut d);
                         match self.editor(ui, &mut d) {
                             // Done: keep what is applied, back to the list.
                             Some(true) => {
@@ -234,17 +244,20 @@ impl DvPanel {
                                 self.update_preview(app, &d);
                                 if self.error.is_none() {
                                     self.preview = None;
+                                    self.applied = None;
                                     self.tried = false;
                                 } else {
                                     self.draft = Some(d);
                                 }
                             }
-                            // Remove rule: undo the live rule, then take the old one off too.
+                            // Remove rule: take off what is on the sheet for it.
                             Some(false) => {
-                                self.revert_preview(app);
-                                if let Some(o) = &d.orig {
-                                    remove(app, o);
+                                let mut h = crate::hostdata::read(app);
+                                if let Some(a) = self.applied.take() {
+                                    remove(app, &a, &mut h);
                                 }
+                                crate::hostdata::write(app, h);
+                                self.preview = None;
                                 self.error = None;
                                 let none_left = app.session.active().and_then(|x| x.wb.active()).is_none_or(|sh| sh.validations.is_empty());
                                 if none_left {
@@ -269,8 +282,10 @@ impl DvPanel {
             return;
         };
         let mut remove_it = None;
+        let h = crate::hostdata::read(app);
+        let sheet = active_sheet_name(app);
         for (i, dv) in rules.iter().enumerate() {
-            let d = draft_from(dv, &cfs, &theme_colours);
+            let d = draft_from(dv, &cfs, &theme_colours, h.dv_for(&sheet, &crate::hostdata::ranges_text(&dv.ranges)));
             let (r, resp) = ui.allocate_exact_size(vec2(PANEL_W, 60.0), Sense::click());
             let p = ui.painter();
             if resp.hovered() {
@@ -290,17 +305,23 @@ impl DvPanel {
                 continue;
             }
             if resp.clicked() {
+                self.applied = d.orig.clone();
+                self.preview = None;
                 self.draft = Some(d);
                 self.tried = false;
             }
             ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, theme::DIVIDER));
         }
         if let Some(o) = remove_it {
-            remove(app, &o);
+            let mut h = h;
+            remove(app, &o, &mut h);
+            crate::hostdata::write(app, h);
         }
         ui.add_space(12.0);
         if ui.add(egui::Button::new(RichText::new("+  Add rule").size(14.0).color(GREEN)).frame(false)).clicked() {
             self.draft = Some(Draft::new(selection_text(app)));
+            self.applied = None;
+            self.preview = None;
             self.tried = false;
         }
     }
@@ -357,67 +378,38 @@ impl DvPanel {
         out
     }
 
-    /// The sheet was edited while a preview is on (a value typed in a cell): undoing the preview
-    /// now would undo that edit, so the preview stays as the rule, and the next change replaces it.
-    fn adopt_if_edited(&mut self, app: &SheetApp, d: &mut Draft) {
-        let Some((_, applied, left)) = self.preview.as_ref().map(|(k, a, l)| (k.clone(), *a, *l)) else { return };
-        if wb_ptr(app) == left {
-            return;
-        }
-        self.preview = None;
-        if applied == 0 {
-            return;
-        }
-        let want: Vec<String> = d.range.split(',').filter_map(|r| RangeRef::parse(r.trim())).map(|r| r.a1()).collect();
-        if let Some((dv, cfs, theme_colours)) = app.session.active().and_then(|doc| {
-            let sh = doc.wb.active()?;
-            let dv = sh.validations.iter().find(|v| v.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>() == want)?.clone();
-            Some((dv, sh.cond_formats.clone(), doc.wb.theme.clone()))
-        }) {
-            d.orig = draft_from(&dv, &cfs, &theme_colours).orig;
-        }
-    }
-
-    fn revert_preview(&mut self, app: &mut SheetApp) {
-        if let Some((_, n, left)) = self.preview.take()
-            && wb_ptr(app) == left
-        {
-            for _ in 0..n {
-                let _ = app.run("edit.undo", json!({}));
-            }
-        }
-    }
-
-    /// Applies the draft as it stands (Sheets applies a rule as you build it), replacing what was
-    /// applied before. An incomplete draft applies nothing and says what is missing.
+    /// Applies the draft as it stands (Sheets applies a rule as you build it), replacing what is
+    /// on the sheet for it. An incomplete draft changes nothing and says what is missing.
     fn update_preview(&mut self, app: &mut SheetApp, d: &Draft) {
         let plan = commands(d);
         let key = format!("{:?}", plan.as_ref().map_err(|_| ()).ok());
-        if self.preview.as_ref().is_some_and(|(k, ..)| *k == key) {
+        if self.preview.as_ref() == Some(&key) {
             self.error = plan.err();
             return;
         }
-        self.revert_preview(app);
-        let mut applied = 0;
         match plan {
             Ok(cmds) => {
                 self.error = None;
-                if let Some(o) = &d.orig {
-                    applied += remove(app, o);
+                let mut h = crate::hostdata::read(app);
+                if let Some(a) = self.applied.take() {
+                    remove(app, &a, &mut h);
                 }
                 for (cmd, params) in cmds {
-                    match app.run(cmd, params) {
-                        Ok(_) => applied += 1,
-                        Err(e) => {
-                            self.error = Some(crate::messages::plain_error(&gridcraft_ui_egui::clean_error(&e)));
-                            break;
-                        }
+                    if let Err(e) = app.run(cmd, params) {
+                        self.error = Some(crate::messages::plain_error(&gridcraft_ui_egui::clean_error(&e)));
+                        break;
                     }
                 }
+                let now = orig_of(d);
+                if self.error.is_none() {
+                    h.set_dv(meta_of(&active_sheet_name(app), d, &now.range));
+                }
+                self.applied = Some(now);
+                crate::hostdata::write(app, h);
             }
             Err(e) => self.error = Some(e),
         }
-        self.preview = Some((key, applied, wb_ptr(app)));
+        self.preview = Some(key);
     }
 }
 
@@ -663,24 +655,72 @@ fn commands(d: &Draft) -> Result<Vec<(&'static str, Json)>, String> {
     Ok(out)
 }
 
-/// Takes a rule off: its validation, the colours of its items and its tick boxes. Returns the
-/// number of steps it took (for undoing a preview).
-fn remove(app: &mut SheetApp, o: &Orig) -> usize {
-    let mut n = 0;
-    if app.run("data.validation", json!({ "range": o.range, "clear": true })).is_ok() {
-        n += 1;
+/// Takes a rule off: its validation, the colours of its items (found by what they are, at the
+/// moment of removing), its tick boxes and its entry in StarSheets' section (`h`, written by the
+/// caller).
+fn remove(app: &mut SheetApp, o: &Orig, h: &mut crate::hostdata::HostData) {
+    if o.range.is_empty() {
+        return;
     }
-    let mut idx = o.colour_rules.clone();
-    idx.sort_unstable_by(|a, b| b.cmp(a));
-    for i in idx {
-        if app.run("home.manageRules", json!({ "delete": i })).is_ok() {
-            n += 1;
-        }
+    let _ = app.run("data.validation", json!({ "range": o.range, "clear": true }));
+    let idx: Vec<usize> = app
+        .session
+        .active()
+        .and_then(|d| d.wb.active())
+        .map(|sh| {
+            sh.cond_formats
+                .iter()
+                .enumerate()
+                .filter(|(_, cf)| crate::hostdata::ranges_text(&cf.ranges) == o.range && cf_item(cf).is_some_and(|v| o.coloured.contains(&v)))
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .unwrap_or_default();
+    for i in idx.into_iter().rev() {
+        let _ = app.run("home.manageRules", json!({ "delete": i }));
     }
-    if o.tick_box && app.run("home.numberFormat", json!({ "range": o.range, "format": "General" })).is_ok() {
-        n += 1;
+    if o.tick_box {
+        let _ = app.run("home.numberFormat", json!({ "range": o.range, "format": "General" }));
     }
-    n
+    h.remove_dv(&active_sheet_name(app), &o.range);
+}
+
+/// The item a conditional-formatting rule colours, if it is "is equal to" a piece of text.
+fn cf_item(cf: &gridcraft_engine::model::CondFormat) -> Option<String> {
+    let CfRule::CellIs { op: CfOperator::Equal, a, b: None, .. } = &cf.rule else { return None };
+    let a = a.trim();
+    (a.len() >= 2 && a.starts_with('"') && a.ends_with('"')).then(|| a[1..a.len() - 1].replace("\"\"", "\""))
+}
+
+/// What a draft puts on the sheet.
+fn orig_of(d: &Draft) -> Orig {
+    Orig {
+        range: crate::hostdata::normalise_ranges(&d.range),
+        coloured: if matches!(d.crit(), Crit::Dropdown) {
+            d.items.iter().filter(|it| it.colour.is_some() && !it.text.trim().is_empty()).map(|it| it.text.trim().to_string()).collect()
+        } else {
+            Vec::new()
+        },
+        tick_box: matches!(d.crit(), Crit::TickBox),
+    }
+}
+
+/// The section's entry for a draft.
+fn meta_of(sheet: &str, d: &Draft, range: &str) -> crate::hostdata::DvMeta {
+    let colours = if matches!(d.crit(), Crit::Dropdown) {
+        d.items
+            .iter()
+            .filter(|it| !it.text.trim().is_empty())
+            .filter_map(|it| it.colour.map(|c| crate::hostdata::ItemColour { text: it.text.trim().to_string(), colour: format!("#{c:06X}") }))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    crate::hostdata::DvMeta { sheet: sheet.to_string(), range: range.to_string(), crit: CRITERIA[d.crit].0.to_string(), colours }
+}
+
+fn active_sheet_name(app: &SheetApp) -> String {
+    app.session.active().and_then(|d| d.wb.active()).map(|sh| sh.name.clone()).unwrap_or_default()
 }
 
 /// The text inside the first `"…"` of a formula (with `""` back to `"`), or the formula itself
@@ -709,7 +749,7 @@ fn first_quoted(f: &str, before: &str) -> String {
 }
 
 /// Reads a stored rule back into the editor's terms (the reverse of `commands`).
-fn draft_from(dv: &Validation, cfs: &[gridcraft_engine::model::CondFormat], theme_colours: &gridcraft_engine::model::Theme) -> Draft {
+fn draft_from(dv: &Validation, cfs: &[gridcraft_engine::model::CondFormat], theme_colours: &gridcraft_engine::model::Theme, meta: Option<&crate::hostdata::DvMeta>) -> Draft {
     let range = dv.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",");
     let mut d = Draft::new(range.clone());
     let tl = top_left(&range).unwrap_or_default();
@@ -717,7 +757,7 @@ fn draft_from(dv: &Validation, cfs: &[gridcraft_engine::model::CondFormat], them
     let op = op_name(dv.op);
     let f1 = dv.f1.trim().to_string();
     let f2 = dv.f2.clone().unwrap_or_default();
-    let mut colour_rules = Vec::new();
+    let mut coloured = Vec::new();
     let mut tick_box = false;
     let show_date = |f: &str| f.parse::<i64>().ok().map(date_text).unwrap_or_else(|| format!("={f}"));
     match dv.kind {
@@ -725,13 +765,16 @@ fn draft_from(dv: &Validation, cfs: &[gridcraft_engine::model::CondFormat], them
             d.crit = pos(Crit::Dropdown);
             let body = f1.trim_matches('"').replace("\"\"", "\"");
             d.items = body.split(',').map(|t| Item { text: t.trim().to_string(), colour: None }).collect();
-            for (i, cf) in cfs.iter().enumerate() {
-                let same = cf.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",") == range;
+            // With StarSheets' section only the items it lists have a colour rule; without it
+            // (an older file) any "is equal to" rule on the same cells counts.
+            let listed = |t: &str| meta.is_none_or(|m| m.colours.iter().any(|c| c.text == t));
+            for cf in cfs {
+                let same = crate::hostdata::ranges_text(&cf.ranges) == range;
                 if let (true, CfRule::CellIs { op: CfOperator::Equal, a, b: None, style }) = (same, &cf.rule)
-                    && let Some(it) = d.items.iter_mut().find(|it| quoted(&it.text) == *a)
+                    && let Some(it) = d.items.iter_mut().find(|it| quoted(&it.text) == *a && listed(it.text.trim()))
                 {
                     it.colour = rgb_of(&style.fill.fg, theme_colours);
-                    colour_rules.push(i);
+                    coloured.push(it.text.trim().to_string());
                 }
             }
         }
@@ -793,7 +836,17 @@ fn draft_from(dv: &Validation, cfs: &[gridcraft_engine::model::CondFormat], them
     d.help = dv.input_message.clone();
     d.reject = dv.error_style == ErrorStyle::Stop;
     d.plain = !dv.in_cell_dropdown;
-    d.orig = Some(Orig { range, colour_rules, tick_box });
+    // StarSheets' section says when a custom formula only looks like one of the text criteria.
+    if let (Some(m), ValidationKind::Custom) = (meta, dv.kind)
+        && CRITERIA.iter().any(|c| c.0 == m.crit && c.1 == Crit::Custom)
+        && d.crit() != Crit::Custom
+    {
+        d.crit = pos(Crit::Custom);
+        d.v1 = format!("={}", dv.f1.trim().trim_start_matches('='));
+        d.v2 = String::new();
+        tick_box = false;
+    }
+    d.orig = Some(Orig { range, coloured, tick_box });
     d
 }
 
@@ -924,7 +977,7 @@ mod tests {
             }
             let doc = s.active().unwrap();
             let sh = doc.wb.active().unwrap().clone();
-            let mut got = draft_from(&sh.validations[0], &sh.cond_formats, &doc.wb.theme);
+            let mut got = draft_from(&sh.validations[0], &sh.cond_formats, &doc.wb.theme, None);
             got.orig = None;
             assert!(got == want, "{} came back as {} ({:?} / {:?})", describe(&want), describe(&got), got.v1, got.v2);
         }
@@ -941,9 +994,42 @@ mod tests {
         }
         s.execute("home.conditionalFormat", json!({ "range": "B2:B9", "rule": { "type": "cellIs", "operator": "equal", "value": "\"Maybe\"", "style": { "fill": "#FF0000" } } })).unwrap();
         let sh = s.active().unwrap().wb.active().unwrap().clone();
-        let colour: Vec<bool> = sh.cond_formats.iter().map(|cf| is_item_colour(&sh, cf)).collect();
+        let colour: Vec<bool> = sh.cond_formats.iter().map(|cf| is_item_colour(&sh, cf, &crate::hostdata::HostData::default())).collect();
         assert_eq!(colour.iter().filter(|c| **c).count(), 1, "{colour:?}");
         assert_eq!(colour.len(), 2);
+    }
+
+    #[test]
+    fn the_section_settles_what_the_formulas_leave_open() {
+        // A custom formula of the same shape as "Text contains" stays a custom formula.
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        let custom = draft(Crit::Custom, "=ISNUMBER(SEARCH(\"x\",B2))", "");
+        for (cmd, p) in commands(&custom).unwrap() {
+            s.execute(cmd, p).unwrap();
+        }
+        let sh = s.active().unwrap().wb.active().unwrap().clone();
+        let theme = s.active().unwrap().wb.theme.clone();
+        assert!(draft_from(&sh.validations[0], &[], &theme, None).crit() == Crit::TextContains, "without the section: guessed");
+        let meta = meta_of(&sh.name, &custom, &crate::hostdata::normalise_ranges(&custom.range));
+        let got = draft_from(&sh.validations[0], &[], &theme, Some(&meta));
+        assert!(got.crit() == Crit::Custom && got.v1 == "=ISNUMBER(SEARCH(\"x\",B2))", "{:?}", got.v1);
+        // A drop-down whose section lists no colours: an "is equal to" rule of the person's own
+        // on the same cells stays theirs.
+        let mut d = draft(Crit::Dropdown, "", "");
+        d.items = vec![Item { text: "Open".into(), colour: None }, Item { text: "Closed".into(), colour: None }];
+        let mut s = Session::new();
+        s.execute("file.new", json!({})).unwrap();
+        for (cmd, p) in commands(&d).unwrap() {
+            s.execute(cmd, p).unwrap();
+        }
+        s.execute("home.conditionalFormat", json!({ "range": "B2:B9", "rule": { "type": "cellIs", "operator": "equal", "value": "\"Open\"", "style": { "fill": "#FF0000" } } })).unwrap();
+        let sh = s.active().unwrap().wb.active().unwrap().clone();
+        let mut h = crate::hostdata::HostData::default();
+        assert!(is_item_colour(&sh, &sh.cond_formats[0], &h), "without the section: guessed");
+        h.set_dv(meta_of(&sh.name, &d, "B2:B9"));
+        assert!(!is_item_colour(&sh, &sh.cond_formats[0], &h));
+        assert!(draft_from(&sh.validations[0], &sh.cond_formats, &theme, h.dv_for(&sh.name, "B2:B9")).items[0].colour.is_none());
     }
 
     #[test]
@@ -953,16 +1039,15 @@ mod tests {
     }
 }
 
-/// Identifies the workbook as it is now (it is replaced on every change).
-fn wb_ptr(app: &SheetApp) -> usize {
-    app.session.active().map_or(0, |d| std::sync::Arc::as_ptr(&d.wb) as usize)
-}
-
-/// Whether a conditional-formatting rule is a drop-down item's colour: "is equal to" an item of a
-/// drop-down rule over exactly the same cells.
-pub fn is_item_colour(sh: &gridcraft_engine::model::Sheet, cf: &gridcraft_engine::model::CondFormat) -> bool {
-    let CfRule::CellIs { op: CfOperator::Equal, a, b: None, .. } = &cf.rule else { return false };
-    let value = a.trim().trim_matches('"').replace("\"\"", "\"");
+/// Whether a conditional-formatting rule is a drop-down item's colour (it then belongs to the
+/// data validation panel, not the conditional formatting one). With StarSheets' section: only a
+/// rule it lists. Without (an older file): "is equal to" an item of a drop-down rule over exactly
+/// the same cells.
+pub fn is_item_colour(sh: &gridcraft_engine::model::Sheet, cf: &gridcraft_engine::model::CondFormat, h: &crate::hostdata::HostData) -> bool {
+    let Some(value) = cf_item(cf) else { return false };
+    if let Some(m) = h.dv_for(&sh.name, &crate::hostdata::ranges_text(&cf.ranges)) {
+        return m.colours.iter().any(|c| c.text == value);
+    }
     sh.validations.iter().any(|v| {
         v.kind == ValidationKind::List
             && v.ranges == cf.ranges
