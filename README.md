@@ -104,7 +104,7 @@ with `SITE=app/dist` to get the app and the file storage together. More in [docs
 
 | Part | Where it comes from |
 |---|---|
-| Formula engine, xlsx/csv import and export, grid, charts | [GridCraft](https://github.com/storytold/gridcraft), pinned to one release, with small patches (`patches/`, listed in [docs/upstream.md](docs/upstream.md)) |
+| Formula engine, xlsx/csv import and export, grid, charts | [GridCraft](https://github.com/storytold/gridcraft), one release plus our changes, kept on [our fork](https://github.com/DomeShifter/gridcraft/tree/starsheets) (listed in [docs/upstream.md](docs/upstream.md)) |
 | Google Sheets look: title, menus, toolbar, side panels | `app/` |
 | Google-only functions (QUERY) | `crates/sheets-functions` |
 | File storage, accounts, sharing and live editing | `crates/server` (Rust) |

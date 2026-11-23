@@ -13,11 +13,11 @@ matching Google Sheets is the goal.
 
 1. Read [docs/architecture.md](docs/architecture.md) and [docs/upstream.md](docs/upstream.md).
    StarSheets is built on [GridCraft](https://github.com/storytold/gridcraft): we never edit
-   GridCraft's code directly. Changes to it are small patches in `patches/`, each listed in
-   docs/upstream.md.
+   GridCraft's copy in `upstream/` directly. Changes to it are commits on our fork's
+   `starsheets` branch, each listed in docs/upstream.md.
 2. Build:
    ```sh
-   scripts/fetch-upstream.sh             # GridCraft at the pinned release, with our patches
+   scripts/fetch-upstream.sh             # GridCraft at the pinned commit of our fork
    python3 scripts/fetch-fonts.py        # the web fonts (needed for a full build)
    cd app && trunk build --release       # the web app, in app/dist/
    cargo test -p starsheets -p sheets-functions

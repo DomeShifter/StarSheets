@@ -2,24 +2,41 @@
 
 | | |
 |---|---|
-| Repo | https://github.com/storytold/gridcraft |
-| Pinned | **v0.19.1** (`476448d7`), see `upstream.pin` |
+| Upstream | https://github.com/storytold/gridcraft |
+| Our fork | https://github.com/DomeShifter/gridcraft, branch **`starsheets`** |
+| Based on | **v0.19.1** (`476448d7`); the exact commit we build is in `upstream.pin` |
 | Licence | MIT OR Apache-2.0 |
 | Pace | alpha, roughly 40 commits a day (Nov 2026) |
 
 ## How we use it
-`scripts/fetch-upstream.sh` clones the pinned tag into `upstream/gridcraft` (git-ignored), checks the commit hash and applies `patches/*.patch` in order. Our `Cargo.toml` points at the crates there by path. It also copies upstream's `[patch.crates-io]` block (GridCraft builds on its own egui fork); the script fails if the two blocks differ.
+Our changes to GridCraft are ordinary commits on the fork's `starsheets` branch, on top of the
+upstream release. `scripts/fetch-upstream.sh` fetches the commit named in `upstream.pin` into
+`upstream/gridcraft` (git-ignored) and checks it. Our `Cargo.toml` points at the crates there by
+path. It also copies upstream's `[patch.crates-io]` block (GridCraft builds on its own egui fork);
+the script fails if the two blocks differ.
 
 What we depend on: `gridcraft-engine` (commands through `Session::execute`) and `gridcraft-ui-egui` (`SheetApp`, `Chrome`, `theme::Tokens`, `run_or_alert`). Our code calls ui-egui only from `app/src/web.rs`, `app/src/shell.rs` and `app/src/theme.rs`.
 
-## Updating (monthly, not nightly)
-1. Branch `upstream-vX.Y.Z`; set `tag` and `commit` in `upstream.pin`.
-2. Run `scripts/fetch-upstream.sh`. If a patch fails, rebase it (or drop it if upstream merged an equivalent).
-3. Copy upstream's `[patch.crates-io]` block if the script reports a difference. Start from upstream's `Cargo.lock` if dependency resolution fails.
-4. Push; CI must be green. Check the app by eye (menus, toolbar, open/save an xlsx).
-5. Merge, add a line to the log below.
+## Changing GridCraft
+1. In a clone of the fork, on `starsheets`: make the change as one commit, subject
+   `<crate>: <what> (StarSheets NNNN)` (next number), with a test where the engine changes.
+2. Push the branch, put the new commit hash in `upstream.pin`, add a row below.
+3. Never edit `upstream/gridcraft` itself: the next fetch resets it.
 
-## Our patches
+## Updating to a newer GridCraft release (monthly, not nightly)
+1. In the fork: `git fetch upstream --tags`, then `git rebase --onto vX.Y.Z vOLD starsheets`
+   (into a new branch first, e.g. `starsheets-vX.Y.Z`). Resolve conflicts commit by commit; drop
+   a commit when upstream already has the same change.
+2. Copy upstream's `[patch.crates-io]` block if the script reports a difference. Start from
+   upstream's `Cargo.lock` if dependency resolution fails.
+3. Point `upstream.pin` at the new branch's head on a StarSheets branch; CI must be green. Check the
+   app by eye (menus, toolbar, open/save an xlsx).
+4. Move `starsheets` to the new branch (keep the old one as `starsheets-vOLD`), merge, add a line
+   to the log below.
+
+## Our changes
+Until 2026-11-23 these were patch files in `patches/` (still in this repo's history); each is now
+the fork commit marked "(StarSheets NNNN)".
 | Patch | What | Upstream status |
 |---|---|---|
 | 0001-ui-egui-chrome-ribbon-switch | `Chrome.ribbon: bool`: a host can hide the ribbon and its key tips | to offer as a PR |
