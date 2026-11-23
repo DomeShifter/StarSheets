@@ -7,6 +7,12 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Added
+- **Google Sheets formulas:** `SORTN`, `SORT` with TRUE/FALSE for ascending/descending and several
+  sort columns, and open-ended ranges such as `A3:C` (to the bottom of the sheet). Saved .xlsx
+  files spell those ranges the way Excel reads them.
+- **Data validation** in the cell right-click menu, under Conditional formatting.
+- **◀ ▶ buttons** after the sheet tabs when they don't all fit; the bar under the tabs is now only a
+  slim sign of where you are.
 - **Border colour and line style** in the borders menu (thin, medium, thick, dashed, dotted,
   double), used by the next border you pick, as in Sheets.
 - **Pictures in cells:** Insert › Image › "Insert image in cell" or "over cells" opens your file
@@ -22,6 +28,11 @@ new features and the last one for fixes.
   `.starsheets/log.txt` next to your files (and in the server's output).
 
 ### Changed
+- **Ctrl+D and Ctrl+R** copy drop-downs and other data validation along, like the fill handle.
+- The **borders menu** stays open while you pick borders, colours and line styles; click away to
+  close it.
+- **Editing a long formula in a cell:** the box wraps at the right edge of the sheet and grows
+  downwards instead of hiding the end of the formula.
 - **Drop-down lists in cells** (data validation) show every choice, as tall as the window allows,
   then scroll with a visible bar; they have the house menu look.
 - **Open a link** asks in a house-style box ("Open this link?") instead of GridCraft's.

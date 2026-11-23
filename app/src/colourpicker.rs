@@ -56,6 +56,15 @@ pub enum Choice {
 /// `now`), STANDARD, CUSTOM with ⊕ (when `custom`), and the conditional formatting link (when
 /// `conditional`). Closes the menu when something is chosen.
 pub fn palette(ui: &mut Ui, now: Option<u32>, custom: bool, conditional: bool) -> Option<Choice> {
+    let choice = palette_open(ui, now, custom, conditional);
+    if choice.is_some() {
+        ui.close();
+    }
+    choice
+}
+
+/// [`palette`] that leaves the menu open after a choice (the borders menu, to-do 2 row 26).
+pub fn palette_open(ui: &mut Ui, now: Option<u32>, custom: bool, conditional: bool) -> Option<Choice> {
     // Rows run edge to edge like every menu; the palette sits 16 px in from the sides.
     let width = 10.0 * 19.0 + 9.0 * 4.0 + 2.0 * f32::from(house::MENU_INSET);
     ui.set_width(width);
@@ -108,9 +117,6 @@ pub fn palette(ui: &mut Ui, now: Option<u32>, custom: bool, conditional: bool) -
     }
     if let Some(rgb) = picked {
         choice = Some(Choice::Colour(rgb));
-    }
-    if choice.is_some() {
-        ui.close();
     }
     choice
 }

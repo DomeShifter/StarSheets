@@ -673,7 +673,6 @@ impl Shell {
                                 params["color"] = json!(format!("#{rgb:06X}"));
                             }
                             app.run_or_alert(id, params);
-                            ui.close();
                         }
                         if (i + 1) % 5 == 0 {
                             ui.end_row();
@@ -686,7 +685,7 @@ impl Shell {
                     // The colour button shows the colour in a bar under the pencil.
                     let colour = self.border_colour.map_or(theme::TEXT, |rgb| egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
                     let cr = match icons::icon("border_color_pen") {
-                        Some(img) => ui.menu_button(img, |ui| match crate::colourpicker::palette(ui, self.border_colour, false, false) {
+                        Some(img) => ui.menu_button(img, |ui| match crate::colourpicker::palette_open(ui, self.border_colour, false, false) {
                             Some(crate::colourpicker::Choice::Colour(rgb)) => self.border_colour = Some(rgb),
                             Some(crate::colourpicker::Choice::Reset) => self.border_colour = None,
                             _ => {}
@@ -708,7 +707,6 @@ impl Shell {
                                 line_sample(ui, r.rect.shrink2(vec2(28.0, 0.0)), k, self.border_style == k);
                                 if r.clicked() {
                                     self.border_style = k;
-                                    ui.close();
                                 }
                             }
                         }),
@@ -719,9 +717,12 @@ impl Shell {
                 });
             });
         };
+        // Picking a preset, colour or line style keeps the menus open (to-do 2 row 26): they close
+        // only on a click outside. The submenus inherit this from the outer menu.
+        let stay = egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
         let r = match icons::icon("border_all") {
-            Some(img) => ui.menu_button(img, body).response,
-            None => ui.menu_button("Borders", body).response,
+            Some(img) => egui::containers::menu::MenuButton::new(img).config(stay).ui(ui, body).0,
+            None => egui::containers::menu::MenuButton::new("Borders").config(stay).ui(ui, body).0,
         };
         r.on_hover_text("Borders");
     }

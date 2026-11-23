@@ -1,0 +1,64 @@
+diff --git a/crates/engine/src/cmd/edit/fill.rs b/crates/engine/src/cmd/edit/fill.rs
+index 338ca4a..e31bcf8 100644
+--- a/crates/engine/src/cmd/edit/fill.rs
++++ b/crates/engine/src/cmd/edit/fill.rs
+@@ -34,10 +34,24 @@ pub(super) fn fill_dir(s: &mut Session, p: &Json, dr: i64, dc: i64) -> Result<Js
+     let skip = s.doc()?.wb.sheet(sheet).map(|sh| super::filtered_rows(sh, r)).unwrap_or_default();
+     edit(s, |cx| {
+         crate::fill::fill_except(cx, sheet, src, r, crate::fill::FillMode::Copy, &skip)?;
++        // Ctrl+D / Ctrl+R carry data validation along too, like the fill handle (StarSheets).
++        extend_validations(cx.sheet_mut(sheet)?, src, r);
+         Ok(Json::Null)
+     })
+ }
+ 
++/// Google Sheets: data validation travels with a fill. A rule that covers every source cell
++/// covers the filled cells too.
++fn extend_validations(sh: &mut gridcraft_model::Sheet, src: RangeRef, target: RangeRef) {
++    for v in &mut sh.validations {
++        let covers = |c: CellRef| v.ranges.iter().any(|r| r.contains(c));
++        let all = (src.start.row..=src.end.row).all(|r| (src.start.col..=src.end.col).all(|c| covers(CellRef::new(r, c))));
++        if all && !v.ranges.iter().any(|r| r.contains(target.start) && r.contains(target.end)) {
++            v.ranges.push(target);
++        }
++    }
++}
++
+ pub(super) fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
+     let sheet = target_sheet(s, p)?;
+     let src = str_param(p, "source").and_then(RangeRef::parse).map_or_else(|| target_range(s, p), Ok)?;
+@@ -69,14 +83,7 @@ pub(super) fn auto_fill(s: &mut Session, p: &Json) -> Result<Json> {
+         // Google Sheets: data validation travels with the fill handle. A rule that covers every
+         // source cell covers the filled cells too.
+         if keeps_rules {
+-            let sh = cx.sheet_mut(sheet)?;
+-            for v in &mut sh.validations {
+-                let covers = |c: CellRef| v.ranges.iter().any(|r| r.contains(c));
+-                let all = (src.start.row..=src.end.row).all(|r| (src.start.col..=src.end.col).all(|c| covers(CellRef::new(r, c))));
+-                if all && !v.ranges.iter().any(|r| r.contains(target.start) && r.contains(target.end)) {
+-                    v.ranges.push(target);
+-                }
+-            }
++            extend_validations(cx.sheet_mut(sheet)?, src, target);
+         }
+         *cx.sel = crate::Selection { active: src.start, anchor: src.start, ranges: vec![target.union(&src)] };
+         Ok(Json::Null)
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index 6555a10..0cd418b 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -6578,3 +6578,14 @@ fn history_charges_the_storage_of_empty_comment_replies() {
+     // 500 replies of no text are still 500 elements.
+     assert!(crate::sheet_text_bytes(&sheet) >= 500 * std::mem::size_of::<(String, String)>());
+ }
++
++#[test]
++fn fill_down_carries_data_validation() {
++    // StarSheets: Ctrl+D (Fill Down) copies a drop-down rule to the filled cells, like the fill handle.
++    let mut s = s();
++    s.execute("range.setValues", json!({"range": "A1", "values": [["a"]]})).unwrap();
++    s.execute("data.validation", json!({"range": "A1", "type": "list", "formula1": "\"a,b\""})).unwrap();
++    s.execute("edit.fillDown", json!({"range": "A1:A4"})).unwrap();
++    let sh = s.doc().unwrap().wb.active().unwrap().clone();
++    assert!(sh.validations[0].ranges.iter().any(|r| r.a1() == "A1:A4"));
++}

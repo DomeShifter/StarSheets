@@ -114,6 +114,7 @@ const ICONS: &[(&str, &[u8])] = &[
     ("create_new_folder", include_bytes!("../icons/create_new_folder.svg")),
     ("folder_fill", include_bytes!("../icons/folder_fill.svg")),
     ("palette", include_bytes!("../icons/palette.svg")),
+    ("chevron_left", include_bytes!("../icons/chevron_left.svg")),
     ("chevron_right", include_bytes!("../icons/chevron_right.svg")),
     ("expand_more", include_bytes!("../icons/expand_more.svg")),
     ("folder", include_bytes!("../icons/folder.svg")),

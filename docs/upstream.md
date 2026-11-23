@@ -86,3 +86,7 @@ What we depend on: `gridcraft-engine` (commands through `Session::execute`) and 
 | 0057 | ui-egui | Tick boxes 17 px at 100% (were 13): half the space above and below them in a default row |
 | 0058 | xlsx | Google Sheets export: a spill placeholder (`DUMMYFUNCTION("""COMPUTED_VALUE""")`) next to an unwrapped formula is left empty for the spill (was #SPILL!); placeholders of a still-wrapped formula keep their values |
 | 0059 | ui-egui | A picture in a cell is placed by the cell's alignment (left/right/centre; top/middle/bottom; General = centred across) |
+| 0060 | engine | Fill Down / Fill Right (Ctrl+D / Ctrl+R) carry data validation to the filled cells, like the fill handle |
+| 0061 | ui-egui | Google Sheets cell menu: "Data validation" under "Conditional formatting" |
+| 0062 | ui-egui | A one-line in-cell edit too long for the room to the right wraps at the grid edge and grows down (as Sheets) |
+| 0063 | formula, functions, xlsx | Google Sheets: SORTN; SORT with is_ascending TRUE/FALSE and column pairs; open-ended ranges `A3:C` (printed back as typed, written to files as `A3:C1048576`) |

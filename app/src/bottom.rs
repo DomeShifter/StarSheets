@@ -55,7 +55,15 @@ pub struct Bottom {
     drag_origin: Option<f32>,
     /// A tab whose Delete was clicked, waiting for "Are you sure?" (its name: indexes can move).
     confirm_delete: Option<String>,
+    /// The tab strip's scroll position and how far it can go, as of last frame (◀ ▶ buttons).
+    tab_offset: f32,
+    tab_max: f32,
+    /// Where a click on ◀ or ▶ moves the tab strip to.
+    tab_scroll_to: Option<f32>,
 }
+
+/// How far one click on the tab strip's ◀ or ▶ scrolls.
+const TAB_STEP: f32 = 160.0;
 
 /// Where a dragged tab would land (its new position among the tabs): past every tab whose middle
 /// its own middle has crossed. Dragging right, a tab only gives way once the dragged tab's middle
@@ -151,16 +159,40 @@ impl Bottom {
                     all.on_hover_text("All sheets (Alt+Shift+K)");
                     ui.add_space(6.0);
                     let quick_width = 220.0;
-                    let strip = (ui.available_width() - quick_width).max(80.0);
-                    // The tab strip keeps a thin bar that shows on hover (a solid one would sit under the tabs).
-                    ui.spacing_mut().scroll = egui::style::ScrollStyle::floating();
-                    egui::ScrollArea::horizontal().max_width(strip).id_salt("starsheets_tabs").show(ui, |ui| {
+                    // ◀ ▶ after the tabs when they don't all fit (to-do 2 row 18).
+                    let overflow = self.tab_max > 0.5;
+                    let arrows_width = if overflow { 2.0 * 30.0 + 2.0 + 6.0 } else { 0.0 };
+                    let strip = (ui.available_width() - quick_width - arrows_width).max(80.0);
+                    // The tab strip shows only the slim bar, as a sign of where you are: it can't
+                    // be grabbed (it would sit under the tabs). Shift+wheel and ◀ ▶ scroll it.
+                    ui.spacing_mut().scroll = egui::style::ScrollStyle { bar_width: 2.0, floating_width: 2.0, ..egui::style::ScrollStyle::floating() };
+                    let mut area = egui::ScrollArea::horizontal()
+                        .max_width(strip)
+                        .id_salt("starsheets_tabs")
+                        .scroll_source(egui::containers::scroll_area::ScrollSource { scroll_bar: false, ..Default::default() });
+                    if let Some(x) = self.tab_scroll_to.take() {
+                        area = area.horizontal_scroll_offset(x);
+                    }
+                    let out = area.show(ui, |ui| {
                         ui.horizontal(|ui| {
                             self.tab_rects.clear();
                             let visible: Vec<&Tab> = list.iter().filter(|t| !t.hidden).collect();
                             self.strip(app, ui, &visible, active, list.len());
                         });
                     });
+                    self.tab_offset = out.state.clamped_offset().x;
+                    self.tab_max = (out.content_size.x - out.inner_rect.width()).max(0.0);
+                    if overflow {
+                        ui.add_space(6.0);
+                        let left = ui.add_enabled_ui(self.tab_offset > 0.5, |ui| icon_button(ui, "chevron_left", "Scroll sheet tabs left")).inner;
+                        if left.clicked() {
+                            self.tab_scroll_to = Some((self.tab_offset - TAB_STEP).max(0.0));
+                        }
+                        let right = ui.add_enabled_ui(self.tab_offset < self.tab_max - 0.5, |ui| icon_button(ui, "chevron_right", "Scroll sheet tabs right")).inner;
+                        if right.clicked() {
+                            self.tab_scroll_to = Some((self.tab_offset + TAB_STEP).min(self.tab_max));
+                        }
+                    }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| self.quick_sum(app, ui));
                 });
             });

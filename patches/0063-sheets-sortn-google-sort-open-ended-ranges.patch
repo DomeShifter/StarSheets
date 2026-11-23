@@ -1,0 +1,278 @@
+diff --git a/crates/engine/src/tests.rs b/crates/engine/src/tests.rs
+index 0cd418b..246f93e 100644
+--- a/crates/engine/src/tests.rs
++++ b/crates/engine/src/tests.rs
+@@ -6589,3 +6589,26 @@ fn fill_down_carries_data_validation() {
+     let sh = s.doc().unwrap().wb.active().unwrap().clone();
+     assert!(sh.validations[0].ranges.iter().any(|r| r.a1() == "A1:A4"));
+ }
++
++#[test]
++fn google_sort_sortn_and_open_ended_ranges() {
++    // StarSheets (to-do 2 row 23): ={A2:C2;SORTN(SORT(A3:C,2,0),9^9,2,1,TRUE)} as in Google Sheets.
++    let mut s = s();
++    s.execute("range.setValues", json!({"range": "A2", "values": [["Name","Score","X"],["b",1,"p"],["a",5,"q"],["b",7,"r"],["a",2,"s"]]})).unwrap();
++    s.execute("cell.set", json!({"cell": "E1", "input": "=ROWS(A3:C)"})).unwrap();
++    assert_eq!(v(&s, "E1"), Value::Number(1_048_574.0));
++    s.execute("cell.set", json!({"cell": "F1", "input": "=INDEX(SORT(A3:C6,2,FALSE),1,2)"})).unwrap();
++    assert_eq!(v(&s, "F1"), Value::Number(7.0));
++    s.execute("cell.set", json!({"cell": "E3", "input": "={A2:C2;SORTN(SORT(A3:C,2,0),9^9,2,1,TRUE)}"})).unwrap();
++    // The header, then the best row for each name, by name: a 5, b 7.
++    assert_eq!(v(&s, "E3"), Value::Text("Name".into()));
++    assert_eq!((v(&s, "E4"), v(&s, "F4")), (Value::Text("a".into()), Value::Number(5.0)));
++    assert_eq!((v(&s, "E5"), v(&s, "F5")), (Value::Text("b".into()), Value::Number(7.0)));
++    let f = s.execute("cell.get", json!({"cell": "E3"})).unwrap()["formula"].clone();
++    assert!(f.as_str().unwrap().contains("A3:C,"), "{f}");
++    // Ties: mode 0 cuts at n, 1 adds rows tied with the last, 3 keeps whole tie groups.
++    s.execute("cell.set", json!({"cell": "H1", "input": "=ROWS(SORTN(A3:C6,1,0,1,TRUE))"})).unwrap();
++    s.execute("cell.set", json!({"cell": "H2", "input": "=ROWS(SORTN(A3:C6,1,1,1,TRUE))"})).unwrap();
++    s.execute("cell.set", json!({"cell": "H3", "input": "=ROWS(SORTN(A3:C6,2,3,1,TRUE))"})).unwrap();
++    assert_eq!((v(&s, "H1"), v(&s, "H2"), v(&s, "H3")), (Value::Number(1.0), Value::Number(2.0), Value::Number(4.0)));
++}
+diff --git a/crates/formula/src/lib.rs b/crates/formula/src/lib.rs
+index 7cae66a..9d10c99 100644
+--- a/crates/formula/src/lib.rs
++++ b/crates/formula/src/lib.rs
+@@ -13,7 +13,7 @@ pub mod printer;
+ pub use ast::{Anchor, BinOp, Expr, RefKind, Reference, SheetSel, StructItem, StructRef, TrimMode, UnOp};
+ pub use input::{FormulaLocale, parse_input, print_input};
+ pub use parser::{MAX_FORMULA_LEN, ParseError, normalize_function_name, parse, parse_closing_parens, parse_name};
+-pub use printer::{print, print_r1c1, quote_sheet};
++pub use printer::{print, print_r1c1, quote_sheet, with_full_rows};
+ 
+ /// Whether two LET/LAMBDA names are the same: case-insensitive in any script, as in Excel
+ /// (`dług` = `DŁUG`, `ß` = `ẞ`). Close to Unicode's default case folding: lower case, plus the
+diff --git a/crates/formula/src/parser.rs b/crates/formula/src/parser.rs
+index a356c04..b9184ff 100644
+--- a/crates/formula/src/parser.rs
++++ b/crates/formula/src/parser.rs
+@@ -380,6 +380,17 @@ impl Parser {
+                 self.next();
+                 return Ok(wrap(RefKind::Range(a, b), sheet));
+             }
++            // Google Sheets' open-ended range `A3:C`: from A3 to the bottom of column C. It is
++            // kept as `A3:C1048576` (what Excel calls it) and prints back as `A3:C` (StarSheets).
++            if matches!(trim, Some(None))
++                && let Tok::Word(w2) = self.peek_at(1)
++                && let Some((c, col_abs)) = word_is_cols(w2)
++            {
++                self.next();
++                self.next();
++                let b = Anchor { row: gridcraft_core::MAX_ROWS - 1, col: c, row_abs: false, col_abs };
++                return Ok(wrap(RefKind::Range(a, b), sheet));
++            }
+             let cell = Expr::Ref(Reference { sheet, kind: RefKind::Cell(a) });
+             if *self.peek() == Tok::Op("#") {
+                 self.next();
+diff --git a/crates/formula/src/printer.rs b/crates/formula/src/printer.rs
+index 59ae33d..74e6634 100644
+--- a/crates/formula/src/printer.rs
++++ b/crates/formula/src/printer.rs
+@@ -74,7 +74,14 @@ fn push_range_a1(s: &mut String, r: &Reference, sep: &str) {
+         RefKind::Range(a, b) => {
+             push_anchor_a1(s, a);
+             s.push_str(sep);
+-            push_anchor_a1(s, b);
++            // Google Sheets' open-ended `A3:C` (a range to the last row with a relative end row)
++            // prints as typed, except into files: Excel only reads `A3:C1048576`.
++            if b.row == gridcraft_core::MAX_ROWS - 1 && a.row < b.row && !b.row_abs && !FULL_ROWS.with(std::cell::Cell::get) {
++                s.push_str(dollar(b.col_abs));
++                push_col(s, b.col);
++            } else {
++                push_anchor_a1(s, b);
++            }
+         }
+         RefKind::Rows(r0, a0, r1, a1) => {
+             let _ = write!(s, "{}{}{sep}{}{}", dollar(*a0), r0 + 1, dollar(*a1), r1 + 1);
+@@ -215,6 +222,20 @@ fn number(n: f64) -> String {
+     }
+ }
+ 
++thread_local! {
++    /// While set, open-ended ranges print their last row (`A3:C1048576`): see [`with_full_rows`].
++    static FULL_ROWS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
++}
++
++/// Runs `f` with open-ended ranges (`A3:C`) printed in full (`A3:C1048576`), for writing files
++/// that Excel reads.
++pub fn with_full_rows<R>(f: impl FnOnce() -> R) -> R {
++    let before = FULL_ROWS.with(|c| c.replace(true));
++    let out = f();
++    FULL_ROWS.with(|c| c.set(before));
++    out
++}
++
+ /// Prints an expression in A1 notation.
+ pub fn print(e: &Expr) -> String {
+     let mut s = String::new();
+diff --git a/crates/formula/src/tests.rs b/crates/formula/src/tests.rs
+index efc23a3..e897e13 100644
+--- a/crates/formula/src/tests.rs
++++ b/crates/formula/src/tests.rs
+@@ -577,3 +577,15 @@ fn column_starting_with_at_round_trips() {
+         assert_eq!(parse(&text).ok(), Some(Expr::Struct(s)), "printed as {text}");
+     }
+ }
++
++#[test]
++fn google_open_ended_range() {
++    // StarSheets: Google Sheets' `A3:C` runs to the last row; it prints back as typed, and in
++    // full for files Excel reads.
++    let e = crate::parse("SUM(A3:C)").unwrap();
++    assert_eq!(crate::print(&e), "SUM(A3:C)");
++    assert_eq!(crate::with_full_rows(|| crate::print(&e)), "SUM(A3:C1048576)");
++    assert_eq!(crate::print(&crate::parse("Data!$B2:$D").unwrap()), "Data!$B2:$D");
++    // An absolute last row stays as written.
++    assert_eq!(crate::print(&crate::parse("A1:A$1048576").unwrap()), "A1:A$1048576");
++}
+diff --git a/crates/functions/src/dynamic.rs b/crates/functions/src/dynamic.rs
+index 6a5aa95..f2f16b1 100644
+--- a/crates/functions/src/dynamic.rs
++++ b/crates/functions/src/dynamic.rs
+@@ -167,10 +167,23 @@ fn int_list(v: &Value) -> R<Vec<i64>> {
+ 
+ fn sort(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     let a = arr_arg(args, 0)?;
+-    let by_col = opt_bool(args, 3, false)?;
++    // Google Sheets: SORT(range, column, is_ascending, column2, is_ascending2, …), with TRUE/1
++    // ascending and FALSE/0 descending. Five or more arguments can only be that form.
++    let google = args.len() >= 5;
++    let by_col = !google && opt_bool(args, 3, false)?;
+     let a = if by_col { a.transpose() } else { a };
+-    let idx = if has(args, 1) { int_list(&arg(args, 1)?.value)? } else { vec![1] };
+-    let ord = if has(args, 2) { int_list(&arg(args, 2)?.value)? } else { vec![1] };
++    let (idx, ord) = if google {
++        let mut idx = Vec::new();
++        let mut ord = Vec::new();
++        for i in (1..args.len()).step_by(2) {
++            idx.push(num(args, i)?.trunc() as i64);
++            ord.push(if has(args, i + 1) { num(args, i + 1)?.trunc() as i64 } else { 1 });
++        }
++        (idx, ord)
++    } else {
++        (if has(args, 1) { int_list(&arg(args, 1)?.value)? } else { vec![1] }, if has(args, 2) { int_list(&arg(args, 2)?.value)? } else { vec![1] })
++    };
++    let ord: Vec<i64> = ord.into_iter().map(google_order).collect();
+     if idx.is_empty() || idx.iter().any(|&i| i < 1 || i > a.cols as i64) || ord.iter().any(|&o| o != 1 && o != -1) {
+         return Err(CellError::Value);
+     }
+@@ -189,6 +202,86 @@ fn sort(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     Ok(Value::from(if by_col { out.transpose() } else { out }))
+ }
+ 
++/// A sort order: Excel's 1 / -1, or Google Sheets' is_ascending TRUE (1) / FALSE (0).
++fn google_order(o: i64) -> i64 {
++    if o == 0 { -1 } else { o }
++}
++
++/// Google Sheets' SORTN(range, [n], [display_ties_mode], [sort_column, is_ascending], …): the
++/// first `n` rows after sorting. Ties are rows with equal sort keys. Modes: 0 at most `n` rows;
++/// 1 `n` rows plus any rows tied with the last; 2 the first row of each tie group, at most `n`;
++/// 3 every row of the first `n` tie groups.
++fn sortn(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
++    let a = arr_arg(args, 0)?;
++    let n = if has(args, 1) { num(args, 1)? } else { 1.0 };
++    if !(n >= 0.0) {
++        return Err(CellError::Value);
++    }
++    let n = if n >= a.rows as f64 { a.rows } else { n.trunc() as usize };
++    let mode = if has(args, 2) { num(args, 2)?.trunc() as i64 } else { 0 };
++    if !(0..=3).contains(&mode) {
++        return Err(CellError::Value);
++    }
++    let mut idx = Vec::new();
++    let mut orders = Vec::new();
++    for i in (3..args.len()).step_by(2) {
++        let c = num(args, i)?.trunc() as i64;
++        if c < 1 || c > a.cols as i64 {
++            return Err(CellError::Value);
++        }
++        idx.push(c);
++        orders.push(if has(args, i + 1) { google_order(num(args, i + 1)?.trunc() as i64) } else { 1 });
++    }
++    if idx.is_empty() {
++        // No sort columns: Google sorts by every column in turn, ascending.
++        idx = (1..=a.cols as i64).collect();
++        orders = vec![1; idx.len()];
++    }
++    if orders.iter().any(|&o| o != 1 && o != -1) {
++        return Err(CellError::Value);
++    }
++    let mut lines: Vec<(Vec<Value>, Vec<Value>)> =
++        rows_of(&a).into_iter().map(|r| (idx.iter().map(|&i| r.get(i as usize - 1).cloned().unwrap_or(Value::Empty)).collect(), r)).collect();
++    // A stable sort: tied rows keep their order, so SORTN(SORT(…), …, 2, …) keeps the first.
++    lines.sort_by(|x, y| cmp_keys(&x.0, &y.0, &orders));
++    let tied = |x: &[Value], y: &[Value]| cmp_keys(x, y, &orders) == Ordering::Equal;
++    let mut out: Vec<Vec<Value>> = Vec::new();
++    match mode {
++        0 => out.extend(lines.into_iter().take(n).map(|(_, r)| r)),
++        1 => {
++            let mut last: Option<Vec<Value>> = None;
++            for (k, r) in lines {
++                if out.len() >= n && !last.as_ref().is_some_and(|l| tied(l, &k)) {
++                    break;
++                }
++                out.push(r);
++                last = Some(k);
++            }
++        }
++        _ => {
++            let mut groups = 0;
++            let mut last: Option<Vec<Value>> = None;
++            for (k, r) in lines {
++                let new_group = !last.as_ref().is_some_and(|l| tied(l, &k));
++                if new_group {
++                    if groups == n {
++                        break;
++                    }
++                    groups += 1;
++                }
++                if new_group || mode == 3 {
++                    out.push(r);
++                }
++                last = Some(k);
++            }
++        }
++    }
++    if out.is_empty() {
++        return Err(CellError::NA);
++    }
++    from_rows(out, &Value::Empty)
++}
++
+ fn sortby(args: &[Arg], _c: &mut dyn Ctx) -> R<Value> {
+     let a = arr_arg(args, 0)?;
+     let mut keys: Vec<Array> = Vec::new();
+@@ -1092,7 +1185,7 @@ pub(crate) fn specs() -> Vec<FnSpec> {
+         f!(
+             "SORT",
+             1,
+-            4,
++            255,
+             Lookup,
+             A,
+             "SORT(array, [sort_index], [sort_order], [by_col])",
+@@ -1125,6 +1218,7 @@ pub(crate) fn specs() -> Vec<FnSpec> {
+         // Google Sheets' QUERY (StarSheets crates/sheets-functions). The 4th argument is added by
+         // the calculator: the sheet column the data starts in, so `select C` means column C.
+         f!("QUERY", 2, 4, Lookup, A, "QUERY(data, query, [headers])", "Runs a Google Visualization API query (select, where, group by, pivot, order by, limit, label, format) over a range.", query),
++        f!("SORTN", 1, 255, Lookup, A, "SORTN(range, [n], [display_ties_mode], [sort_column], [is_ascending], …)", "Returns the first n rows of a range after sorting (Google Sheets).", sortn),
+         f!("ARRAYFORMULA", 1, 1, Lookup, A, "ARRAYFORMULA(array_formula)", "Shows the values of a formula over ranges in the cells below and to the right (Google Sheets).", arrayformula),
+         f!("ARRAY_ROW", 1, VAR, Lookup, A, "ARRAY_ROW(value1, [value2], ...)", "One row of a {…} array literal: its parts side by side (Google Sheets).", array_row),
+         f!("ARRAY_LITERAL", 1, VAR, Lookup, A, "ARRAY_LITERAL(row1, [row2], ...)", "A {…} array literal: its rows one under another (Google Sheets).", array_literal),
+diff --git a/crates/xlsx/src/write.rs b/crates/xlsx/src/write.rs
+index 8f8c571..4cbebe0 100644
+--- a/crates/xlsx/src/write.rs
++++ b/crates/xlsx/src/write.rs
+@@ -252,6 +252,11 @@ fn workbook_view_attrs(wb: &Workbook) -> String {
+ /// Writes the workbook for the file `book_name` (a bare file name). A PivotChart is bound to its
+ /// PivotTable in Excel only when its link starts with the workbook in brackets.
+ pub fn write_xlsx_named_with(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
++    // Google Sheets' open-ended ranges (`A3:C`) are written as Excel reads them (`A3:C1048576`).
++    gridcraft_formula::with_full_rows(|| write_xlsx_inner(wb, kind, book_name, functions))
++}
++
++fn write_xlsx_inner(wb: &Workbook, kind: XlsxKind, book_name: Option<&str>, functions: FunctionInfo) -> Result<Vec<u8>, IoError> {
+     if wb.sheets.is_empty() {
+         return Err(IoError::Format("a workbook needs at least one sheet".into()));
+     }
