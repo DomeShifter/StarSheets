@@ -23,6 +23,8 @@ pub struct LiveStatus {
     pub text: String,
     pub unsaved: bool,
     pub saved_at: Option<i64>,
+    /// Who changed the file last and when (to-do 3 row 8: the save symbol's hover text).
+    pub last_edit: Option<sync::LastEdit>,
 }
 
 thread_local! {
@@ -91,6 +93,8 @@ pub struct Live {
     /// selection, when it last moved).
     people: Vec<sync::Person>,
     you: String,
+    /// The file's last change: from the server on joining, then every change seen here.
+    last_edit: Option<sync::LastEdit>,
     places: std::collections::HashMap<String, (usize, gridcraft_engine::selection::Selection, f64)>,
     sent_place: Option<(usize, gridcraft_engine::selection::Selection)>,
     sent_place_at: f64,
@@ -122,6 +126,7 @@ impl Default for Live {
             saved_at: None,
             people: Vec::new(),
             you: String::new(),
+            last_edit: None,
             places: std::collections::HashMap::new(),
             sent_place: None,
             sent_place_at: 0.0,
@@ -257,7 +262,7 @@ impl Live {
         } else {
             "Saved"
         };
-        let status = LiveStatus { doc, text: text.to_string(), unsaved: !self.pending.is_empty(), saved_at: self.saved_at };
+        let status = LiveStatus { doc, text: text.to_string(), unsaved: !self.pending.is_empty(), saved_at: self.saved_at, last_edit: self.last_edit.clone() };
         STATUS.with(|s| *s.borrow_mut() = Some(status));
         if !self.open {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -291,7 +296,8 @@ impl Live {
 
     fn message(&mut self, app: &mut SheetApp, m: ToClient) -> bool {
         match m {
-            ToClient::Welcome { seq, workbook, can_edit } => {
+            ToClient::Welcome { seq, workbook, can_edit, last_edit } => {
+                self.last_edit = last_edit;
                 // A viewer's tab can't change the file (GridCraft refuses edits, patch 0042).
                 self.can_edit = can_edit;
                 app.session.read_only = !can_edit;
@@ -319,6 +325,13 @@ impl Live {
             ToClient::Applied { seq, client, cseq, change } => {
                 self.seq = seq;
                 self.server_dirty = true;
+                // Who made it, for "Last edit … by …": you, someone here, or the server's own work.
+                let by = if client == self.client {
+                    "you".to_string()
+                } else {
+                    self.people.iter().find(|p| p.client == client).map(|p| p.name.clone()).unwrap_or_else(|| "someone".into())
+                };
+                self.last_edit = Some(sync::LastEdit { by, at: (js_sys::Date::now() / 1000.0) as i64 });
                 if client == self.client {
                     if self.pending.front().is_some_and(|p| p.cseq == cseq) {
                         let p = self.pending.pop_front();

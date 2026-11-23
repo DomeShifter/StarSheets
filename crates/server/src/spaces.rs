@@ -158,6 +158,13 @@ pub fn note_changed(store: &Store, file: &str, username: &str) -> io::Result<()>
     store.save_json(&changed_path(store), &Value::Object(all))
 }
 
+/// Who last changed `file` (username) and when (Unix seconds), where known.
+pub fn last_change(store: &Store, file: &str) -> Option<(String, i64)> {
+    let all = store.load_json(&changed_path(store));
+    let v = all.get(file)?;
+    Some((v.get("by")?.as_str()?.to_string(), v.get("at").and_then(Value::as_i64).unwrap_or(0)))
+}
+
 /// Who last changed each file (file id → username), where known.
 pub fn changed_by(store: &Store) -> Map<String, Value> {
     store.load_json(&changed_path(store)).into_iter().filter_map(|(k, v)| Some((k, v.get("by")?.clone()))).collect()

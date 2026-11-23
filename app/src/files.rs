@@ -22,6 +22,8 @@ pub const REQUEST: &str = "starsheets_files_request";
 pub const STATUS: &str = "starsheets_save_status";
 /// The hover text for the status line: where and when the file was saved.
 pub const STATUS_TIP: &str = "starsheets_save_status_tip";
+/// "Last edit was 5 minutes ago (14:05) by Ada", for the save symbol's hover text (to-do 3 row 8).
+pub const LAST_EDIT: &str = "starsheets_last_edit";
 const API: &str = "api/files";
 /// Quiet time after the last change before saving (ms).
 const SAVE_AFTER: f64 = 1500.0;
@@ -160,6 +162,7 @@ impl Files {
         {
             link.saved = at;
         }
+        let last_edit = live.as_ref().and_then(|l| l.last_edit.clone()).map(|e| format!("Last edit was {} by {}", ago(e.at), e.by)).unwrap_or_default();
         let status = if let Some(l) = live {
             l.text
         } else if let Some(e) = &self.error {
@@ -175,6 +178,7 @@ impl Files {
         ctx.data_mut(|m| {
             m.insert_temp(egui::Id::new(STATUS), status);
             m.insert_temp(egui::Id::new(STATUS_TIP), tip);
+            m.insert_temp(egui::Id::new(LAST_EDIT), last_edit);
         });
     }
 

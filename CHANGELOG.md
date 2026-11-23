@@ -17,6 +17,10 @@ new features and the last one for fixes.
   puts it back). The first of the look-and-feel settings.
 
 ### Changed
+- The "Saved" text beside the title is now a clock symbol left of Files. A dot shows when it is
+  saving (blue) or something isn't saved (red); hover shows who edited the file last and when,
+  and where it is saved; a click opens version history.
+- Other people in the file now show to the right of Share, next to your own picture.
 - The sheet tab arrows (◀ ▶) move a page of whole tabs at a time and slide smoothly: ▶ brings the
   last tab you could see to the front, ◀ does the same the other way.
 - Drop-down cells: only a click on the ▾ opens the list. Dragging from the ▾ or the fill handle

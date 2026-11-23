@@ -857,14 +857,6 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             ui.spacing_mut().item_spacing.y = 0.0;
             ui.horizontal(|ui| {
                 rename_box(app, ui, &name, title_draft);
-                let status = ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new("starsheets_save_status"))).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string());
-                let tip = ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new("starsheets_save_status_tip"))).unwrap_or_default();
-                // As in Sheets: hover says where and when; a click opens version history.
-                let r = ui.add(egui::Label::new(RichText::new(status).size(12.0).color(theme::TEXT_DIM)).sense(egui::Sense::click()));
-                let r = if tip.is_empty() { r } else { r.on_hover_text(tip) };
-                if r.clicked() {
-                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "versions".to_string()));
-                }
             });
             ui.horizontal(|ui| {
                 flat(ui);
@@ -876,11 +868,16 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             });
         });
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-            // Your avatar (with its menu) at the far right, then Share, then who else is here.
+            // From the right: your avatar (with its menu), who else is here (to-do 3 row 9), Share,
+            // Files, then the save symbol (to-do 3 row 8).
             #[cfg(target_arch = "wasm32")]
             {
                 crate::account::me_ui(ui);
                 ui.add_space(8.0);
+                if !crate::live::others().is_empty() {
+                    crate::account::others_ui(ui);
+                    ui.add_space(8.0);
+                }
             }
             let share = Button::new(RichText::new("Share").size(14.0).color(theme::TEXT)).fill(theme::SHARE).corner_radius(18.0).min_size(vec2(84.0, 36.0));
             // Files: back to the home screen (the file organiser), in this file's folder. The
@@ -912,10 +909,50 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
                     ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "home_tab".to_string()));
                 }
                 ui.add_space(8.0);
-                crate::account::others_ui(ui);
             }
+            save_symbol(ui, dirty);
         });
     });
+}
+
+/// The save and change-tracking symbol left of Files (to-do 3 row 8; replaces the "Saved" text
+/// beside the title). A dot shows the state: blue while saving, red when something isn't saved
+/// or the connection is down; none when all is saved. Hover: who changed the file last and when,
+/// then where it is saved. A click opens version history, as Sheets' clock does.
+fn save_symbol(ui: &mut Ui, dirty: bool) {
+    let get = |key: &str| ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new(key))).unwrap_or_default();
+    let status = Some(get("starsheets_save_status")).filter(|s| !s.is_empty()).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string());
+    let (last_edit, tip) = (get("starsheets_last_edit"), get("starsheets_save_status_tip"));
+    let dot = match status.as_str() {
+        "Saved" | "View only" => None,
+        "Saving…" => Some(theme::BLUE),
+        _ => Some(crate::house::ERROR),
+    };
+    let button = match icons::icon("history") {
+        Some(img) => Button::image(img.fit_to_exact_size(vec2(24.0, 24.0))),
+        None => Button::new(RichText::new("🕘").size(18.0)),
+    };
+    let r = ui.add(button.frame_when_inactive(false).corner_radius(18.0).min_size(vec2(36.0, 36.0)));
+    if let Some(c) = dot {
+        let at = r.rect.center() + vec2(8.0, -8.0);
+        ui.painter().circle(at, 4.0, c, Stroke::new(1.5, theme::PAGE));
+    }
+    // The live state in words first (the save tip below already covers saving and errors), then
+    // who and when, then where.
+    let mut lines: Vec<String> = Vec::new();
+    if matches!(status.as_str(), "View only" | "Connecting…") || status.starts_with("Offline") {
+        lines.push(status.clone());
+    }
+    if !last_edit.is_empty() {
+        lines.push(last_edit);
+    }
+    if !tip.is_empty() {
+        lines.push(tip);
+    }
+    let r = if lines.is_empty() { r } else { r.on_hover_text(lines.join("\n")) };
+    if r.clicked() {
+        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "versions".to_string()));
+    }
 }
 
 /// The Material Symbols icon Sheets shows beside a menu item (docs/sheets-menus.md).

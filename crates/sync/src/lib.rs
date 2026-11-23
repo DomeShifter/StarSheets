@@ -62,6 +62,13 @@ pub struct Person {
     pub colour: String,
 }
 
+/// The last change to a file: who (their display name) and when (Unix seconds).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LastEdit {
+    pub by: String,
+    pub at: i64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c", rename_all = "snake_case")]
 pub enum ToClient {
@@ -72,6 +79,9 @@ pub enum ToClient {
         /// False for someone who may only view the file.
         #[serde(default = "yes")]
         can_edit: bool,
+        /// Who changed the file last and when, where known (the title row's save symbol).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        last_edit: Option<LastEdit>,
     },
     /// A change everyone applies (also the sender's acknowledgement).
     Applied { seq: u64, client: String, cseq: u64, change: Change },

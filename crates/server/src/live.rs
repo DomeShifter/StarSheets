@@ -238,6 +238,8 @@ struct Room {
     path: Option<String>,
     /// Who made the last change not yet saved (for "Last changed by" in Details).
     last_editor: Option<String>,
+    /// The last change made here (username, Unix seconds): kept after saving, for newcomers.
+    last_edit: Option<(String, i64)>,
     /// The last "couldn't save" told to everyone, so it isn't repeated every 10 s.
     told: Option<String>,
 }
@@ -269,6 +271,7 @@ impl Room {
             thumb_at: None,
             path: None,
             last_editor: None,
+            last_edit: None,
             told: None,
         };
         let opened = room.open();
@@ -350,6 +353,14 @@ impl Room {
         }
     }
 
+    /// Who changed the file last and when: this room's own last change, else the one noted at
+    /// the last save. Shown as the person's display name.
+    fn last_edit_now(&self) -> Option<sync::LastEdit> {
+        let (username, at) = self.last_edit.clone().or_else(|| crate::spaces::last_change(&self.app.store, &self.file))?;
+        let by = crate::auth::users(&self.app.store).into_iter().find(|u| u.username == username).map(|u| u.name).unwrap_or(username);
+        Some(sync::LastEdit { by, at })
+    }
+
     fn snapshot(&self) -> sync::Whole {
         match self.wb() {
             Some(wb) => sync::workbook_json(&wb),
@@ -360,7 +371,8 @@ impl Room {
     fn handle(&mut self, msg: RoomMsg) {
         match msg {
             RoomMsg::Join { client, user, can_edit, out } => {
-                let _ = out.send(text(&ToClient::Welcome { seq: self.seq, workbook: self.snapshot(), can_edit }));
+                let last_edit = self.last_edit_now();
+                let _ = out.send(text(&ToClient::Welcome { seq: self.seq, workbook: self.snapshot(), can_edit, last_edit }));
                 // Without sign-in (STARSHEETS_AUTH=off) people are guests, numbered as they come.
                 let person = match user {
                     Some(u) => sync::Person { client: client.clone(), username: u.username, name: u.name, colour: u.colour },
@@ -472,6 +484,7 @@ impl Room {
             c.redo.clear();
             if !c.person.username.is_empty() {
                 self.last_editor = Some(c.person.username.clone());
+                self.last_edit = Some((c.person.username.clone(), crate::store::now() as i64));
             }
         }
         self.record(client, before, after);
@@ -701,6 +714,7 @@ impl Room {
         self.server_change(before);
         if !by.is_empty() {
             self.last_editor = Some(by.to_string());
+            self.last_edit = Some((by.to_string(), crate::store::now() as i64));
         }
         Ok(names)
     }

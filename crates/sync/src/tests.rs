@@ -246,7 +246,7 @@ fn whole_workbooks_and_patches_round_trip_as_raw_text() {
     a.execute("file.new", json!({})).unwrap();
     a.execute("cell.set", json!({"cell": "B2", "input": "=1+2"})).unwrap();
     let before = a.active().unwrap().wb.clone();
-    let m = ToClient::Welcome { seq: 4, workbook: workbook_json(&before), can_edit: true };
+    let m = ToClient::Welcome { seq: 4, workbook: workbook_json(&before), can_edit: true, last_edit: None };
     let t = serde_json::to_string(&m).unwrap();
     let ToClient::Welcome { workbook, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
     assert_eq!(fingerprint(&workbook_from_json(&workbook, None).unwrap()), fingerprint(&before));
@@ -299,4 +299,18 @@ fn whole_workbook_from_the_server_shows_spilled_values() {
     for at in ["D1", "E1", "D2", "E2", "D3", "E3"] {
         assert_eq!(format!("{:?}", shown(&fixed, at)), format!("{:?}", shown(&wb(&a), at)), "{at}");
     }
+}
+
+/// "Last edit by … at …" rides on Welcome as an optional field: a server without it (or a tab
+/// that doesn't know it) still understands the message, so no protocol bump or reload is needed.
+#[test]
+fn welcome_carries_the_last_edit_and_old_welcomes_still_read() {
+    let old = r#"{"t":"welcome","c":{"seq":1,"workbook":null,"can_edit":true}}"#;
+    let ToClient::Welcome { last_edit, .. } = serde_json::from_str::<ToClient>(old).unwrap() else { panic!() };
+    assert_eq!(last_edit, None);
+    let raw = serde_json::value::to_raw_value(&serde_json::Value::Null).unwrap();
+    let edit = crate::LastEdit { by: "Ada".into(), at: 1_795_000_000 };
+    let t = serde_json::to_string(&ToClient::Welcome { seq: 2, workbook: raw, can_edit: true, last_edit: Some(edit.clone()) }).unwrap();
+    let ToClient::Welcome { last_edit, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
+    assert_eq!(last_edit, Some(edit));
 }
