@@ -1201,7 +1201,8 @@ async fn handle(State(app): State<Shared>, req: Request) -> Response<Body> {
     }
     if let Some(site) = &app.site
         && !path.starts_with("/api/")
-        && method == Method::GET
+        // HEAD too (status checks use it); hyper leaves the body out of a HEAD reply.
+        && (method == Method::GET || method == Method::HEAD)
     {
         return serve_site(site, &path, &headers).await;
     }
@@ -1273,7 +1274,13 @@ async fn handle(State(app): State<Shared>, req: Request) -> Response<Body> {
     }
     let q = match gate(&app, &m, &p, q, me.clone(), &body).await {
         Ok(q) => q,
-        Err(resp) => return resp,
+        Err(resp) => {
+            // Sharing is answered inside the gate: open live rooms check access straight away.
+            if m == "POST" && p.last().is_some_and(|l| l == "sharing") && resp.status().is_success() {
+                app.rooms.recheck_access();
+            }
+            return resp;
+        }
     };
     let if_match = headers.get(header::IF_MATCH).and_then(|v| v.to_str().ok()).map(str::to_string);
     // A file replaced through the API (a version restored) is read again by its live room.
