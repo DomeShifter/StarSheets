@@ -114,6 +114,24 @@ pub fn set(store: &Store, item: Item, share: &Share) -> std::io::Result<()> {
     store.save_json(&path(store), &Value::Object(all))
 }
 
+/// Takes `username` off every file and folder share (their account was removed), so a new
+/// account with the same name gets nothing of theirs.
+pub fn forget_person(store: &Store, username: &str) -> std::io::Result<()> {
+    let mut all = load(store);
+    let mut changed = false;
+    for group in ["files", "folders"] {
+        let Some(Value::Object(items)) = all.get_mut(group) else { continue };
+        for item in items.values_mut() {
+            if let Some(Value::Array(people)) = item.get_mut("people") {
+                let before = people.len();
+                people.retain(|p| p.get("username").and_then(Value::as_str) != Some(username));
+                changed |= people.len() != before;
+            }
+        }
+    }
+    if changed { store.save_json(&path(store), &Value::Object(all)) } else { Ok(()) }
+}
+
 /// The old per-file owner (from before everyone had a folder), for moving files home once.
 pub fn old_owner(store: &Store, file: &str) -> Option<String> {
     load(store).get("files")?.get(file)?.get("owner")?.as_str().map(str::to_string)
