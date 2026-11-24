@@ -9,6 +9,29 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+thread_local! {
+    /// The text StarSheets itself last put on the clipboard (cells or text in a cell), while this
+    /// tab has kept the focus. On plain http a page can't read the clipboard, so menu Paste
+    /// (Edit › Paste, a cell's right-click Paste, this menu's Paste) uses this instead; Ctrl+V
+    /// always gets the real clipboard from the browser.
+    static LAST_COPY: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// Remembers text StarSheets just copied (web.rs: every copy, any route).
+pub fn remember_copy(text: &str) {
+    LAST_COPY.with(|c| *c.borrow_mut() = Some(text.replace("\r\n", "\n")));
+}
+
+/// The text StarSheets last copied, if the tab hasn't lost the focus since.
+pub fn last_copy() -> Option<String> {
+    LAST_COPY.with(|c| c.borrow().clone()).filter(|t| !t.is_empty())
+}
+
+/// The tab lost the focus: something else may have been copied meanwhile.
+pub fn forget_copy() {
+    LAST_COPY.with(|c| *c.borrow_mut() = None);
+}
+
 use gridcraft_ui_egui::SheetApp;
 
 use crate::house;
@@ -171,6 +194,12 @@ impl EditMenu {
 
     /// Paste: the clipboard's text where the browser lets the page read it, else the note.
     fn paste(&mut self, ctx: &egui::Context) {
+        // StarSheets' own last copy: still what's on the clipboard, as the tab never lost focus.
+        if let Some(text) = last_copy() {
+            *self.pasted.borrow_mut() = Some(text);
+            ctx.request_repaint();
+            return;
+        }
         #[cfg(target_arch = "wasm32")]
         if let Some(w) = web_sys::window().filter(|w| w.is_secure_context()) {
             let clipboard = w.navigator().clipboard();
@@ -201,7 +230,7 @@ impl EditMenu {
         let mut closed = false;
         let mut ok = false;
         house::dialog(ctx, "starsheets_paste_note", 420.0, "Copying and pasting in this browser", Some(&mut closed), |ui| {
-            house::text(ui, "The browser doesn't let a menu paste here, but you can still use Ctrl+V to paste (Ctrl+C to copy, Ctrl+X to cut).");
+            house::text(ui, PASTE_NOTE);
             ok = house::actions(ui, &["OK"]).is_some() || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
         });
         if closed || ok {
@@ -209,6 +238,9 @@ impl EditMenu {
         }
     }
 }
+
+/// Why a menu can't paste something copied elsewhere (or before a reload) on plain http.
+pub const PASTE_NOTE: &str = "The browser doesn't let a menu paste something copied in another app (or before the page was reloaded) on this connection. Use Ctrl+V to paste it (Ctrl+C copies, Ctrl+X cuts).";
 
 /// Puts `text` in place of the selection in the text being edited.
 fn insert(app: &mut SheetApp, text: &str) {

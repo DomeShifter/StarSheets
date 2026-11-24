@@ -96,6 +96,10 @@ pub fn plain_error(text: &str) -> String {
 
 /// Sheets' words for the messages people meet most.
 fn reword(title: &str, text: &str) -> (String, String) {
+    // Menu Paste with nothing StarSheets knows of (after a reload, or copied in another app).
+    if text.trim_end_matches('.') == "Nothing to paste" {
+        return ("Copying and pasting in this browser".into(), crate::editmenu::PASTE_NOTE.into());
+    }
     let title = if title == "GridCraft" || title.is_empty() { "Heads up".to_string() } else { title.to_string() };
     let text = if text.contains("protected sheet") {
         "You're trying to edit a protected cell. To change it, remove its protection in Data › Protect sheets and ranges.".to_string()

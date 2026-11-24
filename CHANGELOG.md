@@ -7,6 +7,10 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Fixed
+- Menu Paste (Edit › Paste, or right-click › Paste) pastes what you last copied in StarSheets,
+  including text copied from inside a cell; Edit › Copy and Cut also reach the clipboard now.
+  Something copied in another app (or before a reload) pastes with Ctrl+V, and the menu says so
+  instead of "Nothing to paste".
 - "There's already data here. Do you want to replace it?" (dragging cells onto others) now
   looks like the other StarSheets dialogs.
 - `DATEVALUE` of a date (not text) gives that date, as in Google Sheets, instead of #VALUE!.

@@ -344,6 +344,7 @@ impl eframe::App for WebShell {
         self.spell.ui(&mut self.app, &ctx);
         self.edit_menu.ui(&mut self.app, &ctx);
         crate::house::style_tooltips(&ctx);
+        note_copies(ui.ctx());
         copy_without_https(ui.ctx());
         self.input.end_frame(&ctx);
     }
@@ -351,6 +352,23 @@ impl eframe::App for WebShell {
 
 /// On plain http eframe can't copy (it needs a secure context): take this frame's copied text
 /// and give it to the page's copy bridge (`__ssCopy` in index.html) instead.
+/// Remembers this frame's copied text for menu Paste (editmenu::LAST_COPY), and forgets it once
+/// the tab has lost the focus (something else may have been copied).
+fn note_copies(ctx: &egui::Context) {
+    if web_sys::window().and_then(|w| w.document()).and_then(|d| d.has_focus().ok()) == Some(false) {
+        crate::editmenu::forget_copy();
+    }
+    let last = ctx.output(|o| {
+        o.commands.iter().rev().find_map(|c| match c {
+            egui::OutputCommand::CopyText(t) => Some(t.clone()),
+            _ => None,
+        })
+    });
+    if let Some(t) = last {
+        crate::editmenu::remember_copy(&t);
+    }
+}
+
 fn copy_without_https(ctx: &egui::Context) {
     if web_sys::window().is_none_or(|w| w.is_secure_context()) {
         return;
@@ -385,6 +403,8 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
     let picture_ctx = ctx.clone();
     Services {
         copy_html: Some(Box::new(copy_html)),
+        // Menu Paste: StarSheets' own last copy (the page can't read the clipboard on http).
+        paste_text: Some(Box::new(crate::editmenu::last_copy)),
         open_async: Some(Box::new(move || {
             let inbox = open_inbox.clone();
             let ctx = ctx.clone();
@@ -439,6 +459,7 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
 
 /// Start inside the copy gesture; deferring `write` can lose browser user activation.
 fn copy_html(html: &str, text: &str) -> Result<(), String> {
+    crate::editmenu::remember_copy(text);
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let window = web_sys::window().ok_or("no window")?;
     // Plain http: no clipboard API, but the page's copy bridge can still copy (see index.html).

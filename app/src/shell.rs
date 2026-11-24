@@ -1267,6 +1267,10 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                     } else {
                         match id.strip_prefix("ui:") {
                             Some(dialog) => app.open_dialog(dialog, json!({})),
+                            // Through the clipboard, as the cell menu does: Copy/Cut also fill the
+                            // system clipboard, Paste takes the last copy (cells or text).
+                            None if matches!(*id, "edit.copy" | "edit.cut") => app.copy_to_clipboard(ui.ctx(), id),
+                            None if *id == "edit.paste" => app.paste_from_clipboard(),
                             None => app.run_or_alert(id, json!({})),
                         }
                     }
