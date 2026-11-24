@@ -57,6 +57,11 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
   copy is still exactly that (nothing changed since it read the file), Welcome brings only a
   fingerprint to check. Whole workbooks and sheets travel with what their array formulas spill
   (JSON leaves it out), so no tab recalculates the whole file to show them.
+- Messages of 64 KB or more travel compressed as binary frames (deflate, fast): a whole workbook
+  of two million cells is 140 MB of JSON and 15.5 MB packed (about 80 ms to pack, 50 ms to
+  unpack). A binary format instead of JSON was not taken: GridCraft's types skip empty fields
+  when serialising, which non-self-describing formats can't read back, and packing already
+  removes most of the size.
 - Saving runs on its own thread; the file lock is held only for the write, and the "changed
   outside StarSheets" check waits while our own save is writing.
 - The server finds an open file by its index entry and one file check, and lists the folder

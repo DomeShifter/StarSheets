@@ -591,7 +591,10 @@ impl Live {
         if let (Some(ws), true) = (&self.ws, self.open)
             && let Ok(t) = serde_json::to_string(m)
         {
-            let _ = ws.send_with_str(&t);
+            let _ = match sync::pack(&t) {
+                Some(packed) => ws.send_with_u8_array(&packed),
+                None => ws.send_with_str(&t),
+            };
         }
     }
 
@@ -628,7 +631,18 @@ impl Live {
         let open = on(self.inbox.clone(), ctx.clone(), |_| Some(Event::Open));
         let close = on(self.inbox.clone(), ctx.clone(), |_| Some(Event::Closed));
         let message = on(self.inbox.clone(), ctx.clone(), |e| {
-            let text = e.dyn_into::<web_sys::MessageEvent>().ok()?.data().as_string()?;
+            let data = e.dyn_into::<web_sys::MessageEvent>().ok()?.data();
+            // Big messages come compressed, as binary frames (sync::pack).
+            let text = match data.as_string() {
+                Some(t) => t,
+                None => match sync::unpack(&js_sys::Uint8Array::new(&data).to_vec()) {
+                    Ok(t) => t,
+                    Err(err) => {
+                        log::warn!("live editing: {err}");
+                        return None;
+                    }
+                },
+            };
             match serde_json::from_str::<ToClient>(&text) {
                 Ok(m) => Some(Event::Msg(m)),
                 Err(err) => {
@@ -637,6 +651,7 @@ impl Live {
                 }
             }
         });
+        ws.set_binary_type(web_sys::BinaryType::Arraybuffer);
         ws.set_onopen(Some(open.as_ref().unchecked_ref()));
         ws.set_onclose(Some(close.as_ref().unchecked_ref()));
         ws.set_onmessage(Some(message.as_ref().unchecked_ref()));

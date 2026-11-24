@@ -391,3 +391,14 @@ fn a_formula_result_moving_on_its_own_is_not_part_of_the_change() {
     };
     assert_eq!(change_fingerprint(&base, &edited(1.0)), change_fingerprint(&base, &edited(2.0)));
 }
+
+/// Big messages travel compressed and come back exactly; small ones aren't packed.
+#[test]
+fn big_messages_pack_and_unpack() {
+    assert!(pack("{\"t\":\"undo\"}").is_none());
+    let big = format!("[{}]", vec!["{\"v\":1.5,\"style\":0}"; 20_000].join(","));
+    let packed = pack(&big).expect("big enough");
+    assert!(packed.len() * 10 < big.len(), "repetitive JSON shrinks a lot");
+    assert_eq!(unpack(&packed).unwrap(), big);
+    assert!(unpack(b"not deflate").is_err());
+}

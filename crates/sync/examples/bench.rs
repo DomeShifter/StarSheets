@@ -77,6 +77,10 @@ fn main() {
     let opened = rep.time("Open the .xlsx (as the browser and server do)", || gridcraft_engine::io::open_bytes("bench.xlsx", &xlsx).expect("open").0);
     let json = rep.time("Whole workbook as JSON (the server's Welcome)", || starsheets_sync::workbook_json(&opened));
     rep.note(format!("{:.1} MB", json.get().len() as f64 / 1e6));
+    let packed = rep.time("Compress it for the wire", || starsheets_sync::pack(json.get()).expect("big"));
+    rep.note(format!("{:.1} MB", packed.len() as f64 / 1e6));
+    rep.time("Uncompress it (the tab)", || starsheets_sync::unpack(&packed).expect("unpack"));
+    drop(packed);
     let spills = starsheets_sync::workbook_spills(&opened);
     let back = rep.time("Read that JSON back (a tab that gets it whole)", || {
         starsheets_sync::workbook_from_parts(&json, &spills, Some(&opened)).expect("json")

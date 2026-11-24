@@ -25,7 +25,8 @@ use serde_json::Value as Json;
 /// 5: Hello says which version of the file the tab already has; Welcome can then leave the
 /// workbook out; spilled array values travel with whole workbooks and sheets.
 /// 6: a formula whose result alone moved (NOW()) is left out of an edit's fingerprint.
-pub const PROTOCOL: u32 = 6;
+/// 7: messages from `PACK_FROM` bytes on travel compressed as binary frames.
+pub const PROTOCOL: u32 = 7;
 
 pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
     Some(b) => b,
@@ -547,6 +548,32 @@ pub fn apply_patch(current: &Workbook, patch: &Patch) -> Result<Workbook, String
     keep_workbook_unserialized(&mut wb, current);
     put_spills(&mut wb, &patch.spills);
     Ok(wb)
+}
+
+// ---------------------------------------------------------------- big messages on the wire
+
+/// Messages at least this long travel compressed, as a binary WebSocket frame (protocol 7);
+/// shorter ones stay text frames. A whole workbook is mostly repeated JSON keys, so it shrinks a
+/// lot (140 MB to a few MB for two million cells), which matters most away from home.
+pub const PACK_FROM: usize = 64 * 1024;
+
+/// `text` compressed for a binary frame, when it is long enough to be worth it.
+pub fn pack(text: &str) -> Option<Vec<u8>> {
+    use std::io::Write as _;
+    if text.len() < PACK_FROM {
+        return None;
+    }
+    let mut e = flate2::write::DeflateEncoder::new(Vec::with_capacity(text.len() / 8), flate2::Compression::fast());
+    e.write_all(text.as_bytes()).ok()?;
+    e.finish().ok()
+}
+
+/// The text of a binary frame made by [`pack`].
+pub fn unpack(bytes: &[u8]) -> Result<String, String> {
+    use std::io::Read as _;
+    let mut out = String::new();
+    flate2::read::DeflateDecoder::new(bytes).read_to_string(&mut out).map_err(|e| format!("unreadable message: {e}"))?;
+    Ok(out)
 }
 
 // ---------------------------------------------------------------- fingerprints

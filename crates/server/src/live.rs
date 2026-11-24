@@ -185,19 +185,33 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
                     break;
                 }
             },
-            incoming = socket.recv() => match incoming {
-                Some(Ok(Message::Text(t))) => match serde_json::from_str::<ToServer>(&t) {
+            incoming = socket.recv() => {
+                // Big messages come compressed, as binary frames (sync::pack).
+                let t = match incoming {
+                    Some(Ok(Message::Text(t))) => Ok(t.to_string()),
+                    Some(Ok(Message::Binary(b))) => tokio::task::spawn_blocking(move || sync::unpack(&b)).await.unwrap_or_else(|e| Err(e.to_string())),
+                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    _ => break,
+                };
+                match t.and_then(|t| serde_json::from_str::<ToServer>(&t).map_err(|e| e.to_string())) {
                     Ok(msg) => app.rooms.send(&app, &file, RoomMsg::From { client: client.clone(), msg }),
                     Err(e) => {
                         let _ = socket.send(Message::Text(text(&ToClient::Message { text: format!("bad message: {e}") }).into())).await;
                     }
-                },
-                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Binary(_))) => {}
-                _ => break,
+                }
             },
             outgoing = outbox.recv() => match outgoing {
                 Some(t) => {
-                    if socket.send(Message::Text(t.into())).await.is_err() {
+                    let m = if t.len() >= sync::PACK_FROM {
+                        match tokio::task::spawn_blocking(move || sync::pack(&t).ok_or(t)).await {
+                            Ok(Ok(packed)) => Message::Binary(packed.into()),
+                            Ok(Err(t)) => Message::Text(t.into()),
+                            Err(_) => break,
+                        }
+                    } else {
+                        Message::Text(t.into())
+                    };
+                    if socket.send(m).await.is_err() {
                         break;
                     }
                 }
