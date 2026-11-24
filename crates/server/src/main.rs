@@ -912,7 +912,9 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     }
     // StarDocs reads a document with a plain GET (spreadsheets open through their live room,
     // which notes this itself): it counts as opened, for Recent.
-    if m == "GET" && p.len() == 2 && p[0] == "files"
+    if m == "GET"
+        && p.len() == 2
+        && p[0] == "files"
         && let Some(u) = me.clone()
     {
         let id = p[1].clone();
