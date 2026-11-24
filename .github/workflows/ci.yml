@@ -133,7 +133,8 @@ jobs:
         with:
           key: lint
       - name: Formatting
-        run: cargo fmt --all --check
+        # Our packages only: GridCraft (upstream/) keeps its own formatting.
+        run: cargo fmt -p starsheets -p starsheets-server -p starsheets-sync --check
       - name: Clippy (web app)
         run: cargo clippy -p starsheets --target wasm32-unknown-unknown -- -D warnings
       - name: Clippy (server and sync, with tests)

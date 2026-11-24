@@ -22,7 +22,7 @@ matching Google Sheets is the goal.
    cd app && trunk build --release       # the web app, in app/dist/
    cargo test -p starsheets -p starsheets-server -p starsheets-sync
    ```
-   Before a pull request: `cargo fmt --all`, and no clippy warnings
+   Before a pull request: `cargo fmt -p starsheets -p starsheets-server -p starsheets-sync`, and no clippy warnings
    (`cargo clippy -p starsheets --target wasm32-unknown-unknown`, and
    `cargo clippy -p starsheets-server -p starsheets-sync --all-targets`). CI checks both.
 3. Keep pull requests small and about one thing. Say what it changes for someone using StarSheets.
