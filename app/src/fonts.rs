@@ -66,13 +66,19 @@ impl WebFontLoader {
             self.requested.insert(name.clone());
             let folder = slug(menu);
             let ctx = ctx.clone();
+            // All four faces are handed over together: each addition makes GridCraft rebuild its
+            // font set (and its glyph atlas), so one at a time cost four rebuilds per font.
             wasm_bindgen_futures::spawn_local(async move {
+                let mut got = Vec::new();
                 for (file, bold, italic) in [("regular", false, false), ("bold", true, false), ("italic", false, true), ("bolditalic", true, true)] {
                     if let Ok((200, _, bytes)) = crate::files::get_bytes(&format!("webfonts/{folder}/{file}.ttf")).await {
-                        gridcraft_ui_egui::fonts::add_web_face(&name, bold, italic, bytes);
-                        ctx.request_repaint();
+                        got.push((bold, italic, bytes));
                     }
                 }
+                for (bold, italic, bytes) in got {
+                    gridcraft_ui_egui::fonts::add_web_face(&name, bold, italic, bytes);
+                }
+                ctx.request_repaint();
             });
         }
     }
