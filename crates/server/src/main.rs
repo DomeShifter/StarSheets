@@ -445,6 +445,7 @@ async fn accounts(
                     auth::remove(&app.store, &who)?;
                     // Their folder goes to the owner as "Removed – <username>"; their shares go.
                     let moved = spaces::retire(&app.store, &who).map_err(|e| e.to_string())?;
+                    app.rooms.recheck_access();
                     if let Some(to) = &moved {
                         log::note(&app.store, &format!("account {who:?} removed; their folder is now {to:?}"));
                     }
@@ -1307,6 +1308,14 @@ async fn handle(State(app): State<Shared>, req: Request) -> Response<Body> {
                     let who = me.username.clone();
                     blocking(&app, move |a| spaces::note_changed(&a.store, &id, &who)).await;
                 }
+            }
+            // Sharing changed, or something moved (ownership follows the folder): open live rooms
+            // check everyone's access again now, rather than at their next 30-second check.
+            if r.is_ok()
+                && (m2 == "DELETE" || m2 == "POST")
+                && p2.last().is_some_and(|l| m2 == "DELETE" || matches!(l.as_str(), "sharing" | "move" | "rename" | "restore"))
+            {
+                app.rooms.recheck_access();
             }
             if app.auth
                 && let Some(me) = me

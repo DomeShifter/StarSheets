@@ -130,9 +130,6 @@ impl Rooms {
     /// made owner or not): every open file checks again who may still have it open. Someone who
     /// lost access is told and disconnected; someone whose role changed gets the file again as
     /// a viewer or an editor. Cheap: one message per open file; the check runs in each room.
-    // Called from main.rs after sharing and account changes; until that call is added there
-    // (the same change set), only the tests use it. Remove this allow once it is.
-    #[allow(dead_code)]
     pub fn recheck_access(&self) {
         for tx in self.map.lock().unwrap_or_else(|e| e.into_inner()).values() {
             let _ = tx.send(RoomMsg::Recheck);
