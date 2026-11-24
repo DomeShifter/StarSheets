@@ -26,7 +26,10 @@ use serde_json::Value as Json;
 /// workbook out; spilled array values travel with whole workbooks and sheets.
 /// 6: a formula whose result alone moved (NOW()) is left out of an edit's fingerprint.
 /// 7: messages from `PACK_FROM` bytes on travel compressed as binary frames.
-pub const PROTOCOL: u32 = 7;
+/// 8: the server names each connection (Welcome `you`; Applied, People and Presence use that
+/// name), so one tab can't pass itself off as another; `NoAccess` when the file stops being
+/// shared with you while it's open.
+pub const PROTOCOL: u32 = 8;
 
 pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
     Some(b) => b,
@@ -41,7 +44,9 @@ pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c", rename_all = "snake_case")]
 pub enum ToServer {
-    /// First message: the file (its id), the tab's build and a random id for this tab.
+    /// First message: the file (its id), the tab's build and a random id for this tab. The id
+    /// only lets the same person's tab undo its own earlier changes after reconnecting; the
+    /// server names the connection itself (Welcome `you`, protocol 8).
     Hello {
         file: String,
         build: String,
@@ -106,6 +111,11 @@ pub enum ToClient {
         /// Who changed the file last and when, where known (the title row's save symbol).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         last_edit: Option<LastEdit>,
+        /// This connection's name, made by the server: `Applied`, `People` and `Presence` call
+        /// this tab that (protocol 8). A Welcome can come again on an open connection when what
+        /// you may do changes (your sharing was changed to view only, or back).
+        #[serde(default)]
+        you: String,
     },
     /// A change everyone applies (also the sender's acknowledgement).
     Applied { seq: u64, client: String, cseq: u64, change: Change },
@@ -136,6 +146,8 @@ pub enum ToClient {
     People { people: Vec<Person>, you: String },
     /// Where someone is.
     Presence { client: String, sheet: usize, sel: Selection },
+    /// You may not open this file (any more): the tab stops connecting and keeps what it shows.
+    NoAccess { text: String },
 }
 
 fn yes() -> bool {
@@ -568,12 +580,42 @@ pub fn pack(text: &str) -> Option<Vec<u8>> {
     e.finish().ok()
 }
 
-/// The text of a binary frame made by [`pack`].
+/// The biggest frame the server takes from a tab (compressed or not); bigger ones end the
+/// connection. A tab's biggest message is a change sent as its finished state: the sheets it
+/// changed, in full. Two million cells are 140 MB of JSON and 15.5 MB packed, so 16 MB carries a
+/// change to a sheet of about two million cells, more than a browser tab edits comfortably.
+/// (The server's own messages to tabs, such as a whole workbook, aren't limited by this.)
+pub const MAX_FRAME: usize = 16 * 1024 * 1024;
+
+/// The longest message a packed frame may unpack to. Deflate can grow up to about a thousand
+/// times, so a 16 MB frame could otherwise become 16 GB on the server. 256 MB is about 3.5
+/// million cells of JSON, above what a full 16 MB frame of ordinary cells unpacks to (about
+/// 145 MB); only very repetitive sheets pack smaller, and the tab checks both limits first.
+pub const MAX_UNPACKED: usize = 256 * 1024 * 1024;
+// A full frame of ordinary cells must unpack within the limit.
+const _: () = assert!(MAX_UNPACKED > MAX_FRAME * 9);
+
+/// The text of a binary frame made by [`pack`]; refused when it unpacks to more than
+/// [`MAX_UNPACKED`] bytes.
 pub fn unpack(bytes: &[u8]) -> Result<String, String> {
+    unpack_at_most(bytes, MAX_UNPACKED)
+}
+
+fn unpack_at_most(bytes: &[u8], limit: usize) -> Result<String, String> {
     use std::io::Read as _;
     let mut out = String::new();
-    flate2::read::DeflateDecoder::new(bytes).read_to_string(&mut out).map_err(|e| format!("unreadable message: {e}"))?;
+    flate2::read::DeflateDecoder::new(bytes).take(limit as u64 + 1).read_to_string(&mut out).map_err(|e| format!("unreadable message: {e}"))?;
+    if out.len() > limit {
+        return Err(format!("message too big: it unpacks to more than {} MB", limit / (1024 * 1024)));
+    }
     Ok(out)
+}
+
+/// Whether a message of this text fits what the server takes (see [`MAX_FRAME`]): the tab
+/// checks before sending, so a change too big to send is dropped and said, not sent over and
+/// over (the server would end the connection each time, and the tab would send it again).
+pub fn fits(text: &str, packed: Option<&[u8]>) -> bool {
+    text.len() <= MAX_UNPACKED && packed.map_or(text.len(), <[u8]>::len) <= MAX_FRAME
 }
 
 // ---------------------------------------------------------------- fingerprints

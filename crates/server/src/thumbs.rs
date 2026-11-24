@@ -14,6 +14,7 @@
 
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use ab_glyph::{Font as _, FontRef, PxScale, ScaleFont as _};
 use gridcraft_engine::core::{CellRef, Value};
@@ -34,8 +35,14 @@ pub const DRAW_TAG: &str = "d2";
 /// Files bigger than this aren't read only to draw a picture.
 pub const MAX_READ: u64 = 8 * 1024 * 1024;
 
-/// One picture at a time.
-pub static DRAWING: Mutex<()> = Mutex::new(());
+/// One picture at a time, opening the file included (security review #11): many preview
+/// requests at once each unpacking a file (up to GridCraft's 1 GB limit for one package) could
+/// otherwise use up the server's memory. Opening only for a picture can't be limited more
+/// tightly without a change in GridCraft (its zip limits are fixed constants).
+static DRAWING: Mutex<()> = Mutex::new(());
+/// Files waiting to be opened for a picture, and the most that may wait.
+static WAITING: AtomicUsize = AtomicUsize::new(0);
+const MAX_WAITING: usize = 16;
 
 static REGULAR: &[u8] = include_bytes!("../../../app/fonts/Roboto-Regular.ttf");
 static BOLD: &[u8] = include_bytes!("../../../app/fonts/Roboto-Bold.ttf");
@@ -113,11 +120,27 @@ pub fn forget(store: &Store, file: &str) {
 
 /// Opens a spreadsheet file's bytes (xlsx, csv, ods…) and draws it.
 pub fn from_bytes(name: &str, bytes: &[u8]) -> Result<Vec<u8>, String> {
+    // Each waiting request holds its file's bytes (up to MAX_READ): past a few, say "not now"
+    // (the app shows a plain icon and asks again another time).
+    struct Waiting;
+    impl Drop for Waiting {
+        fn drop(&mut self) {
+            WAITING.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+    if WAITING.fetch_add(1, Ordering::Relaxed) >= MAX_WAITING {
+        WAITING.fetch_sub(1, Ordering::Relaxed);
+        return Err("too many pictures waiting".into());
+    }
+    let waiting = Waiting;
+    let _one = DRAWING.lock().unwrap_or_else(|e| e.into_inner());
+    drop(waiting);
     let mut s = gridcraft_engine::Session::new();
     let b64 = gridcraft_engine::io::base64_encode(bytes);
     s.execute("file.open", serde_json::json!({ "name": name, "base64": b64 })).map_err(|e| e.to_string())?;
     let wb = s.active().map(|d| d.wb.clone()).ok_or("nothing opened")?;
-    draw(&wb)
+    drop(s);
+    draw_one(&wb)
 }
 
 fn rgb(c: [u8; 3]) -> Color {
@@ -127,6 +150,11 @@ fn rgb(c: [u8; 3]) -> Color {
 /// Draws the top-left corner of the active sheet as a PNG.
 pub fn draw(wb: &Workbook) -> Result<Vec<u8>, String> {
     let _one = DRAWING.lock().unwrap_or_else(|e| e.into_inner());
+    draw_one(wb)
+}
+
+/// [`draw`], with DRAWING already held.
+fn draw_one(wb: &Workbook) -> Result<Vec<u8>, String> {
     let mut pm = Pixmap::new(WIDTH, HEIGHT).ok_or("no picture")?;
     pm.fill(Color::WHITE);
     let Some(sh) = wb.sheet(wb.active_sheet()).or_else(|| wb.sheet(0)) else { return encode(&pm) };
