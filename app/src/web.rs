@@ -308,7 +308,7 @@ impl eframe::App for WebShell {
         // Before GridCraft draws: its alerts are shown as house dialogs instead.
         self.messages.ui(&mut self.app, &ctx);
         self.spell.before(&ctx);
-        self.edit_menu.before(&ctx);
+        self.edit_menu.before(&mut self.app, &ctx);
         self.find.keys(&self.app, &ctx);
         crate::dvpanel::delete_key(&mut self.app);
         // Whether the grid gets this frame's keys: not when a box just let go of them, nor while

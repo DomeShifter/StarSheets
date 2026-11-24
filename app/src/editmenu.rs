@@ -25,6 +25,11 @@ pub struct EditMenu {
     pasted: Rc<RefCell<Option<String>>>,
     /// The "use Ctrl+V" note, when the browser won't let a page read the clipboard.
     paste_note: bool,
+    /// The selection (anchor, caret) as the right button went down. egui's text box moves the
+    /// caret to the pointer on ANY press (egui text_cursor_state.rs: `any_pressed`), which
+    /// cleared the selection before the menu could cut or copy it (to-do 3 row 14, James's
+    /// test): it is put back on every frame until the button is let go.
+    kept: Option<(usize, usize)>,
 }
 
 /// `text` without the characters `a..b` (character indexes), and that text.
@@ -56,10 +61,30 @@ fn over_editor(ctx: &egui::Context, at: egui::Pos2) -> bool {
 }
 
 impl EditMenu {
-    /// Call before the grid: Esc closes the menu only, it must not cancel the cell.
-    pub fn before(&mut self, ctx: &egui::Context) {
+    /// Call before the grid: Esc closes the menu only, it must not cancel the cell; a right
+    /// press on the text keeps its selection (see `kept`).
+    pub fn before(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         if self.open.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.escape = true;
+        }
+        let (pressed, held) = ctx.input(|i| (i.pointer.secondary_pressed(), i.pointer.secondary_down() || i.pointer.secondary_released()));
+        let Some(e) = app.editor.as_mut() else {
+            self.kept = None;
+            return;
+        };
+        if pressed && ctx.input(|i| i.pointer.interact_pos()).is_some_and(|p| over_editor(ctx, p)) {
+            self.kept = Some((e.anchor, e.caret));
+        }
+        match self.kept {
+            // Given back to the text box after it has handled the press (formula_bar.rs applies
+            // anchor..caret when keep_selection is set), so the highlight never goes.
+            Some((anchor, caret)) if held => {
+                e.anchor = anchor;
+                e.caret = caret;
+                e.keep_selection = true;
+                e.request_focus = true;
+            }
+            _ => self.kept = None,
         }
     }
 
