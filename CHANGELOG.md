@@ -23,6 +23,7 @@ new features and the last one for fixes.
 - Saving a big file no longer holds up other people's edits or other files while it writes.
 - When the server does send a whole big file to a tab, it sends about a ninth of the data
   (compressed): much quicker away from home.
+- A big spreadsheet shows "Opening …" while it is read, instead of a still page.
 - Fixed: a sheet with NOW() or RAND() could make some edits take the slow way to the server
   (the check compared the clock-driven result, which differs between the tab and the server).
 - Fixed: after an undo (and some other changes), saving could drop parts of a sheet StarSheets

@@ -100,6 +100,9 @@ pub struct Files {
     renaming: bool,
     /// File › Details is showing.
     details: bool,
+    /// A big file that arrived and is opened next frame, after "Opening …" has been drawn once:
+    /// reading it keeps the page busy for a few seconds (two million cells: about three).
+    opening: Option<(Reply, bool)>,
 }
 
 impl Files {
@@ -142,8 +145,22 @@ impl Files {
                 get_file(id, self.inbox.clone(), ctx.clone());
             }
         }
+        if let Some((r, shown)) = self.opening.take() {
+            if shown {
+                self.handle(app, ctx, r);
+            } else {
+                self.opening = Some((r, false));
+            }
+        }
         let replies: Vec<Reply> = std::mem::take(&mut *self.inbox.borrow_mut());
         for r in replies {
+            if let Reply::Opened { bytes, .. } = &r
+                && bytes.len() >= OPENING_NOTICE_FROM
+            {
+                self.opening = Some((r, false));
+                ctx.request_repaint();
+                continue;
+            }
             self.handle(app, ctx, r);
         }
         if let (Some((name, folder)), Some(l)) = (crate::live::take_moved(), self.link.as_mut()) {
@@ -517,6 +534,18 @@ impl Files {
 
     /// The file window and the version list.
     pub fn ui(&mut self, app: &mut SheetApp, ui: &mut Ui) {
+        if let Some((Reply::Opened { name, .. }, shown)) = &mut self.opening {
+            egui::Area::new(egui::Id::unique("starsheets_opening"))
+                .order(egui::Order::Foreground)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ui.ctx(), |ui| {
+                    crate::house::card_frame().show(ui, |ui| {
+                        ui.label(egui::RichText::new(format!("Opening {}…", stem(name))).size(crate::house::BODY).color(crate::theme::TEXT))
+                    });
+                });
+            *shown = true;
+            ui.ctx().request_repaint();
+        }
         let keys = std::mem::take(&mut self.browser_keys);
         for action in self.browser.ui(ui.ctx(), &keys) {
             self.act(app, ui.ctx(), action);
@@ -767,6 +796,9 @@ pub(crate) fn xlsx(wb: &Workbook, name: &str) -> Result<Vec<u8>, String> {
     starsheets_sync::clip_into_host(&mut wb);
     gridcraft_engine::io::save_bytes(&wb, name).map_err(|e| e.to_string())
 }
+
+/// Files from this size on show "Opening …" before they are read (smaller ones open at once).
+const OPENING_NOTICE_FROM: usize = 512 * 1024;
 
 fn has_data(wb: &Workbook) -> bool {
     wb.sheets.iter().any(|s| {

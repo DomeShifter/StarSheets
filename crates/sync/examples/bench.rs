@@ -7,7 +7,8 @@
 //! million cells, plus one big tab of BENCH_BIG_ROWS rows (default 100,000: another million).
 //! Each row: 8 numbers, a text and a formula (the row's sum). CI runs it and
 //! puts the table in the job summary, so a slowdown shows up next to the change that caused it.
-//! The numbers are for comparing runs on the same machine, not a pass/fail test.
+//! The numbers are for comparing runs on the same machine, not a pass/fail test. BENCH_SAVE=path
+//! also writes the .xlsx there, to open it in the app.
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -74,6 +75,10 @@ fn main() {
     rep.time("Calculate every formula", || gridcraft_engine::calc::Calc::new().recalc_all(&mut wb));
     let xlsx = rep.time("Save as .xlsx", || gridcraft_engine::io::save_bytes(&wb, "bench.xlsx").expect("save"));
     rep.note(format!("{:.1} MB", xlsx.len() as f64 / 1e6));
+    // BENCH_SAVE=path keeps the file, to try it in the app.
+    if let Ok(path) = std::env::var("BENCH_SAVE") {
+        let _ = std::fs::write(path, &xlsx);
+    }
     let opened = rep.time("Open the .xlsx (as the browser and server do)", || gridcraft_engine::io::open_bytes("bench.xlsx", &xlsx).expect("open").0);
     let json = rep.time("Whole workbook as JSON (the server's Welcome)", || starsheets_sync::workbook_json(&opened));
     rep.note(format!("{:.1} MB", json.get().len() as f64 / 1e6));
