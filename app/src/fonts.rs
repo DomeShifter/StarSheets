@@ -117,7 +117,9 @@ fn preview_family(menu: &str) -> String {
 fn cap_scale(ttf: &[u8]) -> f32 {
     let be16 = |o: usize| ttf.get(o..o + 2).map(|b| u16::from_be_bytes([b[0], b[1]]));
     let be32 = |o: usize| ttf.get(o..o + 4).map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]) as usize);
-    let table = |tag: &[u8; 4]| (0..usize::from(be16(4).unwrap_or(0))).map(|i| 12 + 16 * i).find(|o| ttf.get(*o..*o + 4) == Some(tag)).and_then(|o| be32(o + 8));
+    let table = |tag: &[u8; 4]| {
+        (0..usize::from(be16(4).unwrap_or(0))).map(|i| 12 + 16 * i).find(|o| ttf.get(*o..*o + 4) == Some(tag)).and_then(|o| be32(o + 8))
+    };
     let cap = || {
         let os2 = table(b"OS/2")?;
         let upm = f32::from(be16(table(b"head")? + 18)?);

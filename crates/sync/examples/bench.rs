@@ -78,7 +78,9 @@ fn main() {
     let json = rep.time("Whole workbook as JSON (the server's Welcome)", || starsheets_sync::workbook_json(&opened));
     rep.note(format!("{:.1} MB", json.get().len() as f64 / 1e6));
     let spills = starsheets_sync::workbook_spills(&opened);
-    let back = rep.time("Read that JSON back (a tab that gets it whole)", || starsheets_sync::workbook_from_parts(&json, &spills, Some(&opened)).expect("json"));
+    let back = rep.time("Read that JSON back (a tab that gets it whole)", || {
+        starsheets_sync::workbook_from_parts(&json, &spills, Some(&opened)).expect("json")
+    });
     rep.time("Fingerprint of the whole file (a tab that opened the same version)", || starsheets_sync::fingerprint(&back));
     drop(json);
 

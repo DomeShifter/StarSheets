@@ -38,14 +38,8 @@ const CONDITIONS: &[(&str, &str, &str, u8)] = &[
 
 /// Sheets' preset styles (the menu under "Formatting style"): (text colour, fill). Top row:
 /// green, yellow, red fills; bottom row: the same colours as text only.
-const STYLE_PRESETS: &[(Option<u32>, Option<u32>)] = &[
-    (None, Some(0xB7E1CD)),
-    (None, Some(0xFCE8B2)),
-    (None, Some(0xF4C7C3)),
-    (Some(0x0B8043), None),
-    (Some(0xF09300), None),
-    (Some(0xC5221F), None),
-];
+const STYLE_PRESETS: &[(Option<u32>, Option<u32>)] =
+    &[(None, Some(0xB7E1CD)), (None, Some(0xFCE8B2)), (None, Some(0xF4C7C3)), (Some(0x0B8043), None), (Some(0xF09300), None), (Some(0xC5221F), None)];
 
 /// Colour-scale presets (min, max; Sheets' first row is two-colour, the rest add a midpoint).
 const SCALE_PRESETS: &[&[u32]] = &[
@@ -61,7 +55,8 @@ const SCALE_PRESETS: &[&[u32]] = &[
 ];
 
 /// Point types: label, GridCraft value type ("" = no midpoint).
-const POINT_KINDS: &[(&str, &str)] = &[("None", ""), ("Min value", "min"), ("Max value", "max"), ("Number", "num"), ("Percent", "percent"), ("Percentile", "percentile")];
+const POINT_KINDS: &[(&str, &str)] =
+    &[("None", ""), ("Min value", "min"), ("Max value", "max"), ("Number", "num"), ("Percent", "percent"), ("Percentile", "percentile")];
 
 #[derive(Clone)]
 struct Point {
@@ -141,7 +136,11 @@ impl CfPanel {
         self.open = true;
         self.error = None;
         let h = crate::hostdata::read(app);
-        let has_rules = app.session.active().and_then(|d| d.wb.active()).is_some_and(|sh| sh.cond_formats.iter().any(|cf| !crate::dvpanel::is_item_colour(sh, cf, &h)));
+        let has_rules = app
+            .session
+            .active()
+            .and_then(|d| d.wb.active())
+            .is_some_and(|sh| sh.cond_formats.iter().any(|cf| !crate::dvpanel::is_item_colour(sh, cf, &h)));
         self.draft = if has_rules { None } else { Some(Draft::new(selection_text(app))) };
     }
 
@@ -154,7 +153,9 @@ impl CfPanel {
 
     /// Takes over GridCraft's own conditional-formatting dialogs (they open from its commands).
     pub fn intercept(&mut self, app: &mut SheetApp) {
-        let ours = app.dialog.as_ref().is_some_and(|d| d.command == Some("home.conditionalFormat") || matches!(d.name.as_str(), "manageRules" | "cfQuick" | "newFormattingRule"));
+        let ours = app.dialog.as_ref().is_some_and(|d| {
+            d.command == Some("home.conditionalFormat") || matches!(d.name.as_str(), "manageRules" | "cfQuick" | "newFormattingRule")
+        });
         if ours {
             app.dialog = None;
             self.open(app);
@@ -197,7 +198,11 @@ impl CfPanel {
                                 self.revert(app);
                                 self.error = None;
                                 let h = crate::hostdata::read(app);
-                                let none_left = app.session.active().and_then(|d| d.wb.active()).is_none_or(|sh| sh.cond_formats.iter().all(|cf| crate::dvpanel::is_item_colour(sh, cf, &h)));
+                                let none_left = app
+                                    .session
+                                    .active()
+                                    .and_then(|d| d.wb.active())
+                                    .is_none_or(|sh| sh.cond_formats.iter().all(|cf| crate::dvpanel::is_item_colour(sh, cf, &h)));
                                 if none_left {
                                     self.open = false;
                                 }
@@ -216,7 +221,8 @@ impl CfPanel {
 
     /// The rule cards: a swatch, what the rule does and its range; click to edit, bin to delete.
     fn list(&mut self, app: &mut SheetApp, ui: &mut Ui) {
-        let Some((rules, theme_colours)) = app.session.active().and_then(|d| d.wb.active().map(|sh| (sh.cond_formats.clone(), d.wb.theme.clone()))) else {
+        let Some((rules, theme_colours)) = app.session.active().and_then(|d| d.wb.active().map(|sh| (sh.cond_formats.clone(), d.wb.theme.clone())))
+        else {
             return;
         };
         let mut delete = None;
@@ -241,7 +247,13 @@ impl CfPanel {
             }
             let sw = egui::Rect::from_min_size(r.min + vec2(4.0, 8.0), vec2(44.0, 44.0));
             paint_swatch(p, sw, &cf.rule, &theme_colours);
-            p.text(sw.right_center() + vec2(12.0, -9.0), egui::Align2::LEFT_CENTER, describe(&cf.rule), egui::FontId::proportional(13.5), theme::TEXT);
+            p.text(
+                sw.right_center() + vec2(12.0, -9.0),
+                egui::Align2::LEFT_CENTER,
+                describe(&cf.rule),
+                egui::FontId::proportional(13.5),
+                theme::TEXT,
+            );
             p.text(sw.right_center() + vec2(12.0, 10.0), egui::Align2::LEFT_CENTER, ranges, egui::FontId::proportional(12.0), theme::TEXT_DIM);
             // The bin always exists (so the pointer moving onto it doesn't make it vanish) and
             // shows while the card or the bin is hovered.
@@ -287,7 +299,11 @@ impl CfPanel {
             for (i, (label, scale)) in [("Single colour", false), ("Colour scale", true)].into_iter().enumerate() {
                 let on = d.scale == scale;
                 let col = &mut cols[i];
-                let r = col.add(egui::Button::new(RichText::new(label).size(14.0).color(if on { GREEN } else { theme::TEXT })).frame(false).min_size(vec2(col.available_width(), 32.0)));
+                let r = col.add(
+                    egui::Button::new(RichText::new(label).size(14.0).color(if on { GREEN } else { theme::TEXT }))
+                        .frame(false)
+                        .min_size(vec2(col.available_width(), 32.0)),
+                );
                 if on {
                     col.painter().hline(r.rect.x_range().shrink(20.0), r.rect.bottom(), Stroke::new(3.0, GREEN));
                 }
@@ -353,7 +369,9 @@ impl CfPanel {
     /// Puts the draft on the sheet: in place of the preview (or the edited rule), or as a new
     /// rule (GridCraft adds new rules first). Returns the engine's complaint, if any.
     fn apply(&mut self, app: &mut SheetApp, d: &Draft, rule: Json) -> Result<(), String> {
-        if let Some(other) = crate::refs::other_sheet(&d.range, &app.session.active().and_then(|x| x.wb.active()).map(|sh| sh.name.clone()).unwrap_or_default()) {
+        if let Some(other) =
+            crate::refs::other_sheet(&d.range, &app.session.active().and_then(|x| x.wb.active()).map(|sh| sh.name.clone()).unwrap_or_default())
+        {
             return Err(format!("The range must be on this sheet, not \"{other}\"."));
         }
         let mut p = json!({ "range": crate::refs::plain(&d.range), "rule": rule });
@@ -505,7 +523,12 @@ fn single_editor(ui: &mut Ui, d: &mut Draft) {
     Frame::NONE.stroke(Stroke::new(1.0, theme::DIVIDER)).inner_margin(Margin::symmetric(6, 4)).show(ui, |ui| {
         ui.set_width(PANEL_W - 14.0);
         ui.horizontal(|ui| {
-            for (flag, label, tip) in [(&mut d.bold, "B", "Bold"), (&mut d.italic, "I", "Italic"), (&mut d.underline, "U", "Underline"), (&mut d.strike, "S", "Strikethrough")] {
+            for (flag, label, tip) in [
+                (&mut d.bold, "B", "Bold"),
+                (&mut d.italic, "I", "Italic"),
+                (&mut d.underline, "U", "Underline"),
+                (&mut d.strike, "S", "Strikethrough"),
+            ] {
                 let mut t = RichText::new(label).size(15.0);
                 t = match label {
                     "B" => t.strong(),
@@ -687,7 +710,16 @@ fn date_formula(op: &str, when: usize, tl: &str) -> Option<String> {
         return None;
     }
     Some(match (op, when) {
-        ("equal", 1..=3) => format!("=AND(ISNUMBER({tl}),INT({tl})=TODAY(){})", if f == "0" { String::new() } else if f.starts_with('-') { f.to_string() } else { format!("+{f}") }),
+        ("equal", 1..=3) => format!(
+            "=AND(ISNUMBER({tl}),INT({tl})=TODAY(){})",
+            if f == "0" {
+                String::new()
+            } else if f.starts_with('-') {
+                f.to_string()
+            } else {
+                format!("+{f}")
+            }
+        ),
         ("equal", _) => format!("=AND(ISNUMBER({tl}),{tl}>={f},{tl}<=TODAY())"),
         ("less", _) => format!("=AND(ISNUMBER({tl}),{tl}<{f})"),
         _ => format!("=AND(ISNUMBER({tl}),{tl}>={f}+1)"),
@@ -1004,7 +1036,14 @@ mod tests {
         s.execute("home.conditionalFormat", json!({"range": "A1:F13", "rule": rule_json(&d).unwrap()})).unwrap();
         let doc = s.active().unwrap();
         let sh = doc.wb.active().unwrap();
-        let hit = |a1: &str| gridcraft_engine::calc::evaluate(&doc.wb, 0, gridcraft_engine::core::CellRef::parse(a1).unwrap(), &sheets_rows("=$A:$A=12", 1).replace("$A1", &format!("$A{}", &a1[1..])));
+        let hit = |a1: &str| {
+            gridcraft_engine::calc::evaluate(
+                &doc.wb,
+                0,
+                gridcraft_engine::core::CellRef::parse(a1).unwrap(),
+                &sheets_rows("=$A:$A=12", 1).replace("$A1", &format!("$A{}", &a1[1..])),
+            )
+        };
         assert_eq!(hit("F4"), gridcraft_engine::core::Value::Bool(true));
         assert_eq!(hit("C5"), gridcraft_engine::core::Value::Bool(false));
         assert!(matches!(&sh.cond_formats[0].rule, gridcraft_engine::model::CfRule::Expression { formula, .. } if formula.contains("$A1")));

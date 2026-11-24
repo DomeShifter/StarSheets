@@ -49,7 +49,11 @@ impl CalcPreview {
                 crate::house::bubble_frame().show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(&text).size(14.0).color(Color32::from_rgb(0x1A, 0x73, 0xE8)));
-                        if ui.add(egui::Button::new(RichText::new("×").size(14.0).color(Color32::from_gray(0x80))).frame(false)).on_hover_text("Hide").clicked() {
+                        if ui
+                            .add(egui::Button::new(RichText::new("×").size(14.0).color(Color32::from_gray(0x80))).frame(false))
+                            .on_hover_text("Hide")
+                            .clicked()
+                        {
                             close = true;
                         }
                     });

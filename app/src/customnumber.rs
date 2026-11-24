@@ -62,7 +62,12 @@ impl CustomNumber {
         let mut closed = false;
         house::dialog(ctx, "starsheets_custom_number", 470.0, "Custom number formats", Some(&mut closed), |ui| {
             ui.horizontal(|ui| {
-                let r = ui.add(egui::TextEdit::singleline(code).desired_width(470.0 - 88.0 - house::S - 2.0 * house::M).margin(vec2(house::M, house::S + 1.0)).hint_text("e.g. #,##0.00"));
+                let r = ui.add(
+                    egui::TextEdit::singleline(code)
+                        .desired_width(470.0 - 88.0 - house::S - 2.0 * house::M)
+                        .margin(vec2(house::M, house::S + 1.0))
+                        .hint_text("e.g. #,##0.00"),
+                );
                 if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     done = Some(true);
                 }
@@ -136,7 +141,8 @@ impl CustomNumber {
 
 /// `value` in format `code`, or a note that the code isn't valid.
 fn sample(value: &Value, code: &str) -> String {
-    gridcraft_engine::numfmt::text_function(value, code, gridcraft_engine::core::date::DateSystem::default()).unwrap_or_else(|_| "(not a valid format)".to_string())
+    gridcraft_engine::numfmt::text_function(value, code, gridcraft_engine::core::date::DateSystem::default())
+        .unwrap_or_else(|_| "(not a valid format)".to_string())
 }
 
 #[cfg(test)]

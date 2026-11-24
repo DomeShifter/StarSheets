@@ -194,11 +194,9 @@ impl ProtectPanel {
         if !self.open {
             return;
         }
-        egui::Panel::right("starsheets_protect")
-            .exact_size(PANEL_W + 32.0 + house::SCROLL_ROOM)
-            .resizable(false)
-            .frame(house::panel_frame())
-            .show(ui, |ui| {
+        egui::Panel::right("starsheets_protect").exact_size(PANEL_W + 32.0 + house::SCROLL_ROOM).resizable(false).frame(house::panel_frame()).show(
+            ui,
+            |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Protected sheets and ranges").size(16.0).color(theme::TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -220,7 +218,8 @@ impl ProtectPanel {
                         self.list(app, ui);
                     }
                 });
-            });
+            },
+        );
     }
 
     fn list(&mut self, app: &mut SheetApp, ui: &mut Ui) {
@@ -231,7 +230,10 @@ impl ProtectPanel {
         ui.add_space(house::S);
         let list = entries(app);
         if list.is_empty() {
-            house::note(ui, "Nothing is protected. Protecting a range or sheet stops it being changed by accident: edits are refused, or you are warned first.");
+            house::note(
+                ui,
+                "Nothing is protected. Protecting a range or sheet stops it being changed by accident: edits are refused, or you are warned first.",
+            );
         }
         for e in list {
             let what = if e.meta.sheet { sheet_name(app, e.sheet) } else { format!("{}!{}", sheet_name(app, e.sheet), e.range.a1()) };
@@ -263,13 +265,19 @@ impl ProtectPanel {
         let sheets: Vec<String> = app.session.active().map(|d| d.wb.sheets.iter().map(|s| s.name.clone()).collect()).unwrap_or_default();
         let Some(d) = self.draft.as_mut() else { return };
         house::label(ui, "Description", "");
-        ui.add(egui::TextEdit::singleline(&mut d.desc).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("Enter a description"));
+        ui.add(
+            egui::TextEdit::singleline(&mut d.desc).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("Enter a description"),
+        );
         house::gap(ui);
         let mut mode = usize::from(d.sheet_mode);
         ui.horizontal(|ui| {
             for (i, label) in ["Range", "Sheet"].iter().enumerate() {
                 let on = mode == i;
-                let r = ui.add(egui::Button::new(RichText::new(*label).size(house::BODY).color(if on { house::GREEN } else { theme::TEXT_DIM })).frame(false).min_size(vec2(PANEL_W / 2.0 - 4.0, 36.0)));
+                let r = ui.add(
+                    egui::Button::new(RichText::new(*label).size(house::BODY).color(if on { house::GREEN } else { theme::TEXT_DIM }))
+                        .frame(false)
+                        .min_size(vec2(PANEL_W / 2.0 - 4.0, 36.0)),
+                );
                 if on {
                     ui.painter().hline(r.rect.x_range().shrink(8.0), r.rect.bottom(), Stroke::new(3.0, house::GREEN));
                 }
@@ -288,10 +296,20 @@ impl ProtectPanel {
             }
             ui.checkbox(&mut d.except_on, "Except certain cells");
             if d.except_on {
-                ui.add(egui::TextEdit::singleline(&mut d.except).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("e.g. A1:B10, D2:D20"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut d.except)
+                        .desired_width(PANEL_W)
+                        .margin(vec2(house::M, house::S + 1.0))
+                        .hint_text("e.g. A1:B10, D2:D20"),
+                );
             }
         } else {
-            ui.add(egui::TextEdit::singleline(&mut d.range).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("e.g. Sheet1!A1:D10"));
+            ui.add(
+                egui::TextEdit::singleline(&mut d.range)
+                    .desired_width(PANEL_W)
+                    .margin(vec2(house::M, house::S + 1.0))
+                    .hint_text("e.g. Sheet1!A1:D10"),
+            );
         }
         house::gap(ui);
         house::label(ui, "When someone edits it", "");
@@ -320,11 +338,20 @@ impl ProtectPanel {
                 let (sheet, refers) = if d.sheet_mode {
                     (d.sheet, format!("={}!$A$1:$XFD$1048576", quoted(sheets.get(d.sheet).map_or("", String::as_str))))
                 } else {
-                    let si = d.range.rsplit_once('!').and_then(|(s, _)| app.session.active().and_then(|x| x.wb.sheet_index(s.trim_matches('\'')))).unwrap_or_else(|| app.session.active().map_or(0, |x| x.wb.active_sheet()));
+                    let si = d
+                        .range
+                        .rsplit_once('!')
+                        .and_then(|(s, _)| app.session.active().and_then(|x| x.wb.sheet_index(s.trim_matches('\''))))
+                        .unwrap_or_else(|| app.session.active().map_or(0, |x| x.wb.active_sheet()));
                     let body = d.range.rsplit_once('!').map_or(d.range.as_str(), |(_, b)| b);
                     (si, format!("={}!{}", quoted(sheets.get(si).map_or("", String::as_str)), crate::namespanel::absolute(body.trim())))
                 };
-                let meta = Meta { d: d.desc.trim().to_string(), sheet: d.sheet_mode, warn: d.warn, except: if d.except_on { d.except.trim().to_string() } else { String::new() } };
+                let meta = Meta {
+                    d: d.desc.trim().to_string(),
+                    sheet: d.sheet_mode,
+                    warn: d.warn,
+                    except: if d.except_on { d.except.trim().to_string() } else { String::new() },
+                };
                 let name = d.old.clone().unwrap_or_else(|| {
                     let have: Vec<String> = entries(app).into_iter().map(|e| e.name).collect();
                     (1..).map(|i| format!("{PREFIX}{i}")).find(|n| !have.contains(n)).unwrap_or_default()
@@ -450,10 +477,21 @@ mod tests {
         let mut s = gridcraft_engine::Session::new();
         s.execute("file.new", json!({})).unwrap();
         let old = Meta { d: "Old".into(), sheet: false, warn: true, except: String::new() };
-        s.execute("formulas.defineName", json!({ "name": format!("{PREFIX}1"), "refersTo": "=Sheet1!$A$1:$B$2", "comment": serde_json::to_string(&old).unwrap(), "force": true })).unwrap();
-        s.execute("formulas.defineName", json!({ "name": format!("{PREFIX}2"), "refersTo": "=Sheet1!$C$1:$C$2", "comment": "Totals", "force": true })).unwrap();
+        s.execute(
+            "formulas.defineName",
+            json!({ "name": format!("{PREFIX}1"), "refersTo": "=Sheet1!$A$1:$B$2", "comment": serde_json::to_string(&old).unwrap(), "force": true }),
+        )
+        .unwrap();
+        s.execute(
+            "formulas.defineName",
+            json!({ "name": format!("{PREFIX}2"), "refersTo": "=Sheet1!$C$1:$C$2", "comment": "Totals", "force": true }),
+        )
+        .unwrap();
         let mut h = crate::hostdata::HostData::default();
-        h.set_protect(&format!("{PREFIX}2"), serde_json::to_value(Meta { d: "Totals".into(), sheet: false, warn: false, except: "C2".into() }).unwrap());
+        h.set_protect(
+            &format!("{PREFIX}2"),
+            serde_json::to_value(Meta { d: "Totals".into(), sheet: false, warn: false, except: "C2".into() }).unwrap(),
+        );
         s.execute("workbook.setHostData", json!({ "data": serde_json::to_string(&h).unwrap() })).unwrap();
         let app = SheetApp::new(s, gridcraft_ui_egui::Services::default());
         let e = entries(&app);

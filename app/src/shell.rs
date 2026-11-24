@@ -121,13 +121,7 @@ pub const MENUS: &[(&str, &[Item])] = &[
             Sep,
             Cmd("Chart", "panel:chart", ""),
             Cmd("Pivot table", "insert.pivotTable", ""),
-            Sub(
-                "Image",
-                &[
-                    Cmd("Insert image in cell", "panel:imageInCell", ""),
-                    Cmd("Insert image over cells", "panel:imageOverCells", ""),
-                ],
-            ),
+            Sub("Image", &[Cmd("Insert image in cell", "panel:imageInCell", ""), Cmd("Insert image over cells", "panel:imageOverCells", "")]),
             Sep,
             Sub(
                 "Function",
@@ -197,7 +191,14 @@ pub const MENUS: &[(&str, &[Item])] = &[
                     Cmd("Bottom", "home.alignBottom", ""),
                 ],
             ),
-            Sub("Wrapping", &[CmdWith("Overflow", "home.wrapText", "", r#"{"on":false}"#), CmdWith("Wrap", "home.wrapText", "", r#"{"on":true}"#), CmdWith("Clip", "home.wrapText", "", r#"{"on":false,"clip":true}"#)]),
+            Sub(
+                "Wrapping",
+                &[
+                    CmdWith("Overflow", "home.wrapText", "", r#"{"on":false}"#),
+                    CmdWith("Wrap", "home.wrapText", "", r#"{"on":true}"#),
+                    CmdWith("Clip", "home.wrapText", "", r#"{"on":false,"clip":true}"#),
+                ],
+            ),
             Sub(
                 "Rotation",
                 &[
@@ -504,7 +505,8 @@ fn current(app: &SheetApp) -> Current {
 /// File › Settings.
 fn params(text: &str) -> serde_json::Value {
     let (date, time, datetime) = crate::settings::default_codes();
-    let text = text.replace("\"@datetime\"", &format!("{datetime:?}")).replace("\"@date\"", &format!("{date:?}")).replace("\"@time\"", &format!("{time:?}"));
+    let text =
+        text.replace("\"@datetime\"", &format!("{datetime:?}")).replace("\"@date\"", &format!("{date:?}")).replace("\"@time\"", &format!("{time:?}"));
     serde_json::from_str(&text).unwrap_or_else(|_| json!({}))
 }
 
@@ -512,12 +514,9 @@ fn params(text: &str) -> serde_json::Value {
 /// rounded grey on hover and while a menu is open (egui's default draws a box round each one).
 fn flat(ui: &mut Ui) {
     let w = &mut ui.style_mut().visuals.widgets;
-    for (state, fill) in [
-        (&mut w.inactive, egui::Color32::TRANSPARENT),
-        (&mut w.hovered, theme::HOVER),
-        (&mut w.active, theme::PRESSED),
-        (&mut w.open, theme::HOVER),
-    ] {
+    for (state, fill) in
+        [(&mut w.inactive, egui::Color32::TRANSPARENT), (&mut w.hovered, theme::HOVER), (&mut w.active, theme::PRESSED), (&mut w.open, theme::HOVER)]
+    {
         state.bg_stroke = Stroke::NONE;
         state.weak_bg_fill = fill;
         state.corner_radius = egui::CornerRadius::same(4);
@@ -574,7 +573,8 @@ impl Shell {
                             }
                         }
                         Txt(text, tip, id, p) => {
-                            let b = ui.add(Button::new(RichText::new(*text).size(15.0).color(theme::TEXT_DIM)).frame(false).min_size(vec2(28.0, 28.0)));
+                            let b =
+                                ui.add(Button::new(RichText::new(*text).size(15.0).color(theme::TEXT_DIM)).frame(false).min_size(vec2(28.0, 28.0)));
                             if b.on_hover_text(*tip).clicked() {
                                 app.run_or_alert(id, params(p));
                             }
@@ -582,7 +582,9 @@ impl Shell {
                         Menu(icon, tip, items) => {
                             let r = match icons::icon(icon) {
                                 Some(img) => ui.menu_button(img, |ui| tool_menu(app, ui, items)).response,
-                                None => ui.menu_button(RichText::new(*icon).size(14.0).color(theme::TEXT_DIM), |ui| tool_menu(app, ui, items)).response,
+                                None => {
+                                    ui.menu_button(RichText::new(*icon).size(14.0).color(theme::TEXT_DIM), |ui| tool_menu(app, ui, items)).response
+                                }
                             };
                             r.on_hover_text(*tip);
                         }
@@ -610,15 +612,27 @@ impl Shell {
                                             // Capitals already match Roboto's height; also meet Roboto's width halfway,
                                             // so narrow fonts (Impact) and wide ones (Verdana) look about as big.
                                             Some(p) => {
-                                                let width = |id: egui::FontId| ui.painter().layout_no_wrap(f.to_string(), id, theme::TEXT).size().x.max(1.0);
+                                                let width =
+                                                    |id: egui::FontId| ui.painter().layout_no_wrap(f.to_string(), id, theme::TEXT).size().x.max(1.0);
                                                 let k = (width(base.clone()) / width(p.clone())).sqrt().clamp(0.85, 1.25);
                                                 egui::FontId::new(p.size * k, p.family)
                                             }
                                             None => base,
                                         };
-                                        let r = ui.add(Button::new(RichText::new(f).font(font).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(220.0, crate::house::ROW_HEIGHT)));
+                                        let r = ui.add(
+                                            Button::new(RichText::new(f).font(font).color(theme::TEXT))
+                                                .shortcut_text("")
+                                                .frame_when_inactive(false)
+                                                .min_size(vec2(220.0, crate::house::ROW_HEIGHT)),
+                                        );
                                         if f == cur.font {
-                                            ui.painter().text(r.rect.left_center() + vec2(16.0, 0.0), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), theme::TEXT);
+                                            ui.painter().text(
+                                                r.rect.left_center() + vec2(16.0, 0.0),
+                                                egui::Align2::LEFT_CENTER,
+                                                "✓",
+                                                egui::FontId::proportional(16.0),
+                                                theme::TEXT,
+                                            );
                                         }
                                         if r.clicked() {
                                             app.run_or_alert("home.fontName", json!({ "name": f }));
@@ -651,7 +665,11 @@ impl Shell {
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let (icon, tip) = if self.compact { ("keyboard_arrow_down", "Show the menus (Ctrl+Shift+F)") } else { ("keyboard_arrow_up", "Hide the menus (Ctrl+Shift+F)") };
+                    let (icon, tip) = if self.compact {
+                        ("keyboard_arrow_down", "Show the menus (Ctrl+Shift+F)")
+                    } else {
+                        ("keyboard_arrow_up", "Hide the menus (Ctrl+Shift+F)")
+                    };
                     if icon_or_text(ui, icon, tip).clicked() {
                         self.compact = !self.compact;
                     }
@@ -687,7 +705,8 @@ impl Shell {
                 ui.painter().vline(r.center().x, r.y_range(), Stroke::new(1.0, theme::DIVIDER));
                 ui.vertical(|ui| {
                     // The colour button shows the colour in a bar under the pencil.
-                    let colour = self.border_colour.map_or(theme::TEXT, |rgb| egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
+                    let colour =
+                        self.border_colour.map_or(theme::TEXT, |rgb| egui::Color32::from_rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8));
                     let cr = match icons::icon("border_color_pen") {
                         Some(img) => ui.menu_button(img, |ui| match crate::colourpicker::palette_open(ui, self.border_colour, false, false) {
                             Some(crate::colourpicker::Choice::Colour(rgb)) => self.border_colour = Some(rgb),
@@ -707,7 +726,8 @@ impl Shell {
                         Some(img) => ui.menu_button(img, |ui| {
                             menu_style_width(ui, 120.0);
                             for (k, (name, _)) in BORDER_STYLES.iter().enumerate() {
-                                let r = ui.add_sized([120.0, crate::house::ROW_HEIGHT], Button::new("").frame_when_inactive(false)).on_hover_text(*name);
+                                let r =
+                                    ui.add_sized([120.0, crate::house::ROW_HEIGHT], Button::new("").frame_when_inactive(false)).on_hover_text(*name);
                                 line_sample(ui, r.rect.shrink2(vec2(28.0, 0.0)), k, self.border_style == k);
                                 if r.clicked() {
                                     self.border_style = k;
@@ -746,7 +766,13 @@ impl Shell {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.horizontal(|ui| {
-                    let r = ui.add(egui::TextEdit::singleline(&mut text).frame(Frame::NONE).desired_width(26.0).min_size(vec2(26.0, 24.0)).align(egui::Align2::CENTER_CENTER));
+                    let r = ui.add(
+                        egui::TextEdit::singleline(&mut text)
+                            .frame(Frame::NONE)
+                            .desired_width(26.0)
+                            .min_size(vec2(26.0, 24.0))
+                            .align(egui::Align2::CENTER_CENTER),
+                    );
                     let mut picked = None;
                     ui.spacing_mut().button_padding.x = 3.0;
                     ui.menu_button(RichText::new("▾").size(11.0).color(theme::TEXT_DIM), |ui| {
@@ -879,7 +905,8 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
                     ui.add_space(8.0);
                 }
             }
-            let share = Button::new(RichText::new("Share").size(14.0).color(theme::TEXT)).fill(theme::SHARE).corner_radius(18.0).min_size(vec2(84.0, 36.0));
+            let share =
+                Button::new(RichText::new("Share").size(14.0).color(theme::TEXT)).fill(theme::SHARE).corner_radius(18.0).min_size(vec2(84.0, 36.0));
             // Files: back to the home screen (the file organiser), in this file's folder. The
             // logo at the left does the same.
             #[cfg(target_arch = "wasm32")]
@@ -921,7 +948,8 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
 /// then where it is saved. A click opens version history, as Sheets' clock does.
 fn save_symbol(ui: &mut Ui, dirty: bool) {
     let get = |key: &str| ui.ctx().data(|m| m.get_temp::<String>(egui::Id::unique(key))).unwrap_or_default();
-    let status = Some(get("starsheets_save_status")).filter(|s| !s.is_empty()).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string());
+    let status =
+        Some(get("starsheets_save_status")).filter(|s| !s.is_empty()).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string());
     let (last_edit, tip) = (get("starsheets_last_edit"), get("starsheets_save_status_tip"));
     let dot = match status.as_str() {
         "Saved" | "View only" => None,
@@ -1100,7 +1128,11 @@ pub fn pick_rows(ui: &mut Ui, width: f32, items: &[String], current: Option<usiz
     ui.spacing_mut().button_padding.x = 40.0;
     let mut hit = None;
     for (i, label) in items.iter().enumerate() {
-        let r = ui.add(Button::new(RichText::new(label).size(crate::house::BODY).color(theme::TEXT)).frame_when_inactive(false).min_size(vec2(width, crate::house::ROW_HEIGHT)));
+        let r = ui.add(
+            Button::new(RichText::new(label).size(crate::house::BODY).color(theme::TEXT))
+                .frame_when_inactive(false)
+                .min_size(vec2(width, crate::house::ROW_HEIGHT)),
+        );
         if Some(i) == current {
             ui.painter().text(r.rect.left_center() + vec2(14.0, 0.0), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), theme::TEXT);
         }
@@ -1248,7 +1280,9 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                 }
             }
             Sub(label, sub) => {
-                let b = menu_row(label, "", with_icons).min_size(vec2(width, 32.0)).right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(MENU_GREY)));
+                let b = menu_row(label, "", with_icons)
+                    .min_size(vec2(width, 32.0))
+                    .right_text(egui::containers::menu::SubMenuButton::arrow_atom(Some(MENU_GREY)));
                 egui::containers::menu::SubMenuButton::from_button(b).ui(ui, |ui| menu_items(app, ui, sub));
             }
             Sep => menu_sep_width(ui, width),

@@ -15,7 +15,6 @@ use gridcraft_ui_egui::SheetApp;
 use serde_json::{Value as Json, json};
 use wasm_bindgen::JsCast as _;
 
-
 /// Asks for the Open dialog, the version list, or another file action (menus set it in egui memory).
 pub const REQUEST: &str = "starsheets_files_request";
 /// The title-bar status line ("Saving…", "Saved to the server", …), in egui memory.
@@ -40,8 +39,16 @@ struct Link {
 }
 
 enum Reply {
-    Saved { doc: u64, sent: Arc<Workbook>, link: Link },
-    Conflict { doc: u64, sent: Arc<Workbook>, bytes: Vec<u8> },
+    Saved {
+        doc: u64,
+        sent: Arc<Workbook>,
+        link: Link,
+    },
+    Conflict {
+        doc: u64,
+        sent: Arc<Workbook>,
+        bytes: Vec<u8>,
+    },
     Failed(String),
     Listed(Vec<crate::filebrowser::FileInfo>, Vec<String>),
     Bin(Vec<crate::filebrowser::BinInfo>),
@@ -53,7 +60,14 @@ enum Reply {
     RenamedId(String, String),
     Download(String, Vec<u8>),
     Versions(Vec<(String, i64)>),
-    Opened { id: String, name: String, version: String, bytes: Vec<u8>, folder: String, modified: i64 },
+    Opened {
+        id: String,
+        name: String,
+        version: String,
+        bytes: Vec<u8>,
+        folder: String,
+        modified: i64,
+    },
     /// How the server describes where files are kept.
     Info(String, bool),
     Renamed(String),
@@ -137,7 +151,10 @@ impl Files {
             l.folder = folder;
         }
         // While the file window is open it takes its keys before the grid sees them.
-        if self.browser.open && !self.browser.typing() && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::unique("starsheets_files_search")) {
+        if self.browser.open
+            && !self.browser.typing()
+            && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::unique("starsheets_files_search"))
+        {
             ctx.input_mut(|i| {
                 let mut keep = Vec::new();
                 for ev in std::mem::take(&mut i.events) {
@@ -167,7 +184,8 @@ impl Files {
         {
             link.saved = at;
         }
-        let last_edit = live.as_ref().and_then(|l| l.last_edit.clone()).map(|e| format!("Last edit was {} by {}", ago(e.at), e.by)).unwrap_or_default();
+        let last_edit =
+            live.as_ref().and_then(|l| l.last_edit.clone()).map(|e| format!("Last edit was {} by {}", ago(e.at), e.by)).unwrap_or_default();
         let status = if let Some(l) = live {
             l.text
         } else if let Some(e) = &self.error {
@@ -221,7 +239,13 @@ impl Files {
                     self.versions = Some(vec![]);
                     send(Method::Get, format!("{API}/{}/versions", l.id), None, None, self.inbox.clone(), ctx.clone(), |_, _, body| {
                         let v: Json = serde_json::from_slice(&body).unwrap_or_default();
-                        Reply::Versions(v.as_array().into_iter().flatten().map(|x| (x["v"].as_str().unwrap_or("").to_string(), x["modified"].as_i64().unwrap_or(0))).collect())
+                        Reply::Versions(
+                            v.as_array()
+                                .into_iter()
+                                .flatten()
+                                .map(|x| (x["v"].as_str().unwrap_or("").to_string(), x["modified"].as_i64().unwrap_or(0)))
+                                .collect(),
+                        )
                     });
                 } else {
                     app.message = Some(("Version history".into(), "This spreadsheet has no saved versions yet.".into()));
@@ -242,7 +266,15 @@ impl Files {
                     app.message = Some(("Move to bin".into(), "This spreadsheet hasn't been saved yet.".into()));
                     return;
                 };
-                send(Method::Delete, format!("{API}/{}", l.id), None, None, self.inbox.clone(), ctx.clone(), |_, _, _| Reply::Navigate(String::new()));
+                send(
+                    Method::Delete,
+                    format!("{API}/{}", l.id),
+                    None,
+                    None,
+                    self.inbox.clone(),
+                    ctx.clone(),
+                    |_, _, _| Reply::Navigate(String::new()),
+                );
             }
             _ => {}
         }
@@ -266,7 +298,12 @@ impl Files {
                 // Someone saved this file elsewhere since we opened it: keep both.
                 // No date in the name: the server adds " (2)" if this name is taken too.
                 let name = format!("{} (conflicted copy)", self.link.as_ref().map_or("Untitled spreadsheet".into(), |l| stem(&l.name)));
-                app.message = Some(("Saved as a copy".into(), format!("Your latest changes couldn't be added to the file, because it was saved by someone else (or by StarSheets after it restarted) since this tab last had it. Nothing is lost: your changes were saved as \"{name}\", next to it.")));
+                app.message = Some((
+                    "Saved as a copy".into(),
+                    format!(
+                        "Your latest changes couldn't be added to the file, because it was saved by someone else (or by StarSheets after it restarted) since this tab last had it. Nothing is lost: your changes were saved as \"{name}\", next to it."
+                    ),
+                ));
                 self.link = None;
                 post_new(doc, sent, bytes, name, &self.new_folder, self.inbox.clone(), ctx.clone());
             }
@@ -362,7 +399,8 @@ impl Files {
                 if !open_tab(&id) {
                     app.message = Some((
                         "Opened in File › Open".into(),
-                        "The browser blocked the new tab. The imported file is saved: open it from File › Open, or allow pop-ups for this site.".into(),
+                        "The browser blocked the new tab. The imported file is saved: open it from File › Open, or allow pop-ups for this site."
+                            .into(),
                     ));
                 }
             }
@@ -383,10 +421,18 @@ impl Files {
         let arrived: Vec<(String, Vec<u8>)> = std::mem::take(&mut *inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         for (name, bytes) in arrived {
             match gridcraft_engine::io::open_bytes(&name, &bytes).and_then(|(wb, _)| gridcraft_engine::io::save_bytes(&wb, "import.xlsx")) {
-                Ok(xlsx) => send(Method::Post, format!("{API}?name={}", enc(&stem(&name))), Some(xlsx), None, self.inbox.clone(), ctx.clone(), |_, _, body| {
-                    let v: Json = serde_json::from_slice(&body).unwrap_or_default();
-                    Reply::OpenTab(v["id"].as_str().unwrap_or("").to_string())
-                }),
+                Ok(xlsx) => send(
+                    Method::Post,
+                    format!("{API}?name={}", enc(&stem(&name))),
+                    Some(xlsx),
+                    None,
+                    self.inbox.clone(),
+                    ctx.clone(),
+                    |_, _, body| {
+                        let v: Json = serde_json::from_slice(&body).unwrap_or_default();
+                        Reply::OpenTab(v["id"].as_str().unwrap_or("").to_string())
+                    },
+                ),
                 // A file that needs a password (or can't be read here): GridCraft's own open asks.
                 Err(_) => inbox.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((name, bytes)),
             }
@@ -437,7 +483,11 @@ impl Files {
                     let v: Json = serde_json::from_slice(&body).unwrap_or_default();
                     let name = v["name"].as_str().map_or(l.name.clone(), str::to_string);
                     let folder = v["folder"].as_str().map_or(l.folder.clone(), str::to_string);
-                    Reply::Saved { doc, sent: sent2, link: Link { version: v["version"].as_str().unwrap_or("").to_string(), name, folder, saved: now_unix(), ..l } }
+                    Reply::Saved {
+                        doc,
+                        sent: sent2,
+                        link: Link { version: v["version"].as_str().unwrap_or("").to_string(), name, folder, saved: now_unix(), ..l },
+                    }
                 });
             }
             None => post_new(doc, sent, bytes, title, &self.new_folder, self.inbox.clone(), ctx.clone()),
@@ -477,27 +527,33 @@ impl Files {
         if let Some(vs) = self.versions.clone() {
             let mut open = true;
             let mut restore = None;
-            egui::Window::new("Version history").title_bar(false).collapsible(false).resizable(false).frame(crate::house::dialog_frame()).anchor(egui::Align2::RIGHT_TOP, vec2(-20.0, 90.0)).show(ui.ctx(), |ui| {
-                ui.set_width(320.0);
-                if crate::house::title_row(ui, "Version history") {
-                    open = false;
-                }
-                crate::house::form_style(ui);
-                crate::house::note(ui, "Earlier copies are kept each time the file saves (the last 6).");
-                if vs.is_empty() {
-                    ui.label("No earlier versions yet.");
-                }
-                for (v, when) in &vs {
-                    ui.horizontal(|ui| {
-                        ui.label(date_text(*when));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(crate::house::link("Restore")).clicked() {
-                                restore = Some(v.clone());
-                            }
+            egui::Window::new("Version history")
+                .title_bar(false)
+                .collapsible(false)
+                .resizable(false)
+                .frame(crate::house::dialog_frame())
+                .anchor(egui::Align2::RIGHT_TOP, vec2(-20.0, 90.0))
+                .show(ui.ctx(), |ui| {
+                    ui.set_width(320.0);
+                    if crate::house::title_row(ui, "Version history") {
+                        open = false;
+                    }
+                    crate::house::form_style(ui);
+                    crate::house::note(ui, "Earlier copies are kept each time the file saves (the last 6).");
+                    if vs.is_empty() {
+                        ui.label("No earlier versions yet.");
+                    }
+                    for (v, when) in &vs {
+                        ui.horizontal(|ui| {
+                            ui.label(date_text(*when));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(crate::house::link("Restore")).clicked() {
+                                    restore = Some(v.clone());
+                                }
+                            });
                         });
-                    });
-                }
-            });
+                    }
+                });
             if let (Some(v), Some(l)) = (restore, self.link.clone()) {
                 open = false;
                 restore_version(l, v, self.inbox.clone(), ui.ctx().clone());
@@ -674,10 +730,14 @@ impl Files {
                     match item {
                         // The open spreadsheet going to the bin: this tab starts a new one.
                         Item::File(id) if Some(&id) == open_one.as_ref() => {
-                            send(Method::Delete, format!("{API}/{id}"), None, None, inbox.clone(), ctx.clone(), |_, _, _| Reply::Navigate(String::new()));
+                            send(Method::Delete, format!("{API}/{id}"), None, None, inbox.clone(), ctx.clone(), |_, _, _| {
+                                Reply::Navigate(String::new())
+                            });
                         }
                         Item::File(id) => send(Method::Delete, format!("{API}/{id}"), None, None, inbox.clone(), ctx.clone(), refresh),
-                        Item::Folder(p) => send(Method::Delete, format!("api/folders?path={}", enc(&p)), None, None, inbox.clone(), ctx.clone(), refresh),
+                        Item::Folder(p) => {
+                            send(Method::Delete, format!("api/folders?path={}", enc(&p)), None, None, inbox.clone(), ctx.clone(), refresh)
+                        }
                     }
                 }
             }
@@ -858,7 +918,12 @@ pub(crate) async fn get_bytes(url: &str) -> Result<(u16, web_sys::Headers, Vec<u
     fetch(Method::Get, url, None, None).await
 }
 
-pub(crate) async fn fetch(method: Method, url: &str, body: Option<Vec<u8>>, if_match: Option<String>) -> Result<(u16, web_sys::Headers, Vec<u8>), String> {
+pub(crate) async fn fetch(
+    method: Method,
+    url: &str,
+    body: Option<Vec<u8>>,
+    if_match: Option<String>,
+) -> Result<(u16, web_sys::Headers, Vec<u8>), String> {
     let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
     let init = web_sys::RequestInit::new();
     init.set_method(match method {
@@ -903,7 +968,8 @@ fn get_file(id: String, inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
         if status != 200 {
             return Reply::Failed("file not found".into());
         }
-        let name = headers.get("X-File-Name").ok().flatten().and_then(|n| serde_json::from_str::<String>(&n).ok()).unwrap_or_else(|| "file.xlsx".into());
+        let name =
+            headers.get("X-File-Name").ok().flatten().and_then(|n| serde_json::from_str::<String>(&n).ok()).unwrap_or_else(|| "file.xlsx".into());
         let version = headers.get("ETag").ok().flatten().unwrap_or_default();
         let folder = headers.get("X-Folder").ok().flatten().and_then(|n| serde_json::from_str::<String>(&n).ok()).unwrap_or_default();
         let modified = headers.get("X-Modified").ok().flatten().and_then(|n| n.parse().ok()).unwrap_or(0);
@@ -919,7 +985,13 @@ fn list_files(inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
             .as_array()
             .into_iter()
             .flatten()
-            .map(|f| crate::filebrowser::FileInfo { id: s(f, "id"), name: s(f, "name"), folder: s(f, "folder"), modified: f["modified"].as_i64().unwrap_or(0), size: f["size"].as_u64().unwrap_or(0) })
+            .map(|f| crate::filebrowser::FileInfo {
+                id: s(f, "id"),
+                name: s(f, "name"),
+                folder: s(f, "folder"),
+                modified: f["modified"].as_i64().unwrap_or(0),
+                size: f["size"].as_u64().unwrap_or(0),
+            })
             .collect();
         let folders = v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect();
         Reply::Listed(files, folders)
@@ -934,7 +1006,12 @@ fn list_bin(inbox: Rc<RefCell<Vec<Reply>>>, ctx: egui::Context) {
             v.as_array()
                 .into_iter()
                 .flatten()
-                .map(|b| crate::filebrowser::BinInfo { name: s(b, "name"), original: s(b, "original"), deleted: b["deleted"].as_i64().unwrap_or(0), folder: b["folder"].as_bool().unwrap_or(false) })
+                .map(|b| crate::filebrowser::BinInfo {
+                    name: s(b, "name"),
+                    original: s(b, "original"),
+                    deleted: b["deleted"].as_i64().unwrap_or(0),
+                    folder: b["folder"].as_bool().unwrap_or(false),
+                })
                 .collect(),
         )
     });

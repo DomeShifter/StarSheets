@@ -111,11 +111,23 @@ mod tests {
         let mut out = ctx.run_ui(raw, |ui| {
             let ctx = ui.ctx().clone();
             router.before_grid(&ctx, None);
-            ctx.input(|i| i.events.iter().for_each(|e| if let Event::Text(t) = e { grid.push_str(t) }));
+            ctx.input(|i| {
+                i.events.iter().for_each(|e| {
+                    if let Event::Text(t) = e {
+                        grid.push_str(t)
+                    }
+                })
+            });
             router.after_grid(&ctx);
             if dialog {
                 note_modal(&ctx);
-                ctx.input(|i| i.events.iter().for_each(|e| if let Event::Text(t) = e { after.push_str(t) }));
+                ctx.input(|i| {
+                    i.events.iter().for_each(|e| {
+                        if let Event::Text(t) = e {
+                            after.push_str(t)
+                        }
+                    })
+                });
             }
             router.end_frame(&ctx);
         });

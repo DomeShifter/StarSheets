@@ -54,13 +54,20 @@ pub enum ToServer {
         have: Option<String>,
     },
     /// A change made on top of the server's revision `base`.
-    Change { cseq: u64, base: u64, change: Change },
+    Change {
+        cseq: u64,
+        base: u64,
+        change: Change,
+    },
     Undo,
     Redo,
     /// The tab's copy doesn't match the server's: send the whole file again.
     Resync,
     /// Where this tab is (its sheet and selection), for other people's screens.
-    Presence { sheet: usize, sel: Selection },
+    Presence {
+        sheet: usize,
+        sel: Selection,
+    },
 }
 
 /// Someone with the file open: one entry per tab.
@@ -246,7 +253,29 @@ pub fn replayable(id: &str) -> bool {
 /// its finished state, which is only data).
 pub fn server_allows(id: &str) -> bool {
     let lower = id.to_ascii_lowercase();
-    let denied = ["file.", "macro", "automate.", "script", "python", "control.", "app.", "window.", "print", "export", "link.open", "data.get", "data.refresh", "data.from", "data.query", "picture", "object", "addin", "options", "solver", "equation"];
+    let denied = [
+        "file.",
+        "macro",
+        "automate.",
+        "script",
+        "python",
+        "control.",
+        "app.",
+        "window.",
+        "print",
+        "export",
+        "link.open",
+        "data.get",
+        "data.refresh",
+        "data.from",
+        "data.query",
+        "picture",
+        "object",
+        "addin",
+        "options",
+        "solver",
+        "equation",
+    ];
     gridcraft_engine::find_command(id).is_some_and(|spec| spec.undoable) && !denied.iter().any(|d| lower.contains(d))
 }
 
@@ -327,14 +356,20 @@ pub fn restore_workbook(s: &mut Session, wb: &Arc<Workbook>) {
 
 /// Why an undo (or redo) can't be done, in plain words.
 pub const UNDO_CHANGED: &str = "Can't undo: someone has changed those cells since.";
-pub const UNDO_LAYOUT: &str = "Can't undo that change any more: it changed more than cells (rows, columns, sheets or rules) and someone has edited the file since.";
+pub const UNDO_LAYOUT: &str =
+    "Can't undo that change any more: it changed more than cells (rows, columns, sheets or rules) and someone has edited the file since.";
 
 /// Two cells hold the same thing (a formula's result may differ: it follows other cells).
 fn same_cell(a: Option<&gridcraft_engine::model::Cell>, b: Option<&gridcraft_engine::model::Cell>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => a.style == b.style && a.formula == b.formula && a.py == b.py && (a.formula.is_some() || a.value == b.value),
         (None, None) => true,
-        (Some(c), None) | (None, Some(c)) => c.formula.is_none() && c.py.is_none() && matches!(c.value, gridcraft_engine::core::Value::Empty) && c.style == gridcraft_engine::model::StyleId::DEFAULT,
+        (Some(c), None) | (None, Some(c)) => {
+            c.formula.is_none()
+                && c.py.is_none()
+                && matches!(c.value, gridcraft_engine::core::Value::Empty)
+                && c.style == gridcraft_engine::model::StyleId::DEFAULT
+        }
     }
 }
 
@@ -677,8 +712,11 @@ pub fn copy_sheet_into(src: &Workbook, index: usize, dst: &mut Workbook) -> Opti
     use gridcraft_engine::model::StyleId;
     let mut sheet: Sheet = (**src.sheets.get(index)?).clone();
     let mut map: std::collections::HashMap<StyleId, StyleId> = std::collections::HashMap::new();
-    let mut remap = |id: StyleId, dst: &mut Workbook| *map.entry(id).or_insert_with(|| if id == StyleId::DEFAULT { StyleId::DEFAULT } else { dst.styles.intern(src.styles.get(id).clone()) });
-    let styled: Vec<(gridcraft_engine::core::CellRef, StyleId)> = sheet.cells.iter().filter(|(_, c)| c.style != StyleId::DEFAULT).map(|(r, c)| (r, c.style)).collect();
+    let mut remap = |id: StyleId, dst: &mut Workbook| {
+        *map.entry(id).or_insert_with(|| if id == StyleId::DEFAULT { StyleId::DEFAULT } else { dst.styles.intern(src.styles.get(id).clone()) })
+    };
+    let styled: Vec<(gridcraft_engine::core::CellRef, StyleId)> =
+        sheet.cells.iter().filter(|(_, c)| c.style != StyleId::DEFAULT).map(|(r, c)| (r, c.style)).collect();
     for (r, id) in styled {
         let new = remap(id, dst);
         sheet.set_style(r, new);

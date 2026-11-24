@@ -136,7 +136,10 @@ const ICONS: &[(&str, &[u8])] = &[
 /// the toolbar uses).
 pub fn icon(name: &str) -> Option<Image<'static>> {
     let (n, bytes) = ICONS.iter().find(|(n, _)| *n == name)?;
-    Some(Image::new(ImageSource::Bytes { uri: format!("bytes://starsheets/{n}.svg").into(), bytes: (*bytes).into() }).fit_to_exact_size(vec2(18.0, 18.0)))
+    Some(
+        Image::new(ImageSource::Bytes { uri: format!("bytes://starsheets/{n}.svg").into(), bytes: (*bytes).into() })
+            .fit_to_exact_size(vec2(18.0, 18.0)),
+    )
 }
 
 #[cfg(test)]

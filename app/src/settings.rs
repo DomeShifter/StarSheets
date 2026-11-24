@@ -15,12 +15,7 @@ pub const REQUEST: &str = "starsheets_settings";
 const STORE_KEY: &str = "starsheets_settings";
 
 /// How numbers are written: label, decimal mark, thousands separator.
-const SEPARATORS: &[(&str, char, char)] = &[
-    ("1,234.56", '.', ','),
-    ("1.234,56", ',', '.'),
-    ("1 234,56", ',', '\u{202f}'),
-    ("1'234.56", '.', '\''),
-];
+const SEPARATORS: &[(&str, char, char)] = &[("1,234.56", '.', ','), ("1.234,56", ',', '.'), ("1 234,56", ',', '\u{202f}'), ("1'234.56", '.', '\'')];
 
 /// Each locale's way of writing numbers (an index into SEPARATORS), in LOCALES order.
 const LOCALE_SEPARATORS: &[usize] = &[0, 0, 0, 0, 0, 1, 1, 2, 1, 1, 1, 0];
@@ -41,7 +36,19 @@ const LOCALES: &[(&str, bool, &str, &str, &str)] = &[
     ("日本語 (日本)", false, "yyyy/mm/dd", "hh:mm:ss", "yyyy/mm/dd hh:mm:ss"),
 ];
 
-const DATE_FORMATS: &[&str] = &["dd/mm/yyyy", "d/m/yyyy", "dd-mm-yyyy", "dd.mm.yyyy", "m/d/yyyy", "mm/dd/yyyy", "yyyy-mm-dd", "d mmm yyyy", "d mmmm yyyy", "dd-mmm-yyyy", "dddd, d mmmm yyyy"];
+const DATE_FORMATS: &[&str] = &[
+    "dd/mm/yyyy",
+    "d/m/yyyy",
+    "dd-mm-yyyy",
+    "dd.mm.yyyy",
+    "m/d/yyyy",
+    "mm/dd/yyyy",
+    "yyyy-mm-dd",
+    "d mmm yyyy",
+    "d mmmm yyyy",
+    "dd-mmm-yyyy",
+    "dddd, d mmmm yyyy",
+];
 const TIME_FORMATS: &[&str] = &["hh:mm:ss", "hh:mm", "h:mm:ss AM/PM", "h:mm AM/PM"];
 /// Default number formats ("" = Automatic, as typed).
 const NUMBER_FORMATS: &[(&str, &str)] = &[("Automatic", ""), ("1,000.12", "#,##0.00"), ("1000.12", "0.00"), ("1,000", "#,##0"), ("1000", "0")];
@@ -220,12 +227,10 @@ fn style_tab(ui: &mut egui::Ui, d: &mut Prefs) {
     let swatch = egui::Rect::from_center_size(r.rect.left_center() + egui::vec2(house::M + 9.0, 0.0), egui::vec2(18.0, 18.0));
     ui.painter().rect_filled(swatch, 4, now);
     ui.painter().rect_stroke(swatch, 4, egui::Stroke::new(1.0, crate::theme::DIVIDER), egui::StrokeKind::Inside);
-    egui::Popup::menu(&r).id(egui::Id::unique("set_toolbar_colour")).show(|ui| {
-        match crate::colourpicker::palette(ui, d.toolbar, false, false) {
-            Some(crate::colourpicker::Choice::Colour(c)) => d.toolbar = Some(c),
-            Some(crate::colourpicker::Choice::Reset) => d.toolbar = None,
-            _ => {}
-        }
+    egui::Popup::menu(&r).id(egui::Id::unique("set_toolbar_colour")).show(|ui| match crate::colourpicker::palette(ui, d.toolbar, false, false) {
+        Some(crate::colourpicker::Choice::Colour(c)) => d.toolbar = Some(c),
+        Some(crate::colourpicker::Choice::Reset) => d.toolbar = None,
+        _ => {}
     });
 }
 
@@ -262,7 +267,9 @@ fn general_tab(ui: &mut egui::Ui, d: &mut Prefs) {
         pick(&mut cols[0], "set_date", "Date", DATE_FORMATS, &mut d.date, &sample);
         pick(&mut cols[1], "set_time", "Time", TIME_FORMATS, &mut d.time, &sample);
         let codes: Vec<&str> = NUMBER_FORMATS.iter().map(|(_, c)| *c).collect();
-        pick(&mut cols[2], "set_number", "Numbers", &codes, &mut d.number, &|c: &str| NUMBER_FORMATS.iter().find(|(_, x)| *x == c).map_or("Automatic", |(l, _)| l).to_string());
+        pick(&mut cols[2], "set_number", "Numbers", &codes, &mut d.number, &|c: &str| {
+            NUMBER_FORMATS.iter().find(|(_, x)| *x == c).map_or("Automatic", |(l, _)| l).to_string()
+        });
     });
     house::note(ui, "New dates, times and numbers you type get these formats; cells already formatted keep theirs.");
     house::gap(ui);

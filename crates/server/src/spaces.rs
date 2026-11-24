@@ -45,11 +45,14 @@ pub fn migrate(store: &Store) -> io::Result<usize> {
     store.synced_folders()?;
     let names: Vec<String> = users.iter().map(|u| u.username.clone()).collect();
     // Old per-file owners, before paths change.
-    let old_owner: Vec<(String, String, String)> =
-        index.iter().filter_map(|(id, path)| sharing::old_owner(store, id).filter(|o| names.contains(o)).map(|o| (id.clone(), path.clone(), o))).collect();
+    let old_owner: Vec<(String, String, String)> = index
+        .iter()
+        .filter_map(|(id, path)| sharing::old_owner(store, id).filter(|o| names.contains(o)).map(|o| (id.clone(), path.clone(), o)))
+        .collect();
     // A top-level folder already named after a person would be taken for their own folder:
     // those are moved too (into the owner's folder), so first get them out of the way.
-    let mut tops: Vec<String> = fs::read_dir(&store.root)?.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect();
+    let mut tops: Vec<String> =
+        fs::read_dir(&store.root)?.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect();
     tops.sort();
     let staging = format!(".moving-{}", crate::store::random_hex(4));
     fs::create_dir_all(store.full(&staging))?;
@@ -187,7 +190,11 @@ fn save_prefs(store: &Store, username: &str, p: &Map<String, Value>) -> io::Resu
 
 /// Starred items as "f:<file id>" / "d:<folder id>".
 pub fn starred(store: &Store, user: &User) -> Vec<String> {
-    prefs(store, &user.username).get("starred").and_then(Value::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect()).unwrap_or_default()
+    prefs(store, &user.username)
+        .get("starred")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 pub fn set_star(store: &Store, user: &User, item: &str, on: bool) -> io::Result<()> {
@@ -228,7 +235,8 @@ pub fn opened(store: &Store, user: &User) -> Map<String, Value> {
 
 pub fn note_opened(store: &Store, user: &User, file: &str) -> io::Result<()> {
     let mut p = prefs(store, &user.username);
-    let mut list: Vec<(String, i64)> = opened(store, user).into_iter().filter_map(|(k, v)| Some((k, v.as_i64()?))).filter(|(k, _)| k != file).collect();
+    let mut list: Vec<(String, i64)> =
+        opened(store, user).into_iter().filter_map(|(k, v)| Some((k, v.as_i64()?))).filter(|(k, _)| k != file).collect();
     list.push((file.to_string(), now() as i64));
     list.sort_by_key(|(_, t)| -t);
     list.truncate(100);
@@ -266,10 +274,13 @@ mod tests {
         auth::add(&s, "boss", "Boss", "bosspassword").unwrap();
         auth::add(&s, "ann", "Ann", "annpassword").unwrap();
         // Before: per-file owners (Ann made two of them).
-        s.save_json(&s.meta().join("sharing.json"), &json!({"files": {
-            anns.clone(): {"owner": "ann", "people": [], "link": "none"},
-            plan.clone(): {"owner": "ann", "people": [], "link": "none"},
-        }}))
+        s.save_json(
+            &s.meta().join("sharing.json"),
+            &json!({"files": {
+                anns.clone(): {"owner": "ann", "people": [], "link": "none"},
+                plan.clone(): {"owner": "ann", "people": [], "link": "none"},
+            }}),
+        )
         .unwrap();
         assert_eq!(migrate(&s).unwrap(), 4, "Budget, Anns, Work, ann");
         assert_eq!(migrate(&s).unwrap(), 0, "only once");

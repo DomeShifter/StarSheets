@@ -126,18 +126,17 @@ struct Tab {
 fn tabs(app: &SheetApp) -> (Vec<Tab>, usize) {
     let Some(d) = app.session.active() else { return (Vec::new(), 0) };
     let theme = &d.wb.theme;
-    let list = d
-        .wb
-        .sheets
-        .iter()
-        .enumerate()
-        .map(|(index, sh)| Tab {
-            index,
-            name: sh.name.clone(),
-            colour: sh.tab_color.as_ref().and_then(|c: &Color| c.resolve(theme)).map(|[r, g, b]| egui::Color32::from_rgb(r, g, b)),
-            hidden: sh.visibility != Visibility::Visible,
-        })
-        .collect();
+    let list =
+        d.wb.sheets
+            .iter()
+            .enumerate()
+            .map(|(index, sh)| Tab {
+                index,
+                name: sh.name.clone(),
+                colour: sh.tab_color.as_ref().and_then(|c: &Color| c.resolve(theme)).map(|[r, g, b]| egui::Color32::from_rgb(r, g, b)),
+                hidden: sh.visibility != Visibility::Visible,
+            })
+            .collect();
     (list, d.wb.active_sheet.get())
 }
 
@@ -163,7 +162,9 @@ impl Bottom {
         self.confirm_delete_dialog(app, ui.ctx());
         egui::Panel::bottom("starsheets_bottom")
             .exact_size(40.0)
-            .frame(Frame::NONE.fill(theme::PAGE).inner_margin(Margin { left: 8, right: 12, top: 4, bottom: 4 }).stroke(Stroke::new(1.0, theme::HOVER)))
+            .frame(
+                Frame::NONE.fill(theme::PAGE).inner_margin(Margin { left: 8, right: 12, top: 4, bottom: 4 }).stroke(Stroke::new(1.0, theme::HOVER)),
+            )
             .show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -191,7 +192,8 @@ impl Bottom {
                     let strip = (ui.available_width() - quick_width - arrows_width).max(80.0);
                     // The tab strip shows only the slim bar, as a sign of where you are: it can't
                     // be grabbed (it would sit under the tabs). Shift+wheel and ◀ ▶ scroll it.
-                    ui.spacing_mut().scroll = egui::style::ScrollStyle { bar_width: 2.0, floating_width: 2.0, ..egui::style::ScrollStyle::floating() };
+                    ui.spacing_mut().scroll =
+                        egui::style::ScrollStyle { bar_width: 2.0, floating_width: 2.0, ..egui::style::ScrollStyle::floating() };
                     let mut area = egui::ScrollArea::horizontal()
                         .max_width(strip)
                         .id_salt("starsheets_tabs")
@@ -228,7 +230,9 @@ impl Bottom {
                         if left.clicked() {
                             self.tab_slide = Some((self.tab_offset, page(false), now));
                         }
-                        let right = ui.add_enabled_ui(self.tab_offset < self.tab_max - 0.5, |ui| icon_button(ui, "chevron_right", "Scroll sheet tabs right")).inner;
+                        let right = ui
+                            .add_enabled_ui(self.tab_offset < self.tab_max - 0.5, |ui| icon_button(ui, "chevron_right", "Scroll sheet tabs right"))
+                            .inner;
                         if right.clicked() {
                             self.tab_slide = Some((self.tab_offset, page(true), now));
                         }
@@ -301,7 +305,8 @@ impl Bottom {
         let shown = Frame::NONE.fill(fill).corner_radius(6.0).inner_margin(Margin { left: 6, right: 2, top: 0, bottom: 0 }).show(ui, |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             let name = ui.add(Button::new(text).frame(false).min_size(vec2(56.0, 30.0)).sense(egui::Sense::click_and_drag()));
-            let arrow = ui.add(Button::new(RichText::new("▾").size(12.0).color(colour)).frame(false).min_size(vec2(20.0, 30.0))).on_hover_text("Sheet menu");
+            let arrow =
+                ui.add(Button::new(RichText::new("▾").size(12.0).color(colour)).frame(false).min_size(vec2(20.0, 30.0))).on_hover_text("Sheet menu");
             (name, arrow)
         });
         let (name, arrow) = shown.inner;
@@ -402,7 +407,8 @@ impl Bottom {
         }
         // The dragged tab last, so it sits above the others, lifted by a shadow.
         if let Some((tab, rect)) = deferred {
-            ui.painter().add(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(50) }.as_shape(rect, 6));
+            ui.painter()
+                .add(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: egui::Color32::from_black_alpha(50) }.as_shape(rect, 6));
             ui.painter().rect_filled(rect, 6.0, egui::Color32::WHITE);
             self.tab_at(app, ui, tab, rect, active, count);
             moving = true;
@@ -448,7 +454,8 @@ impl Bottom {
         // A child that doesn't take part in the strip's layout: the slots stay where they are and
         // only the offset moves the tab (a scope would move the layout cursor to wherever the
         // slid tab ends, pulling every later slot along with it).
-        let mut child = ui.new_child(egui::UiBuilder::new().id_salt(("starsheets_tab", &tab.name)).max_rect(rect).layout(Layout::left_to_right(Align::Center)));
+        let mut child =
+            ui.new_child(egui::UiBuilder::new().id_salt(("starsheets_tab", &tab.name)).max_rect(rect).layout(Layout::left_to_right(Align::Center)));
         child.spacing_mut().item_spacing.x = 0.0;
         self.tab(app, &mut child, tab, tab.index == active, count);
     }
@@ -459,7 +466,11 @@ impl Bottom {
         let Some(name) = self.confirm_delete.clone() else { return };
         let (mut close, mut cancel, mut delete) = (false, false, false);
         crate::house::dialog(ctx, "starsheets_delete_sheet", 420.0, "Delete this sheet?", Some(&mut close), |ui| {
-            ui.label(RichText::new(format!("\"{name}\" and everything on it will be deleted. You can undo this with Ctrl+Z.")).size(crate::house::BODY).color(theme::TEXT));
+            ui.label(
+                RichText::new(format!("\"{name}\" and everything on it will be deleted. You can undo this with Ctrl+Z."))
+                    .size(crate::house::BODY)
+                    .color(theme::TEXT),
+            );
             match crate::house::actions(ui, &["Cancel", "Delete"]) {
                 Some(1) => delete = true,
                 Some(_) => cancel = true,

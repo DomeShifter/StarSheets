@@ -216,7 +216,14 @@ fn new_tab(url: &str) {
     }
 }
 
-fn call(inbox: &Rc<RefCell<Vec<Reply>>>, ctx: &egui::Context, method: Method, url: String, body: Option<Vec<u8>>, then: impl FnOnce(Vec<u8>) -> Reply + 'static) {
+fn call(
+    inbox: &Rc<RefCell<Vec<Reply>>>,
+    ctx: &egui::Context,
+    method: Method,
+    url: String,
+    body: Option<Vec<u8>>,
+    then: impl FnOnce(Vec<u8>) -> Reply + 'static,
+) {
     let (inbox, ctx) = (inbox.clone(), ctx.clone());
     wasm_bindgen_futures::spawn_local(async move {
         let reply = match fetch(method, &url, body, None).await {
@@ -446,7 +453,12 @@ impl Home {
     fn contents(&self) -> (Vec<FolderRow>, Vec<FileRow>) {
         let q = self.search.trim().to_lowercase();
         if !q.is_empty() {
-            let folders = self.folders.iter().filter(|f| name_of(&f.path).to_lowercase().contains(&q) && f.path != self.space && f.path.contains('/')).cloned().collect();
+            let folders = self
+                .folders
+                .iter()
+                .filter(|f| name_of(&f.path).to_lowercase().contains(&q) && f.path != self.space && f.path.contains('/'))
+                .cloned()
+                .collect();
             let files = self.files.iter().filter(|f| f.name.to_lowercase().contains(&q)).cloned().collect();
             return self.sorted(folders, files);
         }
@@ -459,7 +471,9 @@ impl Home {
                 self.folders.iter().filter(|f| self.shared_folders.contains(&f.path)).cloned().collect(),
                 self.files.iter().filter(|f| self.shared_files.contains(&f.id)).cloned().collect(),
             ),
-            Some(View::Starred) => (self.folders.iter().filter(|f| f.starred).cloned().collect(), self.files.iter().filter(|f| f.starred).cloned().collect()),
+            Some(View::Starred) => {
+                (self.folders.iter().filter(|f| f.starred).cloned().collect(), self.files.iter().filter(|f| f.starred).cloned().collect())
+            }
             Some(View::Recent) => {
                 let mut files: Vec<FileRow> = self.files.iter().filter(|f| f.opened.is_some()).cloned().collect();
                 files.sort_by_key(|f| std::cmp::Reverse(f.opened));
@@ -512,7 +526,8 @@ impl Home {
 
     /// Everything shown, in the order shown: folders first (the default) or mixed in by the sort.
     fn shown(&self, folders: &[FolderRow], files: &[FileRow]) -> Vec<Item> {
-        let mut items: Vec<Item> = folders.iter().map(|f| Item::Folder(f.path.clone())).chain(files.iter().map(|f| Item::File(f.id.clone()))).collect();
+        let mut items: Vec<Item> =
+            folders.iter().map(|f| Item::Folder(f.path.clone())).chain(files.iter().map(|f| Item::File(f.id.clone()))).collect();
         if self.mixed && self.view != Some(View::Recent) {
             self.sort_items(&mut items);
         }
@@ -581,7 +596,9 @@ impl Home {
             }
         }
         match self.view.clone() {
-            Some(View::Mine(p)) => walk(&mut parts, &self.space.clone(), if self.accounts { "My files".into() } else { "All files".into() }, &p, &View::Mine),
+            Some(View::Mine(p)) => {
+                walk(&mut parts, &self.space.clone(), if self.accounts { "My files".into() } else { "All files".into() }, &p, &View::Mine)
+            }
             Some(View::Shared(None)) => parts.push(("Shared with me".into(), Some(View::Shared(None)))),
             Some(View::Shared(Some(p))) => {
                 parts.push(("Shared with me".into(), Some(View::Shared(None))));
@@ -699,9 +716,25 @@ impl Home {
     pub fn ui(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx().clone();
         ui.painter().rect_filled(ui.max_rect(), 0, theme::PAGE);
-        egui::Panel::top("home_top").show_separator_line(false).exact_size(TOP).frame(egui::Frame::NONE.fill(theme::PAGE).inner_margin(egui::Margin::symmetric(16, 0))).show(ui, |ui| self.top_ui(ui));
-        egui::Panel::left("home_left").show_separator_line(false).exact_size(LEFT).resizable(false).frame(egui::Frame::NONE.fill(theme::PAGE).inner_margin(egui::Margin { left: 12, right: 12, top: 8, bottom: 8 })).show(ui, |ui| self.left_ui(ui));
-        egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::WHITE).corner_radius(egui::CornerRadius { nw: 16, ..Default::default() }).inner_margin(egui::Margin { left: 24, right: 16, top: 16, bottom: 0 })).show(ui, |ui| self.main_ui(ui));
+        egui::Panel::top("home_top")
+            .show_separator_line(false)
+            .exact_size(TOP)
+            .frame(egui::Frame::NONE.fill(theme::PAGE).inner_margin(egui::Margin::symmetric(16, 0)))
+            .show(ui, |ui| self.top_ui(ui));
+        egui::Panel::left("home_left")
+            .show_separator_line(false)
+            .exact_size(LEFT)
+            .resizable(false)
+            .frame(egui::Frame::NONE.fill(theme::PAGE).inner_margin(egui::Margin { left: 12, right: 12, top: 8, bottom: 8 }))
+            .show(ui, |ui| self.left_ui(ui));
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::NONE
+                    .fill(Color32::WHITE)
+                    .corner_radius(egui::CornerRadius { nw: 16, ..Default::default() })
+                    .inner_margin(egui::Margin { left: 24, right: 16, top: 16, bottom: 0 }),
+            )
+            .show(ui, |ui| self.main_ui(ui));
         self.drag_ui(&ctx);
         self.move_to_ui(&ctx);
         self.details_ui(&ctx);
@@ -777,7 +810,11 @@ impl Home {
             if house::menu_row(ui, Some("upload"), "Upload files…", "", true) {
                 let (inbox, ctx) = (self.inbox.clone(), ui.ctx().clone());
                 wasm_bindgen_futures::spawn_local(async move {
-                    let Some(picked) = rfd::AsyncFileDialog::new().add_filter("Spreadsheets", &["xlsx", "xlsm", "xls", "csv", "ods"]).pick_files().await else { return };
+                    let Some(picked) =
+                        rfd::AsyncFileDialog::new().add_filter("Spreadsheets", &["xlsx", "xlsm", "xls", "csv", "ods"]).pick_files().await
+                    else {
+                        return;
+                    };
                     for f in picked {
                         let (name, bytes) = (f.file_name(), f.read().await);
                         let (inbox2, ctx2) = (inbox.clone(), ctx.clone());
@@ -833,7 +870,8 @@ impl Home {
         if self.expanded.contains(&key) {
             match (kind, folder) {
                 ("every", _) => {
-                    let mut tops: Vec<String> = self.folders.iter().filter(|f| !f.path.contains('/') && !f.path.is_empty()).map(|f| f.path.clone()).collect();
+                    let mut tops: Vec<String> =
+                        self.folders.iter().filter(|f| !f.path.contains('/') && !f.path.is_empty()).map(|f| f.path.clone()).collect();
                     tops.sort();
                     for t in tops {
                         self.tree(ui, &t, 1, "every", &View::Everyone);
@@ -850,7 +888,8 @@ impl Home {
     }
 
     fn children(&self, path: &str) -> Vec<String> {
-        let mut c: Vec<String> = self.folders.iter().filter(|f| parent_of(&f.path) == path && f.path != path && !f.path.is_empty()).map(|f| f.path.clone()).collect();
+        let mut c: Vec<String> =
+            self.folders.iter().filter(|f| parent_of(&f.path) == path && f.path != path && !f.path.is_empty()).map(|f| f.path.clone()).collect();
         c.sort_by_key(|p| name_of(p).to_lowercase());
         c
     }
@@ -880,7 +919,18 @@ impl Home {
 
     /// Draws one tree row; returns true when it was clicked (not on its arrow).
     #[allow(clippy::too_many_arguments)]
-    fn row(&mut self, ui: &mut Ui, label: &str, icon: &str, tint: Option<Color32>, depth: usize, current: bool, has_children: bool, key: &str, folder: Option<String>) -> bool {
+    fn row(
+        &mut self,
+        ui: &mut Ui,
+        label: &str,
+        icon: &str,
+        tint: Option<Color32>,
+        depth: usize,
+        current: bool,
+        has_children: bool,
+        key: &str,
+        folder: Option<String>,
+    ) -> bool {
         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 34.0), Sense::click());
         let p = ui.painter().clone();
         let dropping = self.dragging.is_some() && folder.is_some() && resp.contains_pointer();
@@ -935,7 +985,10 @@ impl Home {
                     Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(22.0, 22.0))),
                     None => egui::Button::new(tip),
                 };
-                ui.add_enabled(enabled, b.frame(false).min_size(vec2(36.0, 36.0)).corner_radius(18)).on_hover_text(tip).on_disabled_hover_text(tip).clicked()
+                ui.add_enabled(enabled, b.frame(false).min_size(vec2(36.0, 36.0)).corner_radius(18))
+                    .on_hover_text(tip)
+                    .on_disabled_hover_text(tip)
+                    .clicked()
             };
             if nav(ui, "arrow_back", !self.back.is_empty(), "Back (your mouse's back button)") {
                 self.go_back();
@@ -952,7 +1005,9 @@ impl Home {
                 if i > 0 {
                     ui.label(RichText::new("›").size(20.0).color(theme::TEXT_DIM));
                 }
-                let r = ui.add(egui::Button::new(RichText::new(&label).size(22.0).color(if i == last { theme::TEXT } else { theme::TEXT_DIM })).frame(false));
+                let r = ui.add(
+                    egui::Button::new(RichText::new(&label).size(22.0).color(if i == last { theme::TEXT } else { theme::TEXT_DIM })).frame(false),
+                );
                 let folder = match &view {
                     Some(View::Mine(p) | View::Everyone(p)) if !p.is_empty() => Some(p.clone()),
                     Some(View::Shared(Some(p))) => Some(p.clone()),
@@ -977,7 +1032,9 @@ impl Home {
                         Some(img) => egui::Button::image(img.fit_to_exact_size(vec2(20.0, 20.0))),
                         None => egui::Button::new(tip),
                     };
-                    ui.add(b.fill(if on { theme::SHARE } else { Color32::WHITE }).corner_radius(16).min_size(vec2(44.0, 32.0))).on_hover_text(tip).clicked()
+                    ui.add(b.fill(if on { theme::SHARE } else { Color32::WHITE }).corner_radius(16).min_size(vec2(44.0, 32.0)))
+                        .on_hover_text(tip)
+                        .clicked()
                 };
                 if toggle(ui, "grid_view", !self.list, "Grid") {
                     self.list = false;
@@ -1015,7 +1072,9 @@ impl Home {
                     "Nothing matches."
                 } else {
                     match self.view {
-                        Some(View::Shared(None)) => "Nothing has been shared with you yet. When someone shares a file or folder with you, it shows here.",
+                        Some(View::Shared(None)) => {
+                            "Nothing has been shared with you yet. When someone shares a file or folder with you, it shows here."
+                        }
                         Some(View::Starred) => "Nothing starred yet. Right-click a file or folder and choose Star to keep it here.",
                         Some(View::Recent) => "Files you open show here.",
                         _ => "This folder is empty. Use New, or drop spreadsheets from your computer here.",
@@ -1165,7 +1224,17 @@ impl Home {
         let (r, resp) = ui.allocate_exact_size(vec2(CARD_W, CHIP_H), Sense::click_and_drag());
         let sel = self.selected.contains(&item);
         let p = ui.painter().clone();
-        p.rect_filled(r, 12, if sel { theme::SHARE } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
+        p.rect_filled(
+            r,
+            12,
+            if sel {
+                theme::SHARE
+            } else if resp.hovered() {
+                theme::HOVER
+            } else {
+                theme::TOOLBAR
+            },
+        );
         folder_icon(ui, f, Rect::from_center_size(r.left_center() + vec2(24.0, 0.0), vec2(22.0, 22.0)));
         if f.shared
             && f.colour.is_some()
@@ -1182,7 +1251,11 @@ impl Home {
         {
             img.paint_at(ui, Rect::from_center_size(r.right_center() - vec2(18.0, 0.0), vec2(16.0, 16.0)));
         }
-        let hover = if self.accounts && f.owner != self.space { format!("{} · {}", name_of(&f.path), self.person(&f.owner)) } else { name_of(&f.path).to_string() };
+        let hover = if self.accounts && f.owner != self.space {
+            format!("{} · {}", name_of(&f.path), self.person(&f.owner))
+        } else {
+            name_of(&f.path).to_string()
+        };
         let resp = resp.on_hover_text(hover);
         self.interact(ui, &item, &resp, clicked_item);
     }
@@ -1193,7 +1266,17 @@ impl Home {
         let (r, resp) = ui.allocate_exact_size(vec2(CARD_W, CARD_H), Sense::click_and_drag());
         let sel = self.selected.contains(&item);
         let p = ui.painter().clone();
-        p.rect_filled(r, 12, if sel { theme::SHARE } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
+        p.rect_filled(
+            r,
+            12,
+            if sel {
+                theme::SHARE
+            } else if resp.hovered() {
+                theme::HOVER
+            } else {
+                theme::TOOLBAR
+            },
+        );
         let pic = Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(CARD_W - 16.0, PIC_H - 8.0));
         p.rect_filled(pic, 6, Color32::WHITE);
         folder_icon(ui, f, Rect::from_center_size(pic.center(), vec2(64.0, 64.0)));
@@ -1219,7 +1302,17 @@ impl Home {
         }
         let sel = self.selected.contains(&item);
         let p = ui.painter().clone();
-        p.rect_filled(r, 12, if sel { theme::SHARE } else if resp.hovered() { theme::HOVER } else { theme::TOOLBAR });
+        p.rect_filled(
+            r,
+            12,
+            if sel {
+                theme::SHARE
+            } else if resp.hovered() {
+                theme::HOVER
+            } else {
+                theme::TOOLBAR
+            },
+        );
         // The picture, on white, in the top part.
         let pic = Rect::from_min_size(r.min + vec2(8.0, 8.0), vec2(CARD_W - 16.0, PIC_H - 8.0));
         p.rect_filled(pic, 6, Color32::WHITE);
@@ -1228,7 +1321,10 @@ impl Home {
                 // The picture's full width (columns A to L, as Drive shows), cut off at the bottom.
                 let tw = tex.size_vec2();
                 let scale = pic.width() / tw.x;
-                let uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2((pic.width() / (tw.x * scale)).min(1.0), (pic.height() / (tw.y * scale)).min(1.0)));
+                let uv = Rect::from_min_max(
+                    egui::pos2(0.0, 0.0),
+                    egui::pos2((pic.width() / (tw.x * scale)).min(1.0), (pic.height() / (tw.y * scale)).min(1.0)),
+                );
                 p.image(tex.id(), pic, uv, Color32::WHITE);
             }
             _ => {
@@ -1272,7 +1368,13 @@ impl Home {
         let (h, _) = ui.allocate_exact_size(vec2(w, 28.0), Sense::hover());
         let cols = [(0.0, "Name"), (w * 0.52, if self.accounts { "Owner" } else { "" }), (w * 0.70, "Last modified"), (w - 90.0, "Size")];
         for (x, label) in cols {
-            ui.painter().text(h.left_center() + vec2(x + if x == 0.0 { 44.0 } else { 0.0 }, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), theme::TEXT_DIM);
+            ui.painter().text(
+                h.left_center() + vec2(x + if x == 0.0 { 44.0 } else { 0.0 }, 0.0),
+                Align2::LEFT_CENTER,
+                label,
+                FontId::proportional(13.0),
+                theme::TEXT_DIM,
+            );
         }
         ui.painter().hline(h.x_range(), h.bottom(), Stroke::new(1.0, theme::DIVIDER));
         let rows: Vec<ListRow> = order
@@ -1280,9 +1382,25 @@ impl Home {
             .filter_map(|item| match item {
                 Item::Folder(p) => self.folder(p).map(|f| {
                     let (newest, size) = self.folder_stats(&f.path);
-                    ListRow { item: item.clone(), name: self.folder_label(&f.path), icon: if f.shared { "folder_shared" } else { "folder" }, owner: f.owner.clone(), modified: newest, size: Some(size), starred: f.starred }
+                    ListRow {
+                        item: item.clone(),
+                        name: self.folder_label(&f.path),
+                        icon: if f.shared { "folder_shared" } else { "folder" },
+                        owner: f.owner.clone(),
+                        modified: newest,
+                        size: Some(size),
+                        starred: f.starred,
+                    }
                 }),
-                Item::File(id) => self.file(id).map(|f| ListRow { item: item.clone(), name: f.name.clone(), icon: "starsheets", owner: f.owner.clone(), modified: f.modified, size: Some(f.size), starred: f.starred }),
+                Item::File(id) => self.file(id).map(|f| ListRow {
+                    item: item.clone(),
+                    name: f.name.clone(),
+                    icon: "starsheets",
+                    owner: f.owner.clone(),
+                    modified: f.modified,
+                    size: Some(f.size),
+                    starred: f.starred,
+                }),
             })
             .collect();
         for ListRow { item, name, icon, owner, modified, size, starred } in rows {
@@ -1527,7 +1645,14 @@ impl Home {
             let colour = choice.map(house::hex).unwrap_or_default();
             for t in targets {
                 if let Item::Folder(p) = t {
-                    call(&self.inbox, ui.ctx(), Method::Post, format!("api/folders/colour?path={}", enc(p)), Some(format!("{{\"colour\":\"{colour}\"}}").into_bytes()), refresh_after);
+                    call(
+                        &self.inbox,
+                        ui.ctx(),
+                        Method::Post,
+                        format!("api/folders/colour?path={}", enc(p)),
+                        Some(format!("{{\"colour\":\"{colour}\"}}").into_bytes()),
+                        refresh_after,
+                    );
                 }
             }
             ui.close();
@@ -1654,7 +1779,13 @@ impl Home {
                         }
                         let f = t.folders.iter().find(|f| f.path == path).cloned().unwrap_or_default();
                         folder_icon(ui, &f, Rect::from_center_size(egui::pos2(x + 34.0, r.center().y), vec2(20.0, 20.0)));
-                        p.text(egui::pos2(x + 52.0, r.center().y), Align2::LEFT_CENTER, label, FontId::proportional(14.0), if allowed { theme::TEXT } else { theme::DIVIDER });
+                        p.text(
+                            egui::pos2(x + 52.0, r.center().y),
+                            Align2::LEFT_CENTER,
+                            label,
+                            FontId::proportional(14.0),
+                            if allowed { theme::TEXT } else { theme::DIVIDER },
+                        );
                         if resp.clicked() && !toggled && allowed {
                             *t.target = Some(path.to_string());
                         }
@@ -1704,7 +1835,13 @@ impl Home {
     /// Where a path is, in words: "My files › Budgets", "Ada's files › Team".
     fn place(&self, folder: &str) -> String {
         let top = space_of(folder);
-        let mut parts = vec![if !self.accounts { "All files".to_string() } else if top == self.space { "My files".into() } else { format!("{}'s files", self.person(top)) }];
+        let mut parts = vec![if !self.accounts {
+            "All files".to_string()
+        } else if top == self.space {
+            "My files".into()
+        } else {
+            format!("{}'s files", self.person(top))
+        }];
         parts.extend(folder.split('/').skip(usize::from(self.accounts)).filter(|p| !p.is_empty()).map(str::to_string));
         parts.join(" › ")
     }
@@ -1728,13 +1865,27 @@ impl Home {
                     rows.push(("Owner", if f.owner == self.space { "You".into() } else { self.person(&f.owner) }));
                 }
                 rows.push(("Size", size_text(f.size)));
-                let by = if f.changed_by.is_empty() { String::new() } else if f.changed_by == self.space { " by you".into() } else { format!(" by {}", self.person(&f.changed_by)) };
+                let by = if f.changed_by.is_empty() {
+                    String::new()
+                } else if f.changed_by == self.space {
+                    " by you".into()
+                } else {
+                    format!(" by {}", self.person(&f.changed_by))
+                };
                 rows.push(("Modified", format!("{}{by}", ago(f.modified))));
                 if let Some(t) = f.opened {
                     rows.push(("Opened by you", ago(t)));
                 }
                 if self.accounts {
-                    rows.push(("Your access", match f.role.as_str() { "owner" => "Owner", "edit" => "Can edit", _ => "Can view" }.into()));
+                    rows.push((
+                        "Your access",
+                        match f.role.as_str() {
+                            "owner" => "Owner",
+                            "edit" => "Can edit",
+                            _ => "Can view",
+                        }
+                        .into(),
+                    ));
                 }
             }
             Item::Folder(p) => {
@@ -1856,11 +2007,14 @@ impl Home {
         let Some(items) = self.dragging.clone() else { return };
         if let Some(pos) = ctx.pointer_latest_pos() {
             let label = if items.len() == 1 { self.label_of(&items[0]) } else { format!("{} items", items.len()) };
-            egui::Area::new(egui::Id::unique("home_drag")).fixed_pos(pos + vec2(14.0, 10.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(label);
-                });
-            });
+            egui::Area::new(egui::Id::unique("home_drag")).fixed_pos(pos + vec2(14.0, 10.0)).order(egui::Order::Tooltip).interactable(false).show(
+                ctx,
+                |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.label(label);
+                    });
+                },
+            );
         }
         if ctx.input(|i| i.pointer.any_released()) {
             self.dragging = None;
@@ -1907,7 +2061,12 @@ impl Home {
     fn keys(&mut self, ctx: &egui::Context) {
         self.mouse_buttons();
         Self::keep_listening(ctx);
-        if self.renaming.is_some() || ctx.memory(|m| m.focused()).is_some() || self.pending_move.is_some() || self.move_to.is_some() || self.details.is_some() {
+        if self.renaming.is_some()
+            || ctx.memory(|m| m.focused()).is_some()
+            || self.pending_move.is_some()
+            || self.move_to.is_some()
+            || self.details.is_some()
+        {
             return;
         }
         let events = ctx.input(|i| i.events.clone());
@@ -1949,7 +2108,14 @@ impl Home {
             house::note(ui, "Things in the bin are deleted for good after 30 days.");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let sure = self.confirm_purge == Some(None);
-                if ui.add_enabled(!self.bin.is_empty(), egui::Button::new(RichText::new(if sure { "Click again to empty the bin" } else { "Empty bin" }).color(house::ERROR)).frame(false)).clicked() {
+                if ui
+                    .add_enabled(
+                        !self.bin.is_empty(),
+                        egui::Button::new(RichText::new(if sure { "Click again to empty the bin" } else { "Empty bin" }).color(house::ERROR))
+                            .frame(false),
+                    )
+                    .clicked()
+                {
                     if sure {
                         call(&self.inbox, ui.ctx(), Method::Delete, "api/bin".into(), None, refresh_after);
                         self.confirm_purge = None;
@@ -1975,15 +2141,31 @@ impl Home {
                 }
                 p.text(r.left_center() + vec2(44.0, -8.0), Align2::LEFT_CENTER, name_of(&b.original), FontId::proportional(14.0), theme::TEXT);
                 let from = parent_of(&b.original);
-                let from = if from.is_empty() || from == self.space { "My files".to_string() } else { from.strip_prefix(&format!("{}/", self.space)).unwrap_or(from).to_string() };
-                p.text(r.left_center() + vec2(44.0, 10.0), Align2::LEFT_CENTER, format!("from {from} · deleted {}", ago(b.deleted)), FontId::proportional(12.0), theme::TEXT_DIM);
+                let from = if from.is_empty() || from == self.space {
+                    "My files".to_string()
+                } else {
+                    from.strip_prefix(&format!("{}/", self.space)).unwrap_or(from).to_string()
+                };
+                p.text(
+                    r.left_center() + vec2(44.0, 10.0),
+                    Align2::LEFT_CENTER,
+                    format!("from {from} · deleted {}", ago(b.deleted)),
+                    FontId::proportional(12.0),
+                    theme::TEXT_DIM,
+                );
                 let restore = Rect::from_min_size(r.right_top() + vec2(-260.0, 6.0), vec2(96.0, ROW - 6.0));
                 let purge = Rect::from_min_size(r.right_top() + vec2(-156.0, 6.0), vec2(150.0, ROW - 6.0));
                 if ui.put(restore, house::secondary("Restore")).clicked() {
                     call(&self.inbox, ui.ctx(), Method::Post, format!("api/bin/restore?name={}", enc(&b.name)), None, refresh_after);
                 }
                 let sure = self.confirm_purge.as_ref() == Some(&Some(b.name.clone()));
-                if ui.put(purge, egui::Button::new(RichText::new(if sure { "Sure? Click again" } else { "Delete forever" }).color(house::ERROR)).frame(false)).clicked() {
+                if ui
+                    .put(
+                        purge,
+                        egui::Button::new(RichText::new(if sure { "Sure? Click again" } else { "Delete forever" }).color(house::ERROR)).frame(false),
+                    )
+                    .clicked()
+                {
                     if sure {
                         call(&self.inbox, ui.ctx(), Method::Delete, format!("api/bin?name={}", enc(&b.name)), None, refresh_after);
                         self.confirm_purge = None;

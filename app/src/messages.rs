@@ -160,8 +160,12 @@ impl Messages {
 mod tests {
     #[test]
     fn formula_problems_in_plain_words() {
-        let m = super::plain_error("Bad parameter: invalid rule formula `ISEVEN(ROW(),TRUE))` — it does not parse; Excel would reject the saved file");
-        assert!(m.contains("=ISEVEN(ROW(),TRUE))") && m.contains("no opening bracket") && m.contains("=ISEVEN(ROW())") && !m.contains("Excel"), "{m}");
+        let m =
+            super::plain_error("Bad parameter: invalid rule formula `ISEVEN(ROW(),TRUE))` — it does not parse; Excel would reject the saved file");
+        assert!(
+            m.contains("=ISEVEN(ROW(),TRUE))") && m.contains("no opening bracket") && m.contains("=ISEVEN(ROW())") && !m.contains("Excel"),
+            "{m}"
+        );
         let m = super::plain_error("invalid rule formula \"ISEVEN(ROW(), TRUE))\" — it does not parse; Excel would reject the saved file");
         assert!(m.starts_with("StarSheets can't read the formula =ISEVEN(ROW(), TRUE)). "), "{m}");
         assert!(super::formula_hint("SUM(A1:A3").contains("add \")\""));

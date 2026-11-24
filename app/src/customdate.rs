@@ -19,7 +19,16 @@ const SAMPLE: f64 = 11_175.665_972_222_2;
 const KINDS: &[(&str, &[(&str, &str)])] = &[
     ("Day", &[("d", "Day without leading 0 (5)"), ("dd", "Day with leading 0 (05)")]),
     ("Day of the week", &[("ddd", "Short day of the week (Tue)"), ("dddd", "Full day of the week (Tuesday)")]),
-    ("Month", &[("m", "Month as number without leading 0 (8)"), ("mm", "Month as number with leading 0 (08)"), ("mmm", "Short month (Aug)"), ("mmmm", "Full month (August)"), ("mmmmm", "First letter of the month (A)")]),
+    (
+        "Month",
+        &[
+            ("m", "Month as number without leading 0 (8)"),
+            ("mm", "Month as number with leading 0 (08)"),
+            ("mmm", "Short month (Aug)"),
+            ("mmmm", "Full month (August)"),
+            ("mmmmm", "First letter of the month (A)"),
+        ],
+    ),
     ("Year", &[("yy", "2-digit year (30)"), ("yyyy", "Full year (1930)")]),
     ("Hour", &[("h", "Hour without leading 0 (15)"), ("hh", "Hour with leading 0 (15)"), ("[h]", "Elapsed hours")]),
     ("Minute", &[("m", "Minute without leading 0 (59)"), ("mm", "Minute with leading 0 (59)")]),
@@ -80,44 +89,53 @@ impl CustomDate {
             // The builder bar.
             ui.horizontal(|ui| {
                 let bar = ui.available_width() - 36.0 - 88.0 - 2.0 * house::S - 2.0 * house::S;
-                egui::Frame::NONE.stroke(Stroke::new(1.0, theme::BOX)).corner_radius(f32::from(house::FIELD_RADIUS)).inner_margin(egui::Margin::same(house::S as i8)).show(ui, |ui| {
-                    ui.set_width(bar);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = vec2(2.0, 4.0);
-                        let mut remove = None;
-                        for (i, p) in parts.iter_mut().enumerate() {
-                            match p {
-                                Part::Token(k, v) => {
-                                    let (kind, variants) = KINDS[*k];
-                                    let label = format!("{kind} ({})", sample(variants[*v].0, *k));
-                                    let chip = ui.add(egui::Button::new(RichText::new(label).size(13.0)).fill(house::SELECTED).stroke(Stroke::NONE).corner_radius(f32::from(house::FIELD_RADIUS)));
-                                    egui::Popup::menu(&chip).id(egui::Id::unique(("date_part", i))).show(|ui| {
-                                        let width = crate::shell::menu_style(ui, false);
-                                        for (vi, (_, text)) in variants.iter().enumerate() {
-                                            let mark = if *v == vi { "✓  " } else { "     " };
-                                            if ui.add(crate::shell::menu_row(&format!("{mark}{text}"), "", false)).clicked() {
-                                                *v = vi;
+                egui::Frame::NONE
+                    .stroke(Stroke::new(1.0, theme::BOX))
+                    .corner_radius(f32::from(house::FIELD_RADIUS))
+                    .inner_margin(egui::Margin::same(house::S as i8))
+                    .show(ui, |ui| {
+                        ui.set_width(bar);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(2.0, 4.0);
+                            let mut remove = None;
+                            for (i, p) in parts.iter_mut().enumerate() {
+                                match p {
+                                    Part::Token(k, v) => {
+                                        let (kind, variants) = KINDS[*k];
+                                        let label = format!("{kind} ({})", sample(variants[*v].0, *k));
+                                        let chip = ui.add(
+                                            egui::Button::new(RichText::new(label).size(13.0))
+                                                .fill(house::SELECTED)
+                                                .stroke(Stroke::NONE)
+                                                .corner_radius(f32::from(house::FIELD_RADIUS)),
+                                        );
+                                        egui::Popup::menu(&chip).id(egui::Id::unique(("date_part", i))).show(|ui| {
+                                            let width = crate::shell::menu_style(ui, false);
+                                            for (vi, (_, text)) in variants.iter().enumerate() {
+                                                let mark = if *v == vi { "✓  " } else { "     " };
+                                                if ui.add(crate::shell::menu_row(&format!("{mark}{text}"), "", false)).clicked() {
+                                                    *v = vi;
+                                                    ui.close();
+                                                }
+                                            }
+                                            crate::shell::menu_sep_width(ui, width);
+                                            if ui.add(crate::shell::menu_row("Delete", "", false)).clicked() {
+                                                remove = Some(i);
                                                 ui.close();
                                             }
-                                        }
-                                        crate::shell::menu_sep_width(ui, width);
-                                        if ui.add(crate::shell::menu_row("Delete", "", false)).clicked() {
-                                            remove = Some(i);
-                                            ui.close();
-                                        }
-                                    });
-                                }
-                                Part::Sep(s) => {
-                                    let w = (s.chars().count().max(1) as f32) * 8.0 + 6.0;
-                                    ui.add(egui::TextEdit::singleline(s).desired_width(w).frame(egui::Frame::NONE));
+                                        });
+                                    }
+                                    Part::Sep(s) => {
+                                        let w = (s.chars().count().max(1) as f32) * 8.0 + 6.0;
+                                        ui.add(egui::TextEdit::singleline(s).desired_width(w).frame(egui::Frame::NONE));
+                                    }
                                 }
                             }
-                        }
-                        if let Some(i) = remove {
-                            parts.remove(i);
-                        }
+                            if let Some(i) = remove {
+                                parts.remove(i);
+                            }
+                        });
                     });
-                });
                 let add = ui.add(egui::Button::new("▾").min_size(vec2(36.0, house::FIELD_HEIGHT))).on_hover_text("Add a part");
                 egui::Popup::menu(&add).id(egui::Id::unique("date_add")).show(|ui| {
                     crate::shell::menu_style(ui, false);
@@ -141,7 +159,12 @@ impl CustomDate {
             egui::ScrollArea::vertical().max_height(330.0).show(ui, |ui| {
                 crate::shell::menu_style_width(ui, ui.available_width());
                 for code in PRESETS {
-                    let r = ui.add(egui::Button::new(RichText::new(sample_code(code)).size(house::BODY).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(ui.available_width(), house::ROW_HEIGHT)));
+                    let r = ui.add(
+                        egui::Button::new(RichText::new(sample_code(code)).size(house::BODY).color(theme::TEXT))
+                            .shortcut_text("")
+                            .frame_when_inactive(false)
+                            .min_size(vec2(ui.available_width(), house::ROW_HEIGHT)),
+                    );
                     if r.clicked() {
                         *parts = parse(code);
                     }
@@ -193,7 +216,8 @@ fn sample(code: &str, kind: usize) -> String {
 }
 
 fn sample_code(code: &str) -> String {
-    gridcraft_engine::numfmt::text_function(&Value::number(SAMPLE), code, gridcraft_engine::core::date::DateSystem::default()).unwrap_or_else(|_| code.to_string())
+    gridcraft_engine::numfmt::text_function(&Value::number(SAMPLE), code, gridcraft_engine::core::date::DateSystem::default())
+        .unwrap_or_else(|_| code.to_string())
 }
 
 /// The format code for the parts; separators with letters are quoted.

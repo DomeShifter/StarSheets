@@ -101,13 +101,24 @@ pub fn others_ui(ui: &mut Ui) {
         ui.add_space(2.0);
     }
     if others.len() > 5 {
-        ui.label(RichText::new(format!("+{}", others.len() - 5)).size(house::NOTE).color(theme::TEXT_DIM)).on_hover_text(others[5..].iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("\n"));
+        ui.label(RichText::new(format!("+{}", others.len() - 5)).size(house::NOTE).color(theme::TEXT_DIM))
+            .on_hover_text(others[5..].iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join("\n"));
     }
 }
 
 enum Reply {
-    Info { auth: bool, setup: bool, signup: bool, signup_code: bool, signed_in: bool, user: Option<Me> },
-    Signup { on: bool, code: String },
+    Info {
+        auth: bool,
+        setup: bool,
+        signup: bool,
+        signup_code: bool,
+        signed_in: bool,
+        user: Option<Me>,
+    },
+    Signup {
+        on: bool,
+        code: String,
+    },
     /// Signed in or out, or the password changed: start the page again.
     Reload,
     Saved(Me),
@@ -180,7 +191,14 @@ fn me_from(v: &Json) -> Option<Me> {
 }
 
 /// Sends a JSON request; `then` turns a good answer into a Reply, errors become Reply::Error.
-fn call(inbox: &Rc<RefCell<Vec<Reply>>>, ctx: &egui::Context, method: Method, url: &str, body: Option<Json>, then: impl FnOnce(Json) -> Reply + 'static) {
+fn call(
+    inbox: &Rc<RefCell<Vec<Reply>>>,
+    ctx: &egui::Context,
+    method: Method,
+    url: &str,
+    body: Option<Json>,
+    then: impl FnOnce(Json) -> Reply + 'static,
+) {
     let (inbox, ctx, url) = (inbox.clone(), ctx.clone(), url.to_string());
     wasm_bindgen_futures::spawn_local(async move {
         let body = body.map(|b| serde_json::to_vec(&b).unwrap_or_default());
@@ -247,7 +265,9 @@ impl Account {
                     self.storage = Some(v);
                 }
                 Reply::SetUp => match self.storage_pick.clone().filter(|p| !p.is_empty()) {
-                    Some(folder) => call(&self.inbox, ctx, Method::Post, "api/storage", Some(json!({ "folder": folder, "mode": "move" })), |v| if v["restarting"].as_bool().unwrap_or(false) { Reply::Restarting } else { Reply::Reload }),
+                    Some(folder) => call(&self.inbox, ctx, Method::Post, "api/storage", Some(json!({ "folder": folder, "mode": "move" })), |v| {
+                        if v["restarting"].as_bool().unwrap_or(false) { Reply::Restarting } else { Reply::Reload }
+                    }),
                     None => reload(),
                 },
                 Reply::Restarting => {
@@ -265,7 +285,9 @@ impl Account {
                     self.name.clear();
                     self.username.clear();
                     self.password.clear();
-                    call(&self.inbox, ctx, Method::Get, "api/users", None, |v| Reply::People(v.as_array().into_iter().flatten().filter_map(me_from).collect()));
+                    call(&self.inbox, ctx, Method::Get, "api/users", None, |v| {
+                        Reply::People(v.as_array().into_iter().flatten().filter_map(me_from).collect())
+                    });
                 }
             }
         }
@@ -279,7 +301,9 @@ impl Account {
                 }
                 "people" => {
                     self.open(Dialog::People);
-                    call(&self.inbox, ctx, Method::Get, "api/users", None, |v| Reply::People(v.as_array().into_iter().flatten().filter_map(me_from).collect()));
+                    call(&self.inbox, ctx, Method::Get, "api/users", None, |v| {
+                        Reply::People(v.as_array().into_iter().flatten().filter_map(me_from).collect())
+                    });
                     call(&self.inbox, ctx, Method::Get, "api/signup/settings", None, signup_reply);
                 }
                 "signout" => call(&self.inbox, ctx, Method::Post, "api/logout", None, |_| Reply::Reload),
@@ -310,7 +334,9 @@ impl Account {
     }
 
     fn field(ui: &mut Ui, text: &mut String, hint: &str, password: bool) -> egui::Response {
-        ui.add(egui::TextEdit::singleline(text).password(password).hint_text(hint).desired_width(f32::INFINITY).margin(vec2(house::M, house::S + 1.0)))
+        ui.add(
+            egui::TextEdit::singleline(text).password(password).hint_text(hint).desired_width(f32::INFINITY).margin(vec2(house::M, house::S + 1.0)),
+        )
     }
 
     fn messages(&self, ui: &mut Ui) {
@@ -373,7 +399,10 @@ impl Account {
             let current = v["current"].as_str().unwrap_or("");
             let here = |p: &str| if p.is_empty() { location.to_string() } else { format!("{location} › {}", p.replace('/', " › ")) };
             house::text(ui, &format!("Now: {}", here(current)));
-            house::note(ui, "Choose another folder below. These are the folders the server can reach; to offer others, give the server a bigger folder when it's installed.");
+            house::note(
+                ui,
+                "Choose another folder below. These are the folders the server can reach; to offer others, give the server a bigger folder when it's installed.",
+            );
             house::gap(ui);
             let folders: Vec<String> = v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect();
             let with_files: Vec<String> = v["has_files"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect();
@@ -411,10 +440,17 @@ impl Account {
             if pick != current {
                 house::gap(ui);
                 if target_has {
-                    ui.radio_value(&mut self.storage_use, true, "Use the StarSheets files already in that folder (accounts there too: you may need to sign in again)");
+                    ui.radio_value(
+                        &mut self.storage_use,
+                        true,
+                        "Use the StarSheets files already in that folder (accounts there too: you may need to sign in again)",
+                    );
                     ui.radio_value(&mut self.storage_use, false, "Move my files there");
                 } else {
-                    house::note(ui, "Your spreadsheets, folders, versions, bin and accounts move there. Nobody can have a spreadsheet open while it happens; StarSheets restarts afterwards (a few seconds).");
+                    house::note(
+                        ui,
+                        "Your spreadsheets, folders, versions, bin and accounts move there. Nobody can have a spreadsheet open while it happens; StarSheets restarts afterwards (a few seconds).",
+                    );
                 }
             }
             self.messages(ui);
@@ -430,7 +466,9 @@ impl Account {
             self.busy = true;
             self.error = None;
             let body = json!({ "folder": self.storage_pick.clone().unwrap_or_default(), "mode": if self.storage_use { "use" } else { "move" } });
-            call(&self.inbox, ctx, Method::Post, "api/storage", Some(body), |v| if v["restarting"].as_bool().unwrap_or(false) { Reply::Restarting } else { Reply::Reload });
+            call(&self.inbox, ctx, Method::Post, "api/storage", Some(body), |v| {
+                if v["restarting"].as_bool().unwrap_or(false) { Reply::Restarting } else { Reply::Reload }
+            });
         }
     }
 
@@ -518,7 +556,10 @@ impl Account {
         let mut go = false;
         house::dialog(ctx, "starsheets_setup", 400.0, "Welcome to StarSheets", None, |ui| {
             house::note(ui, "This server has no accounts yet. Make yours: you'll be its owner and can add other people afterwards.");
-            house::note(ui, "The setup code is printed in the server's log when it starts (with Docker: docker logs followed by the container's name). If the server was started with STARSHEETS_PASSWORD, that is the code.");
+            house::note(
+                ui,
+                "The setup code is printed in the server's log when it starts (with Docker: docker logs followed by the container's name). If the server was started with STARSHEETS_PASSWORD, that is the code.",
+            );
             house::gap(ui);
             house::label(ui, "Setup code", "");
             let r = Self::field(ui, &mut self.code, "From the server's log", false);
@@ -535,10 +576,18 @@ impl Account {
             let r = Self::field(ui, &mut self.password2, "Password again", true);
             go |= Self::enter(ui, &r);
             // Where files go: the server's own folder, or a folder inside it.
-            let folders: Vec<String> = self.storage.as_ref().map(|v| v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            let folders: Vec<String> = self
+                .storage
+                .as_ref()
+                .map(|v| v["folders"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
             if !folders.is_empty() {
                 house::gap(ui);
-                house::label(ui, "Where to keep files", "Your spreadsheets are saved here. You can change it later (your avatar › Where files are kept).");
+                house::label(
+                    ui,
+                    "Where to keep files",
+                    "Your spreadsheets are saved here. You can change it later (your avatar › Where files are kept).",
+                );
                 let mut labels = vec!["The top folder".to_string()];
                 labels.extend(folders.iter().map(|f| f.replace('/', " › ")));
                 let mut i = self.storage_pick.as_ref().and_then(|p| folders.iter().position(|f| f == p)).map_or(0, |i| i + 1);
@@ -597,9 +646,11 @@ impl Account {
             self.dialog = Dialog::None;
         } else if go && !self.busy {
             self.busy = true;
-            call(&self.inbox, ctx, Method::Post, "api/me", Some(json!({ "name": self.name, "colour": self.colour })), |v| match me_from(&v["user"]) {
-                Some(me) => Reply::Saved(me),
-                None => Reply::Error("Couldn't save.".into()),
+            call(&self.inbox, ctx, Method::Post, "api/me", Some(json!({ "name": self.name, "colour": self.colour })), |v| {
+                match me_from(&v["user"]) {
+                    Some(me) => Reply::Saved(me),
+                    None => Reply::Error("Couldn't save.".into()),
+                }
             });
         }
     }
@@ -632,9 +683,11 @@ impl Account {
                 return;
             }
             self.busy = true;
-            call(&self.inbox, ctx, Method::Post, "api/me", Some(json!({ "current_password": self.current, "password": self.password })), |v| match me_from(&v["user"]) {
-                Some(me) => Reply::Saved(me),
-                None => Reply::Error("Couldn't change the password.".into()),
+            call(&self.inbox, ctx, Method::Post, "api/me", Some(json!({ "current_password": self.current, "password": self.password })), |v| {
+                match me_from(&v["user"]) {
+                    Some(me) => Reply::Saved(me),
+                    None => Reply::Error("Couldn't change the password.".into()),
+                }
             });
         }
     }
@@ -673,7 +726,11 @@ impl Account {
                 ui.add_space(house::XS);
             }
             house::gap(ui);
-            house::label(ui, "Sign-up", "Let people make their own account from the sign-in box. Only turn this on if strangers can't reach your server, or set a code.");
+            house::label(
+                ui,
+                "Sign-up",
+                "Let people make their own account from the sign-in box. Only turn this on if strangers can't reach your server, or set a code.",
+            );
             let mut changed = ui.checkbox(&mut self.signup_on, "Let people make their own account").changed();
             if self.signup_on {
                 ui.add_space(house::S);
@@ -702,7 +759,14 @@ impl Account {
         } else if add && !self.busy {
             self.busy = true;
             let who = self.username.clone();
-            call(&self.inbox, ctx, Method::Post, "api/users", Some(json!({ "name": self.name, "username": self.username, "password": self.password })), move |_| Reply::Done(format!("Added {who}.")));
+            call(
+                &self.inbox,
+                ctx,
+                Method::Post,
+                "api/users",
+                Some(json!({ "name": self.name, "username": self.username, "password": self.password })),
+                move |_| Reply::Done(format!("Added {who}.")),
+            );
         } else if save_signup {
             let body = json!({ "on": self.signup_on, "code": self.signup_secret.trim() });
             let on = self.signup_on;

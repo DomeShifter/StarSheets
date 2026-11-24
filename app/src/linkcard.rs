@@ -77,33 +77,37 @@ impl LinkCard {
         if app.grid.cells_rect.is_some_and(|r| !r.contains(pos - vec2(0.0, 6.0))) {
             return;
         }
-        egui::Area::new(egui::Id::unique("starsheets_link_card")).fixed_pos(pos).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            crate::house::card_frame().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let shown: String = if target.chars().count() > 48 { target.chars().take(45).chain("…".chars()).collect() } else { target.clone() };
-                    if ui.link(RichText::new(shown).color(theme::BLUE)).on_hover_text("Open link").clicked() {
-                        gridcraft_ui_egui::grid::follow_link(app, &target);
-                    }
-                    ui.add_space(8.0);
-                    let button = |ui: &mut Ui, icon: &str, tip: &str| match icons::icon(icon) {
-                        Some(img) => ui.add(Button::image(img).frame(false)).on_hover_text(tip),
-                        None => ui.add(Button::new(tip).frame(false)),
-                    };
-                    if button(ui, "content_copy", "Copy link").clicked() {
-                        ui.ctx().copy_text(target.clone());
-                    }
-                    if button(ui, "edit", "Edit link").clicked() {
-                        app.open_dialog("insertLink", json!({}));
-                    }
-                    if button(ui, "link_off", "Remove link").clicked() {
-                        app.run_or_alert("edit.clearHyperlinks", json!({}));
-                    }
-                    if ui.add(Button::new("✕").frame(false)).on_hover_text("Close").clicked() {
-                        self.dismissed = Some(cell);
-                    }
+        egui::Area::new(egui::Id::unique("starsheets_link_card")).fixed_pos(pos).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(
+            ui.ctx(),
+            |ui| {
+                crate::house::card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let shown: String =
+                            if target.chars().count() > 48 { target.chars().take(45).chain("…".chars()).collect() } else { target.clone() };
+                        if ui.link(RichText::new(shown).color(theme::BLUE)).on_hover_text("Open link").clicked() {
+                            gridcraft_ui_egui::grid::follow_link(app, &target);
+                        }
+                        ui.add_space(8.0);
+                        let button = |ui: &mut Ui, icon: &str, tip: &str| match icons::icon(icon) {
+                            Some(img) => ui.add(Button::image(img).frame(false)).on_hover_text(tip),
+                            None => ui.add(Button::new(tip).frame(false)),
+                        };
+                        if button(ui, "content_copy", "Copy link").clicked() {
+                            ui.ctx().copy_text(target.clone());
+                        }
+                        if button(ui, "edit", "Edit link").clicked() {
+                            app.open_dialog("insertLink", json!({}));
+                        }
+                        if button(ui, "link_off", "Remove link").clicked() {
+                            app.run_or_alert("edit.clearHyperlinks", json!({}));
+                        }
+                        if ui.add(Button::new("✕").frame(false)).on_hover_text("Close").clicked() {
+                            self.dismissed = Some(cell);
+                        }
+                    });
                 });
-            });
-        });
+            },
+        );
     }
 }
 

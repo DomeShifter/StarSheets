@@ -236,7 +236,8 @@ impl Live {
             ctx.request_repaint();
         }
         // Where this tab is, for the others (a few times a second at most).
-        if self.open && self.joined
+        if self.open
+            && self.joined
             && let Some(d) = app.session.active().filter(|d| d.uid == doc)
         {
             let place = (d.wb.active_sheet(), d.selection.clone());
@@ -267,7 +268,8 @@ impl Live {
         } else {
             "Saved"
         };
-        let status = LiveStatus { doc, text: text.to_string(), unsaved: !self.pending.is_empty(), saved_at: self.saved_at, last_edit: self.last_edit.clone() };
+        let status =
+            LiveStatus { doc, text: text.to_string(), unsaved: !self.pending.is_empty(), saved_at: self.saved_at, last_edit: self.last_edit.clone() };
         STATUS.with(|s| *s.borrow_mut() = Some(status));
         if !self.open {
             ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -282,7 +284,13 @@ impl Live {
                     // Only while the tab's copy is still the file as opened.
                     let untouched = self.pending.is_empty() && app.session.active().is_some_and(|d| d.uid == *doc && Arc::ptr_eq(&d.wb, &d.saved));
                     let have = self.have.clone().filter(|_| untouched);
-                    self.send(&ToServer::Hello { file: id.clone(), build: sync::BUILD.to_string(), client: self.client.clone(), protocol: sync::PROTOCOL, have });
+                    self.send(&ToServer::Hello {
+                        file: id.clone(),
+                        build: sync::BUILD.to_string(),
+                        client: self.client.clone(),
+                        protocol: sync::PROTOCOL,
+                        have,
+                    });
                 }
                 false
             }
@@ -335,7 +343,8 @@ impl Live {
                         self.rebuild(app, None);
                         restore_draft(app, self.file.as_ref().map(|(_, id)| id.as_str()).unwrap_or(""));
                         // Everything not confirmed goes (again) on top of what the server has.
-                        let resend: Vec<ToServer> = self.pending.iter().map(|p| ToServer::Change { cseq: p.cseq, base: seq, change: p.change.clone() }).collect();
+                        let resend: Vec<ToServer> =
+                            self.pending.iter().map(|p| ToServer::Change { cseq: p.cseq, base: seq, change: p.change.clone() }).collect();
                         for r in resend {
                             self.send(&r);
                         }
@@ -412,7 +421,9 @@ impl Live {
                 true
             }
             ToClient::Check { seq, hash } => {
-                if seq == self.seq && self.pending.is_empty() && self.acked.is_empty()
+                if seq == self.seq
+                    && self.pending.is_empty()
+                    && self.acked.is_empty()
                     && let Some(d) = app.session.active()
                     && sync::fingerprint(&d.wb) != hash
                 {
@@ -442,7 +453,10 @@ impl Live {
                     app.message = Some(("Moved to the bin".into(), "This spreadsheet was moved to the bin. What you change now isn't saved. To keep working on it, restore it from the Bin on your home screen (the Files button); saving then carries on by itself.".into()));
                     self.binned = true;
                 } else if std::mem::take(&mut self.binned) {
-                    app.message = Some(("Back from the bin".into(), "This spreadsheet was restored from the bin, so your changes are being saved again.".into()));
+                    app.message = Some((
+                        "Back from the bin".into(),
+                        "This spreadsheet was restored from the bin, so your changes are being saved again.".into(),
+                    ));
                 }
                 false
             }
@@ -487,7 +501,10 @@ impl Live {
         // The sheet of a cell being typed in, by name: a sheet that arrives from the server as a
         // whole (on reconnecting, or changed by another tab) is a new sheet to GridCraft, which
         // would then throw the typing away as "the sheet was deleted".
-        let typing_on = app.editor.as_ref().and_then(|e| app.session.active().filter(|d| d.uid == e.doc).and_then(|d| d.wb.sheet(e.sheet)).map(|sh| sh.name.clone()));
+        let typing_on = app
+            .editor
+            .as_ref()
+            .and_then(|e| app.session.active().filter(|d| d.uid == e.doc).and_then(|d| d.wb.sheet(e.sheet)).map(|sh| sh.name.clone()));
         sync::restore_workbook(&mut app.session, &confirmed);
         for c in std::mem::take(&mut self.acked) {
             let _ = sync::apply(&mut app.session, &c);
@@ -631,7 +648,14 @@ impl Live {
 
 /// What a step becomes on the wire: the command itself when it replays exactly, else the
 /// finished state of what it changed.
-fn make_change(id: &str, sheet: usize, sel: gridcraft_engine::selection::Selection, params: serde_json::Value, before: &Workbook, after: &Workbook) -> Change {
+fn make_change(
+    id: &str,
+    sheet: usize,
+    sel: gridcraft_engine::selection::Selection,
+    params: serde_json::Value,
+    before: &Workbook,
+    after: &Workbook,
+) -> Change {
     if sync::replayable(id) && sync::server_allows(id) {
         let fp = sync::change_fingerprint(before, after);
         Change::Cmd { sheet, sel, id: id.to_string(), params, locale: sync::InputLocale::current(), fp }

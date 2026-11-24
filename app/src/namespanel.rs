@@ -40,7 +40,8 @@ pub(crate) fn absolute(range: &str) -> String {
     // Only cell references: a constant or formula (=0.2, =A1*2) is kept as written.
     let plain = body.replace('$', "");
     let is_ref = gridcraft_engine::core::RangeRef::parse(&plain).is_some()
-        || plain.split(':').count() == 2 && plain.split(':').all(|p| !p.is_empty() && (p.chars().all(|c| c.is_ascii_alphabetic()) || p.chars().all(|c| c.is_ascii_digit())));
+        || plain.split(':').count() == 2
+            && plain.split(':').all(|p| !p.is_empty() && (p.chars().all(|c| c.is_ascii_alphabetic()) || p.chars().all(|c| c.is_ascii_digit())));
     if !is_ref {
         return range.to_string();
     }
@@ -108,11 +109,9 @@ impl NamesPanel {
         if !self.open {
             return;
         }
-        egui::Panel::right("starsheets_names")
-            .exact_size(PANEL_W + 32.0 + house::SCROLL_ROOM)
-            .resizable(false)
-            .frame(house::panel_frame())
-            .show(ui, |ui| {
+        egui::Panel::right("starsheets_names").exact_size(PANEL_W + 32.0 + house::SCROLL_ROOM).resizable(false).frame(house::panel_frame()).show(
+            ui,
+            |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Named ranges").size(16.0).color(theme::TEXT));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -134,14 +133,21 @@ impl NamesPanel {
                         self.list(app, ui);
                     }
                 });
-            });
+            },
+        );
     }
 
     fn list(&mut self, app: &mut SheetApp, ui: &mut Ui) {
         let names: Vec<(String, String)> = app
             .session
             .active()
-            .map(|d| d.wb.names.iter().filter(|n| !n.hidden && !n.name.starts_with("_sc_") && !n.name.starts_with("_gc_")).map(|n| (n.name.clone(), plain(&n.formula))).collect())
+            .map(|d| {
+                d.wb.names
+                    .iter()
+                    .filter(|n| !n.hidden && !n.name.starts_with("_sc_") && !n.name.starts_with("_gc_"))
+                    .map(|n| (n.name.clone(), plain(&n.formula)))
+                    .collect()
+            })
             .unwrap_or_default();
         if ui.add(house::link("+ Add a range")).clicked() {
             self.add(app);

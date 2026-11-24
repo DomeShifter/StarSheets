@@ -81,7 +81,14 @@ pub struct Share {
     busy: bool,
 }
 
-fn call(inbox: &Rc<RefCell<Vec<Reply>>>, ctx: &egui::Context, method: Method, url: String, body: Option<Json>, then: impl FnOnce(Json) -> Reply + 'static) {
+fn call(
+    inbox: &Rc<RefCell<Vec<Reply>>>,
+    ctx: &egui::Context,
+    method: Method,
+    url: String,
+    body: Option<Json>,
+    then: impl FnOnce(Json) -> Reply + 'static,
+) {
     let (inbox, ctx) = (inbox.clone(), ctx.clone());
     wasm_bindgen_futures::spawn_local(async move {
         let reply = match fetch(method, &url, body.map(|b| serde_json::to_vec(&b).unwrap_or_default()), None).await {
@@ -119,7 +126,9 @@ impl Share {
         let asked = ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::unique(REQUEST))).is_some();
         let target = match (item, file) {
             (Some(t), _) => Some(t),
-            (None, Some((_, id))) if asked => Some((format!("api/files/{id}/sharing"), format!("?file={id}"), app.session.active().map(|d| d.title.clone()).unwrap_or_default())),
+            (None, Some((_, id))) if asked => {
+                Some((format!("api/files/{id}/sharing"), format!("?file={id}"), app.session.active().map(|d| d.title.clone()).unwrap_or_default()))
+            }
             _ => None,
         };
         if let Some((url, page, name)) = target {
@@ -130,7 +139,12 @@ impl Share {
                     v.as_array()
                         .into_iter()
                         .flatten()
-                        .map(|u| Me { username: u["username"].as_str().unwrap_or("").into(), name: u["name"].as_str().unwrap_or("").into(), colour: u["colour"].as_str().unwrap_or("").into(), owner: false })
+                        .map(|u| Me {
+                            username: u["username"].as_str().unwrap_or("").into(),
+                            name: u["name"].as_str().unwrap_or("").into(),
+                            colour: u["colour"].as_str().unwrap_or("").into(),
+                            owner: false,
+                        })
                         .collect(),
                 )
             });
@@ -190,7 +204,12 @@ impl Share {
                     if ui.add(house::secondary("Add")).clicked()
                         && let Some(u) = others.get(self.add)
                     {
-                        self.people.push(Person { username: u.username.clone(), name: u.name.clone(), colour: u.colour.clone(), role: if self.add_role == 1 { "edit".into() } else { "view".into() } });
+                        self.people.push(Person {
+                            username: u.username.clone(),
+                            name: u.name.clone(),
+                            colour: u.colour.clone(),
+                            role: if self.add_role == 1 { "edit".into() } else { "view".into() },
+                        });
                         self.picks.push(self.add_role);
                     }
                 });

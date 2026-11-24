@@ -55,7 +55,10 @@ mod tests {
             s.execute("cell.set", json!({"cell": cell, "input": v})).unwrap();
         }
         s.execute("cell.set", json!({"cell": "E1", "input": "=QUERY(B1:C4, \"select B, C where C > 6 order by C desc\")"})).unwrap();
-        assert_eq!((at(&s, "E1"), at(&s, "E2"), at(&s, "F2"), at(&s, "E3")), (Value::Text("Name".into()), Value::Text("Bob".into()), Value::number(9.0), Value::Text("Cat".into())));
+        assert_eq!(
+            (at(&s, "E1"), at(&s, "E2"), at(&s, "F2"), at(&s, "E3")),
+            (Value::Text("Name".into()), Value::Text("Bob".into()), Value::number(9.0), Value::Text("Cat".into()))
+        );
         s.execute("cell.set", json!({"cell": "H1", "input": "=QUERY({B2:C4}, \"select Col1 where Col2 < 6\", 0)"})).unwrap();
         assert_eq!(at(&s, "H1"), Value::Text("Ann".into()));
         s.execute("cell.set", json!({"cell": "J1", "input": "=QUERY(B1:C4, \"select nonsense\")"})).unwrap();

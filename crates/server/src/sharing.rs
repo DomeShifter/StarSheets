@@ -88,7 +88,11 @@ fn load(store: &Store) -> Map<String, Value> {
 fn parse(v: &Value) -> Share {
     let people = v.get("people").and_then(Value::as_array).cloned().unwrap_or_default();
     Share {
-        people: people.iter().filter_map(|p| Some((p.get("username")?.as_str()?.to_string(), Role::parse(p.get("role")?.as_str()?)))).filter(|(_, r)| *r != Role::None).collect(),
+        people: people
+            .iter()
+            .filter_map(|p| Some((p.get("username")?.as_str()?.to_string(), Role::parse(p.get("role")?.as_str()?))))
+            .filter(|(_, r)| *r != Role::None)
+            .collect(),
         link: Role::parse(v.get("link").and_then(Value::as_str).unwrap_or("none")),
     }
 }
@@ -140,7 +144,9 @@ pub struct Access {
 impl Access {
     pub fn new(store: &Store, auth: bool, user: Option<&User>) -> Access {
         let all = load(store);
-        let group = |g: &str| -> HashMap<String, Share> { all.get(g).and_then(Value::as_object).map(|m| m.iter().map(|(k, v)| (k.clone(), parse(v))).collect()).unwrap_or_default() };
+        let group = |g: &str| -> HashMap<String, Share> {
+            all.get(g).and_then(Value::as_object).map(|m| m.iter().map(|(k, v)| (k.clone(), parse(v))).collect()).unwrap_or_default()
+        };
         let folder_ids: HashMap<String, String> = store.synced_folders().unwrap_or_default().into_iter().map(|(id, p)| (p, id)).collect();
         let by_id = group("folders");
         let folders = folder_ids.iter().filter_map(|(p, id)| Some((p.clone(), by_id.get(id)?.clone()))).collect();
@@ -170,10 +176,13 @@ impl Access {
 
     fn role_from(&self, shares: impl Iterator<Item = Share>, named_only: bool) -> Role {
         let me = self.me().to_string();
-        shares.map(|s| {
-            let mine = s.people.iter().find(|(p, _)| *p == me).map_or(Role::None, |p| p.1);
-            if named_only { mine } else { mine.max(s.link) }
-        }).max().unwrap_or(Role::None)
+        shares
+            .map(|s| {
+                let mine = s.people.iter().find(|(p, _)| *p == me).map_or(Role::None, |p| p.1);
+                if named_only { mine } else { mine.max(s.link) }
+            })
+            .max()
+            .unwrap_or(Role::None)
     }
 
     /// What I may do with the folder at `relpath` ("" = the top).
@@ -249,11 +258,14 @@ impl Access {
             }
             false
         };
-        let mut folders: Vec<String> = self.folders.iter().filter(|(p, s)| named(s) && not_mine(p) && !above_named(p)).map(|(p, _)| p.clone()).collect();
+        let mut folders: Vec<String> =
+            self.folders.iter().filter(|(p, s)| named(s) && not_mine(p) && !above_named(p)).map(|(p, _)| p.clone()).collect();
         let mut files: Vec<String> = self
             .files
             .iter()
-            .filter(|(id, s)| named(s) && self.file_paths.get(*id).is_some_and(|p| not_mine(p) && !folder_named(&crate::store::parent_of(p)) && !above_named(p)))
+            .filter(|(id, s)| {
+                named(s) && self.file_paths.get(*id).is_some_and(|p| not_mine(p) && !folder_named(&crate::store::parent_of(p)) && !above_named(p))
+            })
             .map(|(id, _)| id.clone())
             .collect();
         folders.sort();

@@ -41,61 +41,71 @@ impl DatePicker {
         }
         let Some((_, mut year, mut month)) = self.shown else { return };
         let mut picked = None;
-        egui::Area::new(egui::Id::unique("starsheets_date_picker")).fixed_pos(pos + vec2(0.0, 4.0)).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            crate::house::card_frame().show(ui, |ui| {
-                ui.set_width(CELL * 7.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(format!("{} {year}", MONTHS[(month - 1) as usize])).size(16.0).color(theme::TEXT));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(egui::Button::new(RichText::new("›").size(20.0)).frame(false)).on_hover_text("Next month").clicked() {
-                            (year, month) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
-                        }
-                        if ui.add(egui::Button::new(RichText::new("‹").size(20.0)).frame(false)).on_hover_text("Previous month").clicked() {
-                            (year, month) = if month == 1 { (year - 1, 12) } else { (year, month - 1) };
-                        }
+        egui::Area::new(egui::Id::unique("starsheets_date_picker"))
+            .fixed_pos(pos + vec2(0.0, 4.0))
+            .pivot(Align2::LEFT_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                crate::house::card_frame().show(ui, |ui| {
+                    ui.set_width(CELL * 7.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{} {year}", MONTHS[(month - 1) as usize])).size(16.0).color(theme::TEXT));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(RichText::new("›").size(20.0)).frame(false)).on_hover_text("Next month").clicked() {
+                                (year, month) = if month == 12 { (year + 1, 1) } else { (year, month + 1) };
+                            }
+                            if ui.add(egui::Button::new(RichText::new("‹").size(20.0)).frame(false)).on_hover_text("Previous month").clicked() {
+                                (year, month) = if month == 1 { (year - 1, 12) } else { (year, month - 1) };
+                            }
+                        });
                     });
+                    ui.add_space(6.0);
+                    let (r, _) = ui.allocate_exact_size(vec2(CELL * 7.0, CELL * 7.0), Sense::hover());
+                    let p = ui.painter().clone();
+                    for (i, d) in ["M", "T", "W", "T", "F", "S", "S"].iter().enumerate() {
+                        p.text(
+                            r.min + vec2(CELL * (i as f32 + 0.5), CELL * 0.5),
+                            Align2::CENTER_CENTER,
+                            *d,
+                            egui::FontId::proportional(13.0),
+                            theme::TEXT,
+                        );
+                    }
+                    // Monday on or before the 1st, then six weeks.
+                    let first = serial(year, month, 1);
+                    let start = first - weekday(first);
+                    for k in 0..42 {
+                        let day = start + k;
+                        let (_, m, d) = ymd(day);
+                        let c = r.min + vec2(CELL * ((k % 7) as f32 + 0.5), CELL * ((k / 7) as f32 + 1.5));
+                        let hit = egui::Rect::from_center_size(c, vec2(CELL, CELL));
+                        let resp = ui.interact(hit, ui.scope_id().with(("day", k)), Sense::click());
+                        let chosen = current == Some(day);
+                        if chosen {
+                            p.circle_filled(c, 15.0, BLUE);
+                        } else if resp.hovered() {
+                            p.circle_filled(c, 15.0, theme::MENU_HOVER);
+                        }
+                        let colour = if chosen {
+                            Color32::WHITE
+                        } else if m != month {
+                            Color32::from_gray(0xA0)
+                        } else if day == today {
+                            BLUE
+                        } else {
+                            theme::TEXT
+                        };
+                        p.text(c, Align2::CENTER_CENTER, d.to_string(), egui::FontId::proportional(14.0), colour);
+                        if resp.clicked() {
+                            picked = Some(day);
+                        }
+                    }
+                    ui.add_space(4.0);
+                    if ui.add(egui::Button::new(RichText::new("Today").size(crate::house::BODY).color(BLUE)).frame(false)).clicked() {
+                        picked = Some(today);
+                    }
                 });
-                ui.add_space(6.0);
-                let (r, _) = ui.allocate_exact_size(vec2(CELL * 7.0, CELL * 7.0), Sense::hover());
-                let p = ui.painter().clone();
-                for (i, d) in ["M", "T", "W", "T", "F", "S", "S"].iter().enumerate() {
-                    p.text(r.min + vec2(CELL * (i as f32 + 0.5), CELL * 0.5), Align2::CENTER_CENTER, *d, egui::FontId::proportional(13.0), theme::TEXT);
-                }
-                // Monday on or before the 1st, then six weeks.
-                let first = serial(year, month, 1);
-                let start = first - weekday(first);
-                for k in 0..42 {
-                    let day = start + k;
-                    let (_, m, d) = ymd(day);
-                    let c = r.min + vec2(CELL * ((k % 7) as f32 + 0.5), CELL * ((k / 7) as f32 + 1.5));
-                    let hit = egui::Rect::from_center_size(c, vec2(CELL, CELL));
-                    let resp = ui.interact(hit, ui.scope_id().with(("day", k)), Sense::click());
-                    let chosen = current == Some(day);
-                    if chosen {
-                        p.circle_filled(c, 15.0, BLUE);
-                    } else if resp.hovered() {
-                        p.circle_filled(c, 15.0, theme::MENU_HOVER);
-                    }
-                    let colour = if chosen {
-                        Color32::WHITE
-                    } else if m != month {
-                        Color32::from_gray(0xA0)
-                    } else if day == today {
-                        BLUE
-                    } else {
-                        theme::TEXT
-                    };
-                    p.text(c, Align2::CENTER_CENTER, d.to_string(), egui::FontId::proportional(14.0), colour);
-                    if resp.clicked() {
-                        picked = Some(day);
-                    }
-                }
-                ui.add_space(4.0);
-                if ui.add(egui::Button::new(RichText::new("Today").size(crate::house::BODY).color(BLUE)).frame(false)).clicked() {
-                    picked = Some(today);
-                }
             });
-        });
         self.shown = Some((cell, year, month));
         if let Some(day) = picked {
             let (y, m, d) = ymd(day);

@@ -42,7 +42,15 @@ fn sessions_path(store: &Store) -> std::path::PathBuf {
 }
 
 fn load(store: &Store) -> Vec<Map<String, Value>> {
-    store.load_json(&users_path(store)).get("users").and_then(Value::as_array).cloned().unwrap_or_default().into_iter().filter_map(|u| u.as_object().cloned()).collect()
+    store
+        .load_json(&users_path(store))
+        .get("users")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|u| u.as_object().cloned())
+        .collect()
 }
 
 fn save(store: &Store, users: &[Map<String, Value>]) -> std::io::Result<()> {

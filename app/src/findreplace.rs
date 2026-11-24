@@ -45,7 +45,11 @@ impl Matcher {
     fn new(f: &FindReplace) -> Result<Matcher, String> {
         let body = if f.regex { f.find.clone() } else { regex::escape(&f.find) };
         let body = if f.whole { format!("^(?:{body})$") } else { body };
-        regex::RegexBuilder::new(&body).case_insensitive(!f.match_case).build().map(|re| Matcher { re }).map_err(|_| "That isn't a valid regular expression.".to_string())
+        regex::RegexBuilder::new(&body)
+            .case_insensitive(!f.match_case)
+            .build()
+            .map(|re| Matcher { re })
+            .map_err(|_| "That isn't a valid regular expression.".to_string())
     }
 }
 
@@ -95,51 +99,61 @@ impl FindReplace {
             return;
         }
         let (mut go, mut close, mut full) = (None::<i32>, false, false);
-        egui::Area::new(egui::Id::unique("starsheets_find_bar")).anchor(egui::Align2::RIGHT_TOP, vec2(-24.0, 136.0)).order(egui::Order::Foreground).show(ctx, |ui| {
-            house::card_frame().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let r = ui.add(egui::TextEdit::singleline(&mut self.bar_text).desired_width(200.0).margin(vec2(house::M, house::S + 1.0)).hint_text("Find in sheet"));
-                    if self.bar_focus {
-                        r.request_focus();
-                        self.bar_focus = false;
-                    }
-                    if r.changed() {
-                        self.bar_at = None;
-                        go = Some(0);
-                    }
-                    let (enter, shift, esc) = ui.input(|i| (i.key_pressed(egui::Key::Enter), i.modifiers.shift, i.key_pressed(egui::Key::Escape)));
-                    if r.lost_focus() && enter {
-                        go = Some(if shift { -1 } else { 1 });
-                        self.bar_focus = true;
-                    }
-                    if esc && (r.has_focus() || r.lost_focus()) {
-                        close = true;
-                    }
-                    let shown = match (self.bar_at, self.bar_count) {
-                        (_, 0) => "0 of 0".to_string(),
-                        (Some(i), n) => format!("{} of {n}", i + 1),
-                        (None, n) => format!("{n} found"),
-                    };
-                    ui.label(RichText::new(shown).size(house::BODY).color(crate::theme::TEXT_DIM));
-                    let icon = |ui: &mut egui::Ui, name: &str, fallback: &str, tip: &str| match crate::icons::icon(name) {
-                        Some(img) => ui.add(egui::Button::image(img).frame(false)).on_hover_text(tip),
-                        None => ui.add(egui::Button::new(fallback).frame(false)).on_hover_text(tip),
-                    };
-                    if icon(ui, "keyboard_arrow_up", "▲", "Previous (Shift+Enter)").clicked() {
-                        go = Some(-1);
-                    }
-                    if icon(ui, "keyboard_arrow_down", "▼", "Next (Enter)").clicked() {
-                        go = Some(1);
-                    }
-                    if ui.add(egui::Button::new(RichText::new("⋮").size(16.0)).frame(false)).on_hover_text("Find and replace (Ctrl+H)").clicked() {
-                        full = true;
-                    }
-                    if icon(ui, "close", "✕", "Close (Esc)").clicked() {
-                        close = true;
-                    }
+        egui::Area::new(egui::Id::unique("starsheets_find_bar"))
+            .anchor(egui::Align2::RIGHT_TOP, vec2(-24.0, 136.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                house::card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let r = ui.add(
+                            egui::TextEdit::singleline(&mut self.bar_text)
+                                .desired_width(200.0)
+                                .margin(vec2(house::M, house::S + 1.0))
+                                .hint_text("Find in sheet"),
+                        );
+                        if self.bar_focus {
+                            r.request_focus();
+                            self.bar_focus = false;
+                        }
+                        if r.changed() {
+                            self.bar_at = None;
+                            go = Some(0);
+                        }
+                        let (enter, shift, esc) =
+                            ui.input(|i| (i.key_pressed(egui::Key::Enter), i.modifiers.shift, i.key_pressed(egui::Key::Escape)));
+                        if r.lost_focus() && enter {
+                            go = Some(if shift { -1 } else { 1 });
+                            self.bar_focus = true;
+                        }
+                        if esc && (r.has_focus() || r.lost_focus()) {
+                            close = true;
+                        }
+                        let shown = match (self.bar_at, self.bar_count) {
+                            (_, 0) => "0 of 0".to_string(),
+                            (Some(i), n) => format!("{} of {n}", i + 1),
+                            (None, n) => format!("{n} found"),
+                        };
+                        ui.label(RichText::new(shown).size(house::BODY).color(crate::theme::TEXT_DIM));
+                        let icon = |ui: &mut egui::Ui, name: &str, fallback: &str, tip: &str| match crate::icons::icon(name) {
+                            Some(img) => ui.add(egui::Button::image(img).frame(false)).on_hover_text(tip),
+                            None => ui.add(egui::Button::new(fallback).frame(false)).on_hover_text(tip),
+                        };
+                        if icon(ui, "keyboard_arrow_up", "▲", "Previous (Shift+Enter)").clicked() {
+                            go = Some(-1);
+                        }
+                        if icon(ui, "keyboard_arrow_down", "▼", "Next (Enter)").clicked() {
+                            go = Some(1);
+                        }
+                        if ui.add(egui::Button::new(RichText::new("⋮").size(16.0)).frame(false)).on_hover_text("Find and replace (Ctrl+H)").clicked()
+                        {
+                            full = true;
+                        }
+                        if icon(ui, "close", "✕", "Close (Esc)").clicked() {
+                            close = true;
+                        }
+                    });
                 });
             });
-        });
         if let Some(step) = go {
             let all = self.bar_matches(app);
             self.bar_count = all.len();
@@ -182,7 +196,12 @@ impl FindReplace {
             let field = |ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str| {
                 ui.horizontal(|ui| {
                     label_cell(ui, label);
-                    ui.add(egui::TextEdit::singleline(text).desired_width(460.0 - 110.0 - house::S).margin(vec2(house::M, house::S + 1.0)).hint_text(hint))
+                    ui.add(
+                        egui::TextEdit::singleline(text)
+                            .desired_width(460.0 - 110.0 - house::S)
+                            .margin(vec2(house::M, house::S + 1.0))
+                            .hint_text(hint),
+                    )
                 })
                 .inner
             };
@@ -351,11 +370,7 @@ impl FindReplace {
     }
 
     fn replaced(&self, m: &Matcher, t: &str) -> String {
-        if self.regex {
-            m.re.replace_all(t, self.with.as_str()).into_owned()
-        } else {
-            m.re.replace_all(t, regex::NoExpand(&self.with)).into_owned()
-        }
+        if self.regex { m.re.replace_all(t, self.with.as_str()).into_owned() } else { m.re.replace_all(t, regex::NoExpand(&self.with)).into_owned() }
     }
 
     /// Replaces every match in the search area.

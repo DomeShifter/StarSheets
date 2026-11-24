@@ -41,11 +41,7 @@ impl Bad {
 
 impl From<io::Error> for Bad {
     fn from(e: io::Error) -> Self {
-        if e.kind() == io::ErrorKind::NotFound {
-            Bad::new(404, "not found")
-        } else {
-            Bad::new(500, format!("storage error: {e}"))
-        }
+        if e.kind() == io::ErrorKind::NotFound { Bad::new(404, "not found") } else { Bad::new(500, format!("storage error: {e}")) }
     }
 }
 
@@ -267,10 +263,7 @@ impl Store {
     }
 
     fn load_index(&self) -> Index {
-        self.load_json(&self.index_path())
-            .into_iter()
-            .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
-            .collect()
+        self.load_json(&self.index_path()).into_iter().filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string()))).collect()
     }
 
     fn save_index(&self, index: &Index) -> io::Result<()> {
@@ -486,10 +479,7 @@ impl Store {
     }
 
     fn free_folder_name(&self, parent: &str, name: &str) -> R<String> {
-        (1..10000)
-            .map(|n| numbered(name, n, ""))
-            .find(|c| !self.full(parent).join(c).exists())
-            .ok_or_else(|| Bad::new(409, "no free name"))
+        (1..10000).map(|n| numbered(name, n, "")).find(|c| !self.full(parent).join(c).exists()).ok_or_else(|| Bad::new(409, "no free name"))
     }
 
     fn need_folder(&self, folder: &str) -> R<()> {
@@ -511,7 +501,15 @@ impl Store {
         }
     }
 
-    fn route_files(&self, method: &str, p: &[String], q: &HashMap<String, String>, if_match: Option<&str>, body: &[u8], index: &mut Index) -> R<Reply> {
+    fn route_files(
+        &self,
+        method: &str,
+        p: &[String],
+        q: &HashMap<String, String>,
+        if_match: Option<&str>,
+        body: &[u8],
+        index: &mut Index,
+    ) -> R<Reply> {
         if p.len() == 1 && method == "GET" {
             let (files, folders) = self.walk();
             let by_path: HashMap<&String, &String> = index.iter().map(|(k, v)| (v, k)).collect();
@@ -615,9 +613,8 @@ impl Store {
             }
             (["versions", ..], "GET") => {
                 let vdir = self.versions().join(fid);
-                let mut vs: Vec<String> = fs::read_dir(&vdir)
-                    .map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
-                    .unwrap_or_default();
+                let mut vs: Vec<String> =
+                    fs::read_dir(&vdir).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
                 vs.sort();
                 vs.reverse();
                 if rest.len() == 1 {
@@ -708,7 +705,11 @@ impl Store {
             .unwrap_or_default();
         present.sort();
         let deleted_at = |bins: &Map<String, Value>, name: &str| -> i64 {
-            bins.get(&self.bin_key(&space, name)).and_then(|i| i.get("deleted")).and_then(Value::as_i64).or_else(|| fs::metadata(bin.join(name)).ok().map(|m| mtime(&m).0)).unwrap_or(0)
+            bins.get(&self.bin_key(&space, name))
+                .and_then(|i| i.get("deleted"))
+                .and_then(Value::as_i64)
+                .or_else(|| fs::metadata(bin.join(name)).ok().map(|m| mtime(&m).0))
+                .unwrap_or(0)
         };
         // Things deleted more than BIN_DAYS ago go for good.
         let too_old = now() as i64 - BIN_DAYS * 86400;
@@ -806,7 +807,11 @@ impl Store {
     /// Deletes something in a bin for good, with the versions of the files in it.
     fn forget(&self, bin: &Path, space: &str, name: &str, bins: &mut Map<String, Value>) -> io::Result<()> {
         let src = bin.join(name);
-        if src.is_dir() { fs::remove_dir_all(&src)? } else { fs::remove_file(&src)? }
+        if src.is_dir() {
+            fs::remove_dir_all(&src)?
+        } else {
+            fs::remove_file(&src)?
+        }
         if let Some(info) = bins.remove(&self.bin_key(space, name))
             && let Some(ids) = info.get("files").and_then(Value::as_object)
         {

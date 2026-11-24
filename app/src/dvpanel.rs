@@ -294,7 +294,9 @@ impl DvPanel {
 
     /// The rule cards: range and criterion; click to edit, bin to remove.
     fn list(&mut self, app: &mut SheetApp, ui: &mut Ui) {
-        let Some((rules, cfs, theme_colours)) = app.session.active().and_then(|d| d.wb.active().map(|sh| (sh.validations.clone(), sh.cond_formats.clone(), d.wb.theme.clone()))) else {
+        let Some((rules, cfs, theme_colours)) =
+            app.session.active().and_then(|d| d.wb.active().map(|sh| (sh.validations.clone(), sh.cond_formats.clone(), d.wb.theme.clone())))
+        else {
             return;
         };
         let mut remove_it = None;
@@ -308,7 +310,13 @@ impl DvPanel {
                 p.rect_filled(r, 0.0, theme::MENU_HOVER);
             }
             p.text(r.left_center() + vec2(12.0, -10.0), egui::Align2::LEFT_CENTER, &d.range, egui::FontId::proportional(13.5), theme::TEXT);
-            p.text(r.left_center() + vec2(12.0, 10.0), egui::Align2::LEFT_CENTER, clip(&describe(&d), 44), egui::FontId::proportional(12.0), theme::TEXT_DIM);
+            p.text(
+                r.left_center() + vec2(12.0, 10.0),
+                egui::Align2::LEFT_CENTER,
+                clip(&describe(&d), 44),
+                egui::FontId::proportional(12.0),
+                theme::TEXT_DIM,
+            );
             let bin = egui::Rect::from_center_size(egui::pos2(r.right() - 20.0, r.center().y), vec2(28.0, 28.0));
             let b = ui.interact(bin, ui.scope_id().with(("dv_bin", i)), Sense::click());
             if (resp.hovered() || b.hovered())
@@ -443,7 +451,12 @@ fn criterion_inputs(ui: &mut Ui, d: &mut Draft) {
             for (i, it) in d.items.iter_mut().enumerate() {
                 ui.horizontal(|ui| {
                     chip_colour(ui, i, &mut it.colour);
-                    ui.add(egui::TextEdit::singleline(&mut it.text).hint_text(format!("Option {}", i + 1)).desired_width(PANEL_W - 84.0).margin(vec2(8.0, 6.0)));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut it.text)
+                            .hint_text(format!("Option {}", i + 1))
+                            .desired_width(PANEL_W - 84.0)
+                            .margin(vec2(8.0, 6.0)),
+                    );
                     if let Some(img) = crate::icons::icon("delete")
                         && ui.add(egui::Button::image(img.fit_to_exact_size(vec2(18.0, 18.0))).frame(false)).on_hover_text("Delete item").clicked()
                     {
@@ -503,7 +516,13 @@ fn chip_colour(ui: &mut Ui, i: usize, colour: &mut Option<u32>) {
                 for c in row.iter() {
                     let pick = if *c == CHIP_LIGHT[0] { None } else { Some(*c) };
                     let (r, b) = ui.allocate_exact_size(vec2(26.0, 26.0), Sense::click());
-                    let ring = if *colour == pick { Stroke::new(2.0, GREEN) } else if b.hovered() { Stroke::new(1.0, theme::TEXT_DIM) } else { Stroke::new(1.0, theme::BOX) };
+                    let ring = if *colour == pick {
+                        Stroke::new(2.0, GREEN)
+                    } else if b.hovered() {
+                        Stroke::new(1.0, theme::TEXT_DIM)
+                    } else {
+                        Stroke::new(1.0, theme::BOX)
+                    };
                     ui.painter().circle(r.center(), 10.0, c32(*c), ring);
                     if b.clicked() {
                         *colour = pick;
@@ -601,7 +620,10 @@ fn commands(d: &Draft) -> Result<Vec<(&'static str, Json)>, String> {
             for it in &items {
                 if let Some(c) = it.colour {
                     let style = json!({ "fill": hex(c), "font": { "color": hex(chip_text(c)) } });
-                    extra.push(("home.conditionalFormat", json!({ "range": range, "rule": { "type": "cellIs", "operator": "equal", "value": quoted(it.text.trim()), "style": style } })));
+                    extra.push((
+                        "home.conditionalFormat",
+                        json!({ "range": range, "rule": { "type": "cellIs", "operator": "equal", "value": quoted(it.text.trim()), "style": style } }),
+                    ));
                 }
             }
             json!({ "type": "list", "formula1": items.iter().map(|i| i.text.trim()).collect::<Vec<_>>().join(",") })
@@ -804,7 +826,12 @@ fn first_quoted(f: &str, before: &str) -> String {
 }
 
 /// Reads a stored rule back into the editor's terms (the reverse of `commands`).
-fn draft_from(dv: &Validation, cfs: &[gridcraft_engine::model::CondFormat], theme_colours: &gridcraft_engine::model::Theme, meta: Option<&crate::hostdata::DvMeta>) -> Draft {
+fn draft_from(
+    dv: &Validation,
+    cfs: &[gridcraft_engine::model::CondFormat],
+    theme_colours: &gridcraft_engine::model::Theme,
+    meta: Option<&crate::hostdata::DvMeta>,
+) -> Draft {
     let range = dv.ranges.iter().map(|r| r.a1()).collect::<Vec<_>>().join(",");
     let mut d = Draft::new(range.clone());
     let tl = top_left(&range).unwrap_or_default();
@@ -919,7 +946,10 @@ fn op_name(op: CfOperator) -> &'static str {
 }
 
 fn static_op(op: &str) -> &'static str {
-    ["between", "notBetween", "equal", "notEqual", "greater", "less", "greaterOrEqual", "lessOrEqual"].into_iter().find(|x| *x == op).unwrap_or("equal")
+    ["between", "notBetween", "equal", "notEqual", "greater", "less", "greaterOrEqual", "lessOrEqual"]
+        .into_iter()
+        .find(|x| *x == op)
+        .unwrap_or("equal")
 }
 
 /// A spreadsheet date number as dd/mm/yyyy.
@@ -1047,7 +1077,11 @@ mod tests {
         for (cmd, p) in commands(&d).unwrap() {
             s.execute(cmd, p).unwrap();
         }
-        s.execute("home.conditionalFormat", json!({ "range": "B2:B9", "rule": { "type": "cellIs", "operator": "equal", "value": "\"Maybe\"", "style": { "fill": "#FF0000" } } })).unwrap();
+        s.execute(
+            "home.conditionalFormat",
+            json!({ "range": "B2:B9", "rule": { "type": "cellIs", "operator": "equal", "value": "\"Maybe\"", "style": { "fill": "#FF0000" } } }),
+        )
+        .unwrap();
         let sh = s.active().unwrap().wb.active().unwrap().clone();
         let colour: Vec<bool> = sh.cond_formats.iter().map(|cf| is_item_colour(&sh, cf, &crate::hostdata::HostData::default())).collect();
         assert_eq!(colour.iter().filter(|c| **c).count(), 1, "{colour:?}");
@@ -1078,7 +1112,11 @@ mod tests {
         for (cmd, p) in commands(&d).unwrap() {
             s.execute(cmd, p).unwrap();
         }
-        s.execute("home.conditionalFormat", json!({ "range": "B2:B9", "rule": { "type": "cellIs", "operator": "equal", "value": "\"Open\"", "style": { "fill": "#FF0000" } } })).unwrap();
+        s.execute(
+            "home.conditionalFormat",
+            json!({ "range": "B2:B9", "rule": { "type": "cellIs", "operator": "equal", "value": "\"Open\"", "style": { "fill": "#FF0000" } } }),
+        )
+        .unwrap();
         let sh = s.active().unwrap().wb.active().unwrap().clone();
         let mut h = crate::hostdata::HostData::default();
         assert!(is_item_colour(&sh, &sh.cond_formats[0], &h), "without the section: guessed");

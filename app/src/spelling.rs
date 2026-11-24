@@ -25,7 +25,8 @@ fn mine_has(w: &str) -> bool {
 fn stored_words() -> Vec<String> {
     #[cfg(target_arch = "wasm32")]
     {
-        if let Some(t) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).and_then(|s| s.get_item("starsheets_words").ok().flatten()) {
+        if let Some(t) = web_sys::window().and_then(|w| w.local_storage().ok().flatten()).and_then(|s| s.get_item("starsheets_words").ok().flatten())
+        {
             return t.lines().map(str::to_string).collect();
         }
     }
@@ -127,7 +128,8 @@ pub fn suggestions(word: &str) -> Vec<String> {
             let d = distance(&w, &cc, 2);
             let likely = missing_letters(&w, &cc) || swapped(&w, &cc);
             let shared = w.iter().zip(&cc).take_while(|(a, b)| a == b).count();
-            (d <= 2 && (shared > 0 || likely)).then(|| (!likely, d, consonants(&cc).abs_diff(mine), std::cmp::Reverse(shared), cc.len().abs_diff(w.len()), c))
+            (d <= 2 && (shared > 0 || likely))
+                .then(|| (!likely, d, consonants(&cc).abs_diff(mine), std::cmp::Reverse(shared), cc.len().abs_diff(w.len()), c))
         })
         .collect();
     found.sort();
@@ -227,26 +229,29 @@ impl Suggest {
         let mut pick: Option<String> = None;
         let mut add = false;
         let mut close = false;
-        let shown = egui::Area::new(egui::Id::unique("starsheets_spelling")).fixed_pos(pos + egui::vec2(0.0, 14.0)).order(egui::Order::Foreground).show(ctx, |ui| {
-            egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(0, crate::house::S as i8)).show(ui, |ui| {
-                crate::house::menu(ui, 220.0);
-                if list.is_empty() {
-                    crate::house::menu_inset(ui, |ui| crate::house::note(ui, "No suggestions"));
-                }
-                for s in &list {
-                    if crate::house::menu_row(ui, None, s, "", true) {
-                        pick = Some(s.clone());
+        let shown = egui::Area::new(egui::Id::unique("starsheets_spelling"))
+            .fixed_pos(pos + egui::vec2(0.0, 14.0))
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(0, crate::house::S as i8)).show(ui, |ui| {
+                    crate::house::menu(ui, 220.0);
+                    if list.is_empty() {
+                        crate::house::menu_inset(ui, |ui| crate::house::note(ui, "No suggestions"));
                     }
-                }
-                crate::house::menu_sep(ui);
-                if crate::house::menu_row(ui, None, &format!("Add \u{201c}{word}\u{201d} to dictionary"), "", true) {
-                    add = true;
-                }
-                if crate::house::menu_row(ui, None, "Ignore", "Esc", true) {
-                    close = true;
-                }
+                    for s in &list {
+                        if crate::house::menu_row(ui, None, s, "", true) {
+                            pick = Some(s.clone());
+                        }
+                    }
+                    crate::house::menu_sep(ui);
+                    if crate::house::menu_row(ui, None, &format!("Add \u{201c}{word}\u{201d} to dictionary"), "", true) {
+                        add = true;
+                    }
+                    if crate::house::menu_row(ui, None, "Ignore", "Esc", true) {
+                        close = true;
+                    }
+                });
             });
-        });
         self.rect = Some(shown.response.rect);
         if std::mem::take(&mut self.escape) {
             close = true;

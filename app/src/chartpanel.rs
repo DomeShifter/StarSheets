@@ -284,7 +284,11 @@ impl ChartPanel {
                     for (t, label) in [(Tab::Setup, "Setup"), (Tab::Customise, "Customise")] {
                         let on = tab == t;
                         let colour = if on { house::GREEN } else { theme::TEXT_DIM };
-                        let r = ui.add(egui::Button::new(RichText::new(label).size(house::BODY).color(colour)).frame(false).min_size(vec2(PANEL_W / 2.0 - 4.0, 36.0)));
+                        let r = ui.add(
+                            egui::Button::new(RichText::new(label).size(house::BODY).color(colour))
+                                .frame(false)
+                                .min_size(vec2(PANEL_W / 2.0 - 4.0, 36.0)),
+                        );
                         if on {
                             ui.painter().hline(r.rect.x_range().shrink(8.0), r.rect.bottom(), Stroke::new(3.0, house::GREEN));
                         }
@@ -398,7 +402,8 @@ impl ChartPanel {
             }
             if pie {
                 house::label(ui, "Doughnut hole", "");
-                let now = if c.kind == ChartKind::Pie { 0 } else { HOLES.iter().rposition(|h| h.1 > 0 && u32::from(c.hole_size) >= h.1).unwrap_or(2) };
+                let now =
+                    if c.kind == ChartKind::Pie { 0 } else { HOLES.iter().rposition(|h| h.1 > 0 && u32::from(c.hole_size) >= h.1).unwrap_or(2) };
                 let mut k = now;
                 if house::select(ui, "chart_hole", PANEL_W, &mut k, &HOLES.iter().map(|h| h.0).collect::<Vec<_>>(), &[]) {
                     if HOLES[k].1 == 0 {
@@ -427,7 +432,8 @@ impl ChartPanel {
             };
             house::label(ui, "Title text", "");
             let mut text = now.clone().unwrap_or_default();
-            let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("Type a title"));
+            let r =
+                ui.add(egui::TextEdit::singleline(&mut text).desired_width(PANEL_W).margin(vec2(house::M, house::S + 1.0)).hint_text("Type a title"));
             if r.changed() {
                 // Live, as in Sheets; an emptied title is removed.
                 let v = if text.is_empty() { serde_json::Value::Null } else { json!(text) };

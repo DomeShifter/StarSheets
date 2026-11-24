@@ -175,7 +175,10 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             let setup = on && !auth::any_users(&app.store);
             let s = auth::signup(&app.store);
             let signup = on && !setup && s.on;
-            send_json(&json!({ "location": app.location, "auth": on, "signed_in": !on || me.is_some(), "setup": setup, "signup": signup, "signup_code": signup && !s.code.is_empty(), "user": me.map(|u| u.json()) }), 200)
+            send_json(
+                &json!({ "location": app.location, "auth": on, "signed_in": !on || me.is_some(), "setup": setup, "signup": signup, "signup_code": signup && !s.code.is_empty(), "user": me.map(|u| u.json()) }),
+                200,
+            )
         }
         (["setup"], "POST") => {
             if !on {
@@ -188,7 +191,8 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
                 if !same(field(&json, "code").trim().as_bytes(), auth::setup_code(&app.store).as_bytes()) {
                     return Err((401, "That setup code isn't right.".to_string()));
                 }
-                let user = auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map_err(|e| (400, e))?;
+                let user =
+                    auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map_err(|e| (400, e))?;
                 let _ = std::fs::remove_file(app.store.meta().join("setup-code"));
                 // Files already in the folder become the new owner's.
                 spaces::migrate(&app.store).map_err(|e| (500, e.to_string()))?;
@@ -211,7 +215,8 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
                 return Some(error(400, "Sign-in is off on this server."));
             }
             let r = blocking(app, move |app| {
-                let user = auth::sign_up(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password"), &field(&json, "code"))?;
+                let user =
+                    auth::sign_up(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password"), &field(&json, "code"))?;
                 let _ = spaces::ensure_space(&app.store, &user.username);
                 Ok(session(app, &user))
             })
@@ -233,7 +238,11 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             }
             let posting = m == "POST";
             let r = blocking(app, move |app| {
-                if posting { auth::set_signup(&app.store, json.get("on").and_then(Value::as_bool).unwrap_or(false), &field(&json, "code")) } else { Ok(auth::signup(&app.store)) }
+                if posting {
+                    auth::set_signup(&app.store, json.get("on").and_then(Value::as_bool).unwrap_or(false), &field(&json, "code"))
+                } else {
+                    Ok(auth::signup(&app.store))
+                }
             })
             .await;
             match r {
@@ -246,7 +255,9 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             if !on {
                 return Some(send_json(&json!({ "ok": true }), 200));
             }
-            let r = blocking(app, move |app| auth::check(&app.store, &field(&json, "username"), &field(&json, "password")).map(|u| session(app, &u))).await.flatten();
+            let r = blocking(app, move |app| auth::check(&app.store, &field(&json, "username"), &field(&json, "password")).map(|u| session(app, &u)))
+                .await
+                .flatten();
             match r {
                 Some(resp) => resp,
                 None => {
@@ -268,8 +279,20 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
                 if new_password.is_some() && auth::check(&app.store, &me.username, &field(&json, "current_password")).is_none() {
                     return Err("Your current password isn't right.".to_string());
                 }
-                auth::update(&app.store, &me.username, opt_field(&json, "name").as_deref(), opt_field(&json, "colour").as_deref(), new_password.as_deref())
-                    .and_then(|u| if json.get("password").is_some() { auth::new_session(&app.store, &u.username).map(|t| (u, Some(t))).map_err(|e| e.to_string()) } else { Ok((u, None)) })
+                auth::update(
+                    &app.store,
+                    &me.username,
+                    opt_field(&json, "name").as_deref(),
+                    opt_field(&json, "colour").as_deref(),
+                    new_password.as_deref(),
+                )
+                .and_then(|u| {
+                    if json.get("password").is_some() {
+                        auth::new_session(&app.store, &u.username).map(|t| (u, Some(t))).map_err(|e| e.to_string())
+                    } else {
+                        Ok((u, None))
+                    }
+                })
             })
             .await;
             match r {
@@ -322,7 +345,14 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
 /// Checks a files/folders/bin request against what the person may do, fills in where things go
 /// by default (their own folder), and answers sharing and star requests itself. Returns the
 /// query to use, or the answer to send.
-async fn gate(app: &Shared, m: &str, p: &[String], mut q: HashMap<String, String>, me: Option<auth::User>, body: &[u8]) -> Result<HashMap<String, String>, Response<Body>> {
+async fn gate(
+    app: &Shared,
+    m: &str,
+    p: &[String],
+    mut q: HashMap<String, String>,
+    me: Option<auth::User>,
+    body: &[u8],
+) -> Result<HashMap<String, String>, Response<Body>> {
     if !app.auth {
         return Ok(q);
     }
@@ -496,7 +526,12 @@ fn storage_folders(base: &Path) -> Vec<String> {
             return;
         }
         let Ok(rd) = std::fs::read_dir(if here.is_empty() { base.to_path_buf() } else { base.join(here) }) else { return };
-        let mut dirs: Vec<String> = rd.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| !n.starts_with('.')).collect();
+        let mut dirs: Vec<String> = rd
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| !n.starts_with('.'))
+            .collect();
         dirs.sort_by_key(|d| d.to_lowercase());
         for d in dirs {
             let p = store::join(here, &d);
@@ -532,7 +567,10 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
         let spaces: Vec<String> = auth::users(&app.store).into_iter().map(|u| store::join(&current, &u.username)).collect();
         folders.retain(|f| !spaces.iter().any(|s| f == s || f.starts_with(&format!("{s}/"))));
         let ready: Vec<String> = folders.iter().filter(|f| has_starsheets(&app.base.join(f))).cloned().collect();
-        return send_json(&json!({ "location": app.location, "current": current, "folders": folders, "has_files": ready, "top_has_files": has_starsheets(&app.base) }), 200);
+        return send_json(
+            &json!({ "location": app.location, "current": current, "folders": folders, "has_files": ready, "top_has_files": has_starsheets(&app.base) }),
+            200,
+        );
     }
     let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
     let Ok(to) = store::rel(json.get("folder").and_then(Value::as_str)) else { return error(400, "That isn't a folder name.") };
@@ -564,8 +602,14 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
                     }
                 }
                 // Everything moves, or nothing: check for clashes first.
-                let entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&old).map_err(|e| e.to_string())?.flatten().filter(|e| e.file_name() != ".starsheets-root").collect();
-                let clash: Vec<String> = entries.iter().map(|e| e.file_name()).filter(|n| new.join(n).exists() && old.join(n) != new).map(|n| n.to_string_lossy().into_owned()).collect();
+                let entries: Vec<std::fs::DirEntry> =
+                    std::fs::read_dir(&old).map_err(|e| e.to_string())?.flatten().filter(|e| e.file_name() != ".starsheets-root").collect();
+                let clash: Vec<String> = entries
+                    .iter()
+                    .map(|e| e.file_name())
+                    .filter(|n| new.join(n).exists() && old.join(n) != new)
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .collect();
                 if !clash.is_empty() {
                     return Err(format!("That folder already has {} in it. Choose an empty folder, or tidy it first.", clash.join(", ")));
                 }
@@ -591,7 +635,13 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
     .unwrap_or_else(|| Err("server error".into()));
     match r {
         Ok(()) => {
-            log::note(&app.store, &format!("files now kept in {:?}; restarting", if json["folder"].as_str().unwrap_or("").is_empty() { "the top folder" } else { json["folder"].as_str().unwrap_or("") }));
+            log::note(
+                &app.store,
+                &format!(
+                    "files now kept in {:?}; restarting",
+                    if json["folder"].as_str().unwrap_or("").is_empty() { "the top folder" } else { json["folder"].as_str().unwrap_or("") }
+                ),
+            );
             tokio::spawn(async {
                 tokio::time::sleep(Duration::from_millis(600)).await;
                 std::process::exit(0);
@@ -606,13 +656,19 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
 /// its type) to the end of file ID, through its live room. Needs edit rights on ID.
 async fn add_sheets(app: &Shared, me: Option<auth::User>, file: String, q: &HashMap<String, String>, body: Bytes) -> Response<Body> {
     let (app2, f2, me2) = (app.clone(), file.clone(), me.clone());
-    let (role, path) = blocking(app, move |a| (sharing::file_role(&a.store, a.auth, me2.as_ref(), &f2), a.store.path_of(&f2).ok().flatten().unwrap_or_default())).await.unwrap_or_default();
+    let (role, path) =
+        blocking(app, move |a| (sharing::file_role(&a.store, a.auth, me2.as_ref(), &f2), a.store.path_of(&f2).ok().flatten().unwrap_or_default()))
+            .await
+            .unwrap_or_default();
     // A .csv (or other one-sheet type) can't hold another tab.
     if !matches!(path.rsplit_once('.').map(|(_, e)| e.to_lowercase()).as_deref(), Some("xlsx" | "xlsm" | "ods")) && role > sharing::Role::None {
         return error(400, "That file can only hold one sheet (it's a .csv or similar). Pick an .xlsx spreadsheet, or copy to a new spreadsheet.");
     }
     if role < sharing::Role::Edit {
-        return error(403, if role == sharing::Role::None { "You don't have access to that spreadsheet." } else { "You can only view that spreadsheet." });
+        return error(
+            403,
+            if role == sharing::Role::None { "You don't have access to that spreadsheet." } else { "You can only view that spreadsheet." },
+        );
     }
     let name = q.get("name").cloned().unwrap_or_else(|| "sheet.xlsx".into());
     let by = me.map(|u| u.username).unwrap_or_default();
@@ -717,7 +773,14 @@ fn after_files(app: &App, me: &auth::User, m: &str, p: &[String], r: Result<Repl
             Some(f)
         })
         .collect();
-    let folders: Vec<String> = v["folders"].as_array().cloned().unwrap_or_default().into_iter().filter_map(|f| f.as_str().map(str::to_string)).filter(|f| a.folder_listed(f)).collect();
+    let folders: Vec<String> = v["folders"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|f| f.as_str().map(str::to_string))
+        .filter(|f| a.folder_listed(f))
+        .collect();
     let info: serde_json::Map<String, Value> = folders
         .iter()
         .map(|f| {
@@ -773,11 +836,8 @@ async fn serve_site(site: &Path, path: &str, headers: &HeaderMap) -> Response<Bo
         }
     }
     let name = full.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let kind = if name.ends_with(".wasm") {
-        "application/wasm".to_string()
-    } else {
-        mime_guess::from_path(&full).first_or_octet_stream().to_string()
-    };
+    let kind =
+        if name.ends_with(".wasm") { "application/wasm".to_string() } else { mime_guess::from_path(&full).first_or_octet_stream().to_string() };
     let gz = PathBuf::from(format!("{}.gz", full.display()));
     let zipped = headers.get(header::ACCEPT_ENCODING).and_then(|v| v.to_str().ok()).is_some_and(|v| v.contains("gzip")) && gz.is_file();
     let Ok(data) = tokio::fs::read(if zipped { &gz } else { &full }).await else {
@@ -871,7 +931,9 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
             if let Some(me) = &me {
                 let made = match (&r, m2.as_str(), p2.as_slice()) {
                     (Ok(Reply::Json(_, 200)), "PUT", [_, id]) => Some(id.clone()),
-                    (Ok(Reply::Json(v, 200 | 201)), "POST", [_] | [_, _, _]) if p2[0] == "files" => v.get("id").and_then(Value::as_str).map(str::to_string),
+                    (Ok(Reply::Json(v, 200 | 201)), "POST", [_] | [_, _, _]) if p2[0] == "files" => {
+                        v.get("id").and_then(Value::as_str).map(str::to_string)
+                    }
                     _ => None,
                 };
                 if let Some(id) = made {
@@ -879,7 +941,9 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
                     blocking(&app, move |a| spaces::note_changed(&a.store, &id, &who)).await;
                 }
             }
-            if app.auth && let Some(me) = me {
+            if app.auth
+                && let Some(me) = me
+            {
                 r = blocking(&app, move |app| after_files(app, &me, &m2, &p2, r)).await.unwrap_or(Err(Bad::new(500, "server error")));
             }
             reply(r)
@@ -931,7 +995,11 @@ async fn main() {
         _ => base.clone(),
     };
     let _ = std::fs::create_dir_all(&root);
-    let store = Store { root, keep: env("KEEP", "6").parse().unwrap_or(6), spaces: !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no") };
+    let store = Store {
+        root,
+        keep: env("KEEP", "6").parse().unwrap_or(6),
+        spaces: !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no"),
+    };
     let port: u16 = env("PORT", "8080").parse().unwrap_or(8080);
     let auth = !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no");
     let site = Some(env("SITE", "")).filter(|s| !s.is_empty()).map(PathBuf::from);
@@ -956,7 +1024,11 @@ async fn main() {
             }
         }
     }
-    let router = Router::new().route("/api/live", axum::routing::get(live::ws)).fallback(handle).with_state(app).layer(axum::extract::DefaultBodyLimit::disable());
+    let router = Router::new()
+        .route("/api/live", axum::routing::get(live::ws))
+        .fallback(handle)
+        .with_state(app)
+        .layer(axum::extract::DefaultBodyLimit::disable());
     let listener = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
         Err(e) => {

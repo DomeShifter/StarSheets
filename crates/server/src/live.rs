@@ -37,14 +37,30 @@ const CHECK_EVERY: u64 = 25;
 const HISTORY: usize = 200;
 
 enum RoomMsg {
-    Join { client: String, user: Option<crate::auth::User>, can_edit: bool, out: UnboundedSender<String>, have: Option<String> },
-    Leave { client: String },
-    From { client: String, msg: ToServer },
+    Join {
+        client: String,
+        user: Option<crate::auth::User>,
+        can_edit: bool,
+        out: UnboundedSender<String>,
+        have: Option<String>,
+    },
+    Leave {
+        client: String,
+    },
+    From {
+        client: String,
+        msg: ToServer,
+    },
     /// The file was replaced through the files API (a version restored): read it again.
     Replaced,
     /// Copy every sheet of this spreadsheet file (bytes, name) to the end of the room's file;
     /// answers with the new sheets' names.
-    AddSheets { name: String, bytes: Vec<u8>, by: String, reply: std::sync::mpsc::Sender<Result<Vec<String>, String>> },
+    AddSheets {
+        name: String,
+        bytes: Vec<u8>,
+        by: String,
+        reply: std::sync::mpsc::Sender<Result<Vec<String>, String>>,
+    },
 }
 
 #[derive(Default)]
@@ -314,7 +330,12 @@ impl Room {
                 room.check_disk();
             }
             room.save_if_due(false);
-            if room.clients.is_empty() && room.dirty_since.is_none() && room.saving.is_none() && room.empty_since.is_some_and(|t| t.elapsed() > EMPTY_FOR) && room.close(&rx) {
+            if room.clients.is_empty()
+                && room.dirty_since.is_none()
+                && room.saving.is_none()
+                && room.empty_since.is_some_and(|t| t.elapsed() > EMPTY_FOR)
+                && room.close(&rx)
+            {
                 return;
             }
         }
@@ -335,7 +356,12 @@ impl Room {
     fn open(&mut self) -> Result<(), String> {
         let (name, bytes) = {
             let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
-            let path = self.app.store.path_of(&self.file).map_err(|e| format!("Can't read the file list: {e}"))?.ok_or("This file isn't on the server any more.")?;
+            let path = self
+                .app
+                .store
+                .path_of(&self.file)
+                .map_err(|e| format!("Can't read the file list: {e}"))?
+                .ok_or("This file isn't on the server any more.")?;
             let full = self.app.store.full(&path);
             self.path = Some(path.clone());
             let bytes = std::fs::read(&full).map_err(|e| format!("Can't read the file: {e}"))?;
@@ -406,7 +432,10 @@ impl Room {
         let last_edit = self.last_edit_now();
         let same = have.is_some() && have == self.disk && self.pristine_seq == Some(self.seq) && self.dirty_since.is_none();
         if same {
-            crate::log::note(&self.app.store, &format!("{}: the tab already had this version (sent a check, not the file)", self.path.clone().unwrap_or_default()));
+            crate::log::note(
+                &self.app.store,
+                &format!("{}: the tab already had this version (sent a check, not the file)", self.path.clone().unwrap_or_default()),
+            );
             return ToClient::Welcome { seq: self.seq, workbook: None, spills: Vec::new(), hash: Some(self.whole_hash()), can_edit, last_edit };
         }
         let (workbook, spills) = self.snapshot();
@@ -451,7 +480,10 @@ impl Room {
             RoomMsg::AddSheets { name, bytes, by, reply } => {
                 let _ = reply.send(self.add_sheets(&name, &bytes, &by));
             }
-            RoomMsg::From { client, msg } if matches!(msg, ToServer::Change { .. } | ToServer::Undo | ToServer::Redo) && !self.clients.get(&client).is_some_and(|c| c.can_edit) => {
+            RoomMsg::From { client, msg }
+                if matches!(msg, ToServer::Change { .. } | ToServer::Undo | ToServer::Redo)
+                    && !self.clients.get(&client).is_some_and(|c| c.can_edit) =>
+            {
                 if let ToServer::Change { cseq, .. } = msg {
                     self.to(&client, &ToClient::Rejected { cseq, why: gridcraft_engine::VIEW_ONLY.into() });
                 }
@@ -492,7 +524,8 @@ impl Room {
     /// Whether every change after `base` came from `client`, so its change was made on exactly
     /// what the server has.
     fn same_base(&self, client: &str, base: u64) -> bool {
-        base == self.seq || self.authors.iter().filter(|(s, _)| *s > base).all(|(_, c)| c == client) && self.authors.front().is_some_and(|(s, _)| *s <= base + 1)
+        base == self.seq
+            || self.authors.iter().filter(|(s, _)| *s > base).all(|(_, c)| c == client) && self.authors.front().is_some_and(|(s, _)| *s <= base + 1)
     }
 
     fn change(&mut self, client: &str, cseq: u64, base: u64, change: Change) {
@@ -717,18 +750,29 @@ impl Room {
             return;
         }
         let kept = if self.dirty_since.is_some() { self.wb().map(|wb| self.keep_copy(&wb)) } else { None };
-        crate::log::note(&self.app.store, &format!("{} changed outside StarSheets; {}", self.path.clone().unwrap_or_default(), match &kept {
-            Some(Ok(n)) => format!("unsaved changes kept in {n}"),
-            Some(Err(e)) => format!("unsaved changes could NOT be kept: {e}"),
-            None => "nothing was unsaved".into(),
-        }));
+        crate::log::note(
+            &self.app.store,
+            &format!(
+                "{} changed outside StarSheets; {}",
+                self.path.clone().unwrap_or_default(),
+                match &kept {
+                    Some(Ok(n)) => format!("unsaved changes kept in {n}"),
+                    Some(Err(e)) => format!("unsaved changes could NOT be kept: {e}"),
+                    None => "nothing was unsaved".into(),
+                }
+            ),
+        );
         if matches!(kept, Some(Ok(_))) {
             self.dirty_since = None; // kept: don't make a second copy if reading fails below
         }
         self.reload();
         let text = match kept {
-            Some(Ok(name)) => format!("This file was changed outside StarSheets (for example in Excel). You're now seeing that version; the changes made here in the last few seconds are kept in \u{201c}{name}\u{201d} in the same folder."),
-            Some(Err(why)) => format!("This file was changed outside StarSheets, and the last few seconds of changes made here couldn't be kept: {why}"),
+            Some(Ok(name)) => format!(
+                "This file was changed outside StarSheets (for example in Excel). You're now seeing that version; the changes made here in the last few seconds are kept in \u{201c}{name}\u{201d} in the same folder."
+            ),
+            Some(Err(why)) => {
+                format!("This file was changed outside StarSheets, and the last few seconds of changes made here couldn't be kept: {why}")
+            }
             None => "This file was changed outside StarSheets (for example in Excel), so it was opened again.".to_string(),
         };
         self.all(&ToClient::Message { text });
@@ -749,7 +793,10 @@ impl Room {
             (Some(p), _) | (None, Some(p)) => (crate::store::base_of(p), crate::store::parent_of(p)),
             (None, None) => return,
         };
-        crate::log::note(&self.app.store, &format!("{} is now {}", self.path.clone().unwrap_or_default(), now.clone().unwrap_or_else(|| "in the bin".into())));
+        crate::log::note(
+            &self.app.store,
+            &format!("{} is now {}", self.path.clone().unwrap_or_default(), now.clone().unwrap_or_else(|| "in the bin".into())),
+        );
         self.all(&ToClient::Moved { name, folder, binned: now.is_none() });
         self.path = now;
     }
@@ -758,7 +805,8 @@ impl Room {
     /// the server (every tab gets it at once; undo history isn't touched).
     fn add_sheets(&mut self, name: &str, bytes: &[u8], by: &str) -> Result<Vec<String>, String> {
         let mut s = Session::new();
-        s.execute("file.open", json!({ "name": name, "base64": gridcraft_engine::io::base64_encode(bytes) })).map_err(|e| format!("Can't read that sheet: {e}"))?;
+        s.execute("file.open", json!({ "name": name, "base64": gridcraft_engine::io::base64_encode(bytes) }))
+            .map_err(|e| format!("Can't read that sheet: {e}"))?;
         let src = s.active().map(|d| d.wb.clone()).ok_or("nothing to copy")?;
         let before = self.wb().ok_or("the spreadsheet isn't open")?;
         let mut wb = (*before).clone();
@@ -784,7 +832,8 @@ impl Room {
         let path = store.path_of(&self.file).map_err(|e| e.to_string())?.ok_or("the file is gone")?;
         let folder = crate::store::parent_of(&path);
         let (stem, _) = crate::store::split_name(&crate::store::base_of(&path));
-        let name = store.claim_name(&folder, &format!("{stem} (StarSheets copy {})", crate::store::readable_stamp()), ".xlsx", None).map_err(|e| e.msg)?;
+        let name =
+            store.claim_name(&folder, &format!("{stem} (StarSheets copy {})", crate::store::readable_stamp()), ".xlsx", None).map_err(|e| e.msg)?;
         let bytes = gridcraft_engine::io::save_bytes(wb, &name).map_err(|e| e.to_string())?;
         store.write_file(&store.full(&crate::store::join(&folder, &name)), &bytes).map_err(|e| e.to_string())?;
         Ok(name)
@@ -853,7 +902,15 @@ mod tests {
         std::fs::write(dir.join("t.csv"), "a,b\n1,2\n").unwrap();
         let store = Store { root: dir.clone(), keep: 3, spaces: false };
         let id = store.synced_index().unwrap().keys().next().unwrap().clone();
-        let app = Arc::new(App { store, base: dir.clone(), lock: Mutex::new(()), location: String::new(), auth: false, site: None, rooms: Rooms::default() });
+        let app = Arc::new(App {
+            store,
+            base: dir.clone(),
+            lock: Mutex::new(()),
+            location: String::new(),
+            auth: false,
+            site: None,
+            rooms: Rooms::default(),
+        });
         (app, id, dir)
     }
 
@@ -966,7 +1023,9 @@ mod tests {
             let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
             next(&mut t)
         };
-        let ToClient::Welcome { workbook: None, hash: Some(hash), .. } = welcome(Some(version.clone()), "same") else { panic!("expected no workbook") };
+        let ToClient::Welcome { workbook: None, hash: Some(hash), .. } = welcome(Some(version.clone()), "same") else {
+            panic!("expected no workbook")
+        };
         // The hash is the file as anyone opening it gets it.
         let mut s = Session::new();
         let b64 = gridcraft_engine::io::base64_encode(&std::fs::read(dir.join("t.csv")).unwrap());
@@ -1036,7 +1095,12 @@ mod tests {
         app.rooms.send(&app, &file, RoomMsg::Leave { client: "a".into() });
         std::thread::sleep(Duration::from_millis(400));
         assert!(std::fs::read_to_string(dir.join("t.csv")).unwrap().contains("theirs"), "their version is untouched");
-        let copies: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).filter(|n| n.contains("StarSheets copy")).collect();
+        let copies: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.contains("StarSheets copy"))
+            .collect();
         assert_eq!(copies.len(), 1, "{copies:?}");
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1059,7 +1123,11 @@ mod tests {
         edit(&app, &file, &mut a, "cell.set", json!({"cell": "B9", "input": "later"}));
         let wb = a.session.active().unwrap().wb.clone();
         let patch = sync::make_patch(&wb, &wb);
-        app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Change { cseq: 1, base: 0, change: Change::State { patch } } });
+        app.rooms.send(
+            &app,
+            &file,
+            RoomMsg::From { client: "a".into(), msg: ToServer::Change { cseq: 1, base: 0, change: Change::State { patch } } },
+        );
         assert_eq!(take_applied(&mut a), ("a".into(), 1));
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -1112,7 +1180,12 @@ mod tests {
         app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Undo });
         take_applied(&mut a);
         take_applied(&mut b);
-        let csv = |t: &Tab| format!("{:?}", t.session.active().unwrap().wb.sheets[0].cells.iter().map(|(c, x)| (c.a1(), format!("{:?}", x.value))).collect::<Vec<_>>());
+        let csv = |t: &Tab| {
+            format!(
+                "{:?}",
+                t.session.active().unwrap().wb.sheets[0].cells.iter().map(|(c, x)| (c.a1(), format!("{:?}", x.value))).collect::<Vec<_>>()
+            )
+        };
         assert!(!csv(&b).contains("a again") && csv(&b).contains("b's"), "{}", csv(&b));
         assert_eq!(print(&a), print(&b));
         // b overwrites a's cell: a's undo is refused.

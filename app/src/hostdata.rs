@@ -74,9 +74,7 @@ pub fn write(app: &mut SheetApp, mut h: HostData) {
     let Some(d) = app.session.active() else { return };
     let wb = &d.wb;
     h.v = VERSION;
-    h.dv.retain(|m| {
-        wb.sheets.iter().find(|s| s.name == m.sheet).is_some_and(|sh| sh.validations.iter().any(|v| ranges_text(&v.ranges) == m.range))
-    });
+    h.dv.retain(|m| wb.sheets.iter().find(|s| s.name == m.sheet).is_some_and(|sh| sh.validations.iter().any(|v| ranges_text(&v.ranges) == m.range)));
     h.protect.retain(|p| wb.names.iter().any(|n| n.name.eq_ignore_ascii_case(&p.name)));
     let empty = h.dv.is_empty() && h.protect.is_empty() && h.other.is_empty();
     let text = if empty { None } else { serde_json::to_string(&h).ok() };

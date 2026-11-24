@@ -119,7 +119,8 @@ impl Browser {
             .iter()
             .filter(|f| if q.is_empty() { parent_of(f) == self.cwd } else { name_of(f).to_lowercase().contains(&q) })
             .map(|f| {
-                let newest = self.files.iter().filter(|x| x.folder == *f || x.folder.starts_with(&format!("{f}/"))).map(|x| x.modified).max().unwrap_or(0);
+                let newest =
+                    self.files.iter().filter(|x| x.folder == *f || x.folder.starts_with(&format!("{f}/"))).map(|x| x.modified).max().unwrap_or(0);
                 (Item::Folder(f.clone()), name_of(f).to_string(), parent_of(f).to_string(), newest, None)
             })
             .collect();
@@ -156,20 +157,29 @@ impl Browser {
         let mut open = true;
         let mut close_now = false;
         let title = if self.in_bin { "Bin" } else { "Open a file" };
-        let shown = egui::Window::new(title).title_bar(false).frame(crate::house::dialog_frame()).id(egui::Id::unique("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
-            ui.set_width(W);
-            if crate::house::title_row(ui, title) {
-                close_now = true;
-            }
-            if self.in_bin {
-                self.bin_ui(ui, &mut out);
-            } else {
-                self.files_ui(ui, keys, &mut out);
-            }
-            if let Some(e) = &self.error {
-                ui.label(RichText::new(e).size(crate::house::NOTE).color(crate::house::ERROR));
-            }
-        });
+        let shown = egui::Window::new(title)
+            .title_bar(false)
+            .frame(crate::house::dialog_frame())
+            .id(egui::Id::unique("starsheets_files_window"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .fixed_size(vec2(W, 520.0))
+            .anchor(Align2::CENTER_TOP, vec2(0.0, 80.0))
+            .show(ctx, |ui| {
+                ui.set_width(W);
+                if crate::house::title_row(ui, title) {
+                    close_now = true;
+                }
+                if self.in_bin {
+                    self.bin_ui(ui, &mut out);
+                } else {
+                    self.files_ui(ui, keys, &mut out);
+                }
+                if let Some(e) = &self.error {
+                    ui.label(RichText::new(e).size(crate::house::NOTE).color(crate::house::ERROR));
+                }
+            });
         self.rename_ui(ctx, &mut out);
         // A click outside the window closes it, as with a menu (not while one of its own menus
         // is open, or a rename or drag is under way).
@@ -221,7 +231,9 @@ impl Browser {
                 if i > 0 {
                     ui.label(RichText::new("›").color(theme::TEXT_DIM));
                 }
-                let r = ui.add(egui::Button::new(RichText::new(&label).size(15.0).color(if i == last { theme::TEXT } else { theme::TEXT_DIM })).frame(false));
+                let r = ui.add(
+                    egui::Button::new(RichText::new(&label).size(15.0).color(if i == last { theme::TEXT } else { theme::TEXT_DIM })).frame(false),
+                );
                 if dragging && r.contains_pointer() {
                     ui.painter().rect_stroke(r.rect, 4.0, Stroke::new(2.0, GREEN), egui::StrokeKind::Outside);
                     drop_target = Some(path.clone());
@@ -233,7 +245,13 @@ impl Browser {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.search).id(egui::Id::unique("starsheets_files_search")).hint_text("🔍  Search all folders").desired_width(240.0).margin(vec2(8.0, 6.0)));
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.search)
+                        .id(egui::Id::unique("starsheets_files_search"))
+                        .hint_text("🔍  Search all folders")
+                        .desired_width(240.0)
+                        .margin(vec2(8.0, 6.0)),
+                );
             });
         });
         ui.add_space(6.0);
@@ -270,7 +288,13 @@ impl Browser {
         for (r, label, date) in [(name_col, "Name", false), (date_col, "Last modified", true)] {
             let resp = ui.interact(r, ui.scope_id().with(("sort", label)), Sense::click());
             let arrow = if self.by_date == date { if self.descending { " ↑" } else { " ↓" } } else { "" };
-            ui.painter().text(r.left_center() + vec2(if date { 0.0 } else { 44.0 }, 0.0), Align2::LEFT_CENTER, format!("{label}{arrow}"), FontId::proportional(13.0), theme::TEXT_DIM);
+            ui.painter().text(
+                r.left_center() + vec2(if date { 0.0 } else { 44.0 }, 0.0),
+                Align2::LEFT_CENTER,
+                format!("{label}{arrow}"),
+                FontId::proportional(13.0),
+                theme::TEXT_DIM,
+            );
             if resp.clicked() {
                 if self.by_date == date {
                     self.descending = !self.descending;
@@ -288,7 +312,14 @@ impl Browser {
             if self.loading && rows.is_empty() {
                 ui.label(RichText::new("Loading…").color(theme::TEXT_DIM));
             } else if rows.is_empty() {
-                ui.label(RichText::new(if searching { "Nothing matches." } else { "This folder is empty. A new spreadsheet saves itself as soon as you type in it." }).color(theme::TEXT_DIM));
+                ui.label(
+                    RichText::new(if searching {
+                        "Nothing matches."
+                    } else {
+                        "This folder is empty. A new spreadsheet saves itself as soon as you type in it."
+                    })
+                    .color(theme::TEXT_DIM),
+                );
             }
             for (i, (item, name, folder, modified, size)) in rows.iter().enumerate() {
                 let (r, resp) = ui.allocate_exact_size(vec2(W - 12.0, ROW), Sense::click_and_drag());
@@ -313,12 +344,30 @@ impl Browser {
                 let cut = self.clipboard.as_ref().is_some_and(|(c, cut)| *cut && c.contains(item));
                 let colour = if cut { theme::TEXT_DIM } else { theme::TEXT };
                 // Renaming happens in its own dialog (rename_ui), as in Drive.
-                p.text(r.left_center() + vec2(44.0, if searching && !folder.is_empty() { -7.0 } else { 0.0 }), Align2::LEFT_CENTER, name, FontId::proportional(14.0), colour);
+                p.text(
+                    r.left_center() + vec2(44.0, if searching && !folder.is_empty() { -7.0 } else { 0.0 }),
+                    Align2::LEFT_CENTER,
+                    name,
+                    FontId::proportional(14.0),
+                    colour,
+                );
                 if searching && !folder.is_empty() {
-                    p.text(r.left_center() + vec2(44.0, 9.0), Align2::LEFT_CENTER, format!("in {folder}"), FontId::proportional(11.0), theme::TEXT_DIM);
+                    p.text(
+                        r.left_center() + vec2(44.0, 9.0),
+                        Align2::LEFT_CENTER,
+                        format!("in {folder}"),
+                        FontId::proportional(11.0),
+                        theme::TEXT_DIM,
+                    );
                 }
                 if *modified > 0 {
-                    p.text(r.left_center() + vec2(W - 300.0, 0.0), Align2::LEFT_CENTER, crate::files::date_text(*modified), FontId::proportional(13.0), theme::TEXT_DIM);
+                    p.text(
+                        r.left_center() + vec2(W - 300.0, 0.0),
+                        Align2::LEFT_CENTER,
+                        crate::files::date_text(*modified),
+                        FontId::proportional(13.0),
+                        theme::TEXT_DIM,
+                    );
                 }
                 if let Some(s) = size {
                     p.text(r.right_center() - vec2(16.0, 0.0), Align2::RIGHT_CENTER, size_text(*s), FontId::proportional(13.0), theme::TEXT_DIM);
@@ -387,11 +436,15 @@ impl Browser {
         if let Some(items) = self.dragging.clone() {
             if let Some(pos) = ui.ctx().pointer_latest_pos() {
                 let label = if items.len() == 1 { self.label_of(&items[0]) } else { format!("{} items", items.len()) };
-                egui::Area::new(egui::Id::unique("starsheets_files_drag")).fixed_pos(pos + vec2(14.0, 10.0)).order(egui::Order::Tooltip).interactable(false).show(ui.ctx(), |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.label(label);
+                egui::Area::new(egui::Id::unique("starsheets_files_drag"))
+                    .fixed_pos(pos + vec2(14.0, 10.0))
+                    .order(egui::Order::Tooltip)
+                    .interactable(false)
+                    .show(ui.ctx(), |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.label(label);
+                        });
                     });
-                });
             }
             if ui.input(|i| i.pointer.any_released()) {
                 self.dragging = None;
@@ -484,7 +537,8 @@ impl Browser {
         crate::house::menu(ui, 260.0);
         let targets = if self.selected.contains(item) { self.selected.clone() } else { vec![item.clone()] };
         let single = targets.len() == 1;
-        let row = |ui: &mut Ui, label: &str, keys: &str, enabled: bool| ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked();
+        let row =
+            |ui: &mut Ui, label: &str, keys: &str, enabled: bool| ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked();
         match item {
             Item::File(id) => {
                 if row(ui, "Open", "Enter", single) {
@@ -593,7 +647,13 @@ impl Browser {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let sure = self.confirm_purge == Some(None);
                 let label = if sure { "Click again to empty the bin" } else { "Empty bin" };
-                if ui.add_enabled(!self.bin.is_empty(), egui::Button::new(RichText::new(label).color(Color32::from_rgb(0xC5, 0x39, 0x29))).frame(false)).clicked() {
+                if ui
+                    .add_enabled(
+                        !self.bin.is_empty(),
+                        egui::Button::new(RichText::new(label).color(Color32::from_rgb(0xC5, 0x39, 0x29))).frame(false),
+                    )
+                    .clicked()
+                {
                     if sure {
                         out.push(Action::Purge(None));
                         self.confirm_purge = None;
@@ -619,14 +679,28 @@ impl Browser {
                 }
                 p.text(r.left_center() + vec2(44.0, -7.0), Align2::LEFT_CENTER, name_of(&b.original), FontId::proportional(14.0), theme::TEXT);
                 let from = if parent_of(&b.original).is_empty() { "My files".to_string() } else { parent_of(&b.original).to_string() };
-                p.text(r.left_center() + vec2(44.0, 9.0), Align2::LEFT_CENTER, format!("from {from} · deleted {}", crate::files::date_text(b.deleted)), FontId::proportional(11.0), theme::TEXT_DIM);
+                p.text(
+                    r.left_center() + vec2(44.0, 9.0),
+                    Align2::LEFT_CENTER,
+                    format!("from {from} · deleted {}", crate::files::date_text(b.deleted)),
+                    FontId::proportional(11.0),
+                    theme::TEXT_DIM,
+                );
                 let restore = egui::Rect::from_min_size(r.right_top() + vec2(-250.0, 4.0), vec2(90.0, ROW - 8.0));
                 let purge = egui::Rect::from_min_size(r.right_top() + vec2(-150.0, 4.0), vec2(140.0, ROW - 8.0));
                 if ui.put(restore, egui::Button::new(RichText::new("Restore").color(GREEN))).clicked() {
                     out.push(Action::Restore(b.name.clone()));
                 }
                 let sure = self.confirm_purge.as_ref() == Some(&Some(b.name.clone()));
-                if ui.put(purge, egui::Button::new(RichText::new(if sure { "Sure? Click again" } else { "Delete forever" }).color(Color32::from_rgb(0xC5, 0x39, 0x29)))).clicked() {
+                if ui
+                    .put(
+                        purge,
+                        egui::Button::new(
+                            RichText::new(if sure { "Sure? Click again" } else { "Delete forever" }).color(Color32::from_rgb(0xC5, 0x39, 0x29)),
+                        ),
+                    )
+                    .clicked()
+                {
                     if sure {
                         out.push(Action::Purge(Some(b.name.clone())));
                         self.confirm_purge = None;

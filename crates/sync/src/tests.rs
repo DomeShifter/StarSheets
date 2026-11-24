@@ -131,7 +131,11 @@ fn the_server_runs_only_editing_commands() {
 
 #[test]
 fn messages_round_trip() {
-    let m = ToServer::Change { cseq: 3, base: 9, change: Change::State { patch: Patch { rest: serde_json::value::to_raw_value(&json!({})).unwrap(), sheets: vec![], spills: vec![] } } };
+    let m = ToServer::Change {
+        cseq: 3,
+        base: 9,
+        change: Change::State { patch: Patch { rest: serde_json::value::to_raw_value(&json!({})).unwrap(), sheets: vec![], spills: vec![] } },
+    };
     let t = serde_json::to_string(&m).unwrap();
     assert!(matches!(serde_json::from_str::<ToServer>(&t).unwrap(), ToServer::Change { cseq: 3, base: 9, .. }));
 }
@@ -277,7 +281,9 @@ fn clip_goes_into_the_section_and_comes_back() {
     let mut back = (*t.active().unwrap().wb).clone();
     back.host_data = wb.host_data.clone();
     clip_from_host(&mut back);
-    let clip = |w: &gridcraft_engine::model::Workbook, a: &str| w.styles.get(w.sheets[0].style_id(gridcraft_engine::core::CellRef::parse(a).unwrap())).align.clip;
+    let clip = |w: &gridcraft_engine::model::Workbook, a: &str| {
+        w.styles.get(w.sheets[0].style_id(gridcraft_engine::core::CellRef::parse(a).unwrap())).align.clip
+    };
     assert!(clip(&back, "A1") && clip(&back, "B2") && !clip(&back, "A3"));
     assert!(!back.host_data.as_deref().unwrap_or("").contains("clip"));
 }
@@ -311,7 +317,15 @@ fn welcome_carries_the_last_edit_and_old_welcomes_still_read() {
     assert_eq!(last_edit, None);
     let raw = serde_json::value::to_raw_value(&serde_json::Value::Null).unwrap();
     let edit = crate::LastEdit { by: "Ada".into(), at: 1_795_000_000 };
-    let t = serde_json::to_string(&ToClient::Welcome { seq: 2, workbook: Some(raw), spills: Vec::new(), hash: None, can_edit: true, last_edit: Some(edit.clone()) }).unwrap();
+    let t = serde_json::to_string(&ToClient::Welcome {
+        seq: 2,
+        workbook: Some(raw),
+        spills: Vec::new(),
+        hash: None,
+        can_edit: true,
+        last_edit: Some(edit.clone()),
+    })
+    .unwrap();
     let ToClient::Welcome { last_edit, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
     assert_eq!(last_edit, Some(edit));
 }

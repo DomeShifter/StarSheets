@@ -45,7 +45,9 @@ fn dir(store: &Store) -> PathBuf {
 /// The kept picture of `file` if it shows `version`.
 pub fn cached(store: &Store, file: &str, version: &str) -> Option<Vec<u8>> {
     let d = dir(store);
-    (std::fs::read_to_string(d.join(format!("{file}.ver"))).ok()?.trim() == format!("{DRAW_TAG}/{version}")).then(|| std::fs::read(d.join(format!("{file}.png"))).ok()).flatten()
+    (std::fs::read_to_string(d.join(format!("{file}.ver"))).ok()?.trim() == format!("{DRAW_TAG}/{version}"))
+        .then(|| std::fs::read(d.join(format!("{file}.png"))).ok())
+        .flatten()
 }
 
 /// Keeps a picture of `file` at `version`.
@@ -173,7 +175,17 @@ pub fn draw(wb: &Workbook) -> Result<Vec<u8>, String> {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn text_at(pm: &mut Pixmap, font: &FontRef, size: f32, text: &str, (x0, x1, clip_right): (f32, f32, f32), (y0, y1): (f32, f32), right: bool, center: bool, colour: [u8; 3]) {
+fn text_at(
+    pm: &mut Pixmap,
+    font: &FontRef,
+    size: f32,
+    text: &str,
+    (x0, x1, clip_right): (f32, f32, f32),
+    (y0, y1): (f32, f32),
+    right: bool,
+    center: bool,
+    colour: [u8; 3],
+) {
     let sf = font.as_scaled(PxScale::from(size));
     let width: f32 = text.chars().map(|ch| sf.h_advance(sf.glyph_id(ch))).sum();
     let pad = 3.0 * SCALE;

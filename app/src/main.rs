@@ -4,13 +4,10 @@
 //! Build with `trunk build --release` from `app/` after `scripts/fetch-upstream.sh`.
 
 #[cfg(target_arch = "wasm32")]
-mod prefs;
-mod protectpanel;
-#[cfg(target_arch = "wasm32")]
 mod account;
 mod autolink;
-mod calcpreview;
 mod bottom;
+mod calcpreview;
 mod cfpanel;
 mod chartpanel;
 mod colourpicker;
@@ -21,16 +18,15 @@ mod customnumber;
 mod datepicker;
 mod dvpanel;
 mod errortip;
-mod hostdata;
-mod refs;
 #[cfg(target_arch = "wasm32")]
 mod filebrowser;
 #[cfg(target_arch = "wasm32")]
 mod files;
-#[cfg(target_arch = "wasm32")]
-mod home;
 mod findreplace;
 mod fonts;
+#[cfg(target_arch = "wasm32")]
+mod home;
+mod hostdata;
 mod house;
 mod icons;
 #[cfg(target_arch = "wasm32")]
@@ -43,10 +39,14 @@ mod merge;
 mod messages;
 mod namespanel;
 mod notes;
-mod sheets_formulas;
+#[cfg(target_arch = "wasm32")]
+mod prefs;
+mod protectpanel;
+mod refs;
 mod settings;
 #[cfg(target_arch = "wasm32")]
 mod share;
+mod sheets_formulas;
 mod shell;
 mod spelling;
 mod theme;

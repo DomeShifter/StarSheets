@@ -72,7 +72,12 @@ pub fn menu(ui: &mut Ui, width: f32) {
     st.spacing.item_spacing = vec2(14.0, 0.0);
     st.spacing.icon_width = 10.0;
     let w = &mut st.visuals.widgets;
-    for (state, fill) in [(&mut w.inactive, Color32::TRANSPARENT), (&mut w.hovered, theme::MENU_HOVER), (&mut w.active, theme::HOVER), (&mut w.open, theme::MENU_HOVER)] {
+    for (state, fill) in [
+        (&mut w.inactive, Color32::TRANSPARENT),
+        (&mut w.hovered, theme::MENU_HOVER),
+        (&mut w.active, theme::HOVER),
+        (&mut w.open, theme::MENU_HOVER),
+    ] {
         state.bg_stroke = Stroke::NONE;
         state.weak_bg_fill = fill;
         state.corner_radius = CornerRadius::ZERO;
@@ -185,7 +190,11 @@ pub fn install(ctx: &egui::Context) {
 /// sets up fonts). Cheap: a check of two values most frames.
 pub fn keep(ctx: &egui::Context) {
     let st = ctx.global_style();
-    if st.spacing.scroll.bar_width != 10.0 || st.visuals.window_corner_radius != CornerRadius::same(PANEL_RADIUS) || st.visuals.widgets.inactive.bg_fill != SCROLL_HANDLE || st.animation_time != 0.0 {
+    if st.spacing.scroll.bar_width != 10.0
+        || st.visuals.window_corner_radius != CornerRadius::same(PANEL_RADIUS)
+        || st.visuals.widgets.inactive.bg_fill != SCROLL_HANDLE
+        || st.animation_time != 0.0
+    {
         install(ctx);
     }
 }
@@ -443,20 +452,31 @@ pub fn select(ui: &mut Ui, id: &str, width: f32, current: &mut usize, labels: &[
         ui.spacing_mut().button_padding.x = 40.0;
         // As tall as the screen allows; a scroll bar when it still doesn't fit.
         egui::ScrollArea::vertical().max_height(menu_max_height(ui.ctx())).show(ui, |ui| {
-        for (i, label) in labels.iter().enumerate() {
-            let row = ui.add(egui::Button::new(RichText::new(*label).size(BODY).color(theme::TEXT)).shortcut_text("").frame_when_inactive(false).min_size(vec2(0.0, ROW_HEIGHT)));
-            if i == *current {
-                ui.painter().text(row.rect.left_center() + vec2(L, 0.0), egui::Align2::LEFT_CENTER, "✓", egui::FontId::proportional(16.0), theme::TEXT);
+            for (i, label) in labels.iter().enumerate() {
+                let row = ui.add(
+                    egui::Button::new(RichText::new(*label).size(BODY).color(theme::TEXT))
+                        .shortcut_text("")
+                        .frame_when_inactive(false)
+                        .min_size(vec2(0.0, ROW_HEIGHT)),
+                );
+                if i == *current {
+                    ui.painter().text(
+                        row.rect.left_center() + vec2(L, 0.0),
+                        egui::Align2::LEFT_CENTER,
+                        "✓",
+                        egui::FontId::proportional(16.0),
+                        theme::TEXT,
+                    );
+                }
+                if row.clicked() {
+                    changed = i != *current;
+                    *current = i;
+                    ui.close();
+                }
+                if dividers_after.contains(&i) {
+                    crate::shell::menu_sep_width(ui, width.max(200.0));
+                }
             }
-            if row.clicked() {
-                changed = i != *current;
-                *current = i;
-                ui.close();
-            }
-            if dividers_after.contains(&i) {
-                crate::shell::menu_sep_width(ui, width.max(200.0));
-            }
-        }
         });
     });
     changed
@@ -472,9 +492,11 @@ pub fn tabs(ui: &mut Ui, current: &mut usize, labels: &[&str]) -> bool {
             let on = i == *current;
             let colour = if on { theme::BLUE } else { theme::TEXT_DIM };
             let text = RichText::new(*label).size(BODY).color(colour);
-            let r = ui.add(egui::Button::new(if on { text.strong() } else { text }).frame_when_inactive(false).min_size(vec2(88.0, FIELD_HEIGHT + XS)));
+            let r =
+                ui.add(egui::Button::new(if on { text.strong() } else { text }).frame_when_inactive(false).min_size(vec2(88.0, FIELD_HEIGHT + XS)));
             if on {
-                let bar = egui::Rect::from_min_max(egui::pos2(r.rect.left() + S, r.rect.bottom() - 3.0), egui::pos2(r.rect.right() - S, r.rect.bottom()));
+                let bar =
+                    egui::Rect::from_min_max(egui::pos2(r.rect.left() + S, r.rect.bottom() - 3.0), egui::pos2(r.rect.right() - S, r.rect.bottom()));
                 ui.painter().rect_filled(bar, CornerRadius { nw: 3, ne: 3, sw: 0, se: 0 }, theme::BLUE);
             }
             if r.clicked() && !on {

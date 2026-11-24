@@ -184,7 +184,8 @@ mod refit_tests {
     fn widening_a_column_refits_wrapped_rows() {
         let mut s = Session::new();
         s.execute("file.new", json!({})).unwrap();
-        s.execute("cell.set", json!({ "cell": "B2", "input": "Please make drop-down lists only as wide as they need to be to fit the options" })).unwrap();
+        s.execute("cell.set", json!({ "cell": "B2", "input": "Please make drop-down lists only as wide as they need to be to fit the options" }))
+            .unwrap();
         s.execute("home.wrapText", json!({ "range": "B2", "on": true })).unwrap();
         let h = |s: &Session| s.active().unwrap().wb.active().unwrap().row_height(1);
         let one_line = s.active().unwrap().wb.active().unwrap().default_row_height;

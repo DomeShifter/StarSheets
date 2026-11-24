@@ -64,7 +64,8 @@ impl Notes {
         let Some(cell) = editing.or(self.resizing.map(|r| r.0)).or(over_card).or(hovered).or(selected) else { return };
         let note = sh.comments.get(&cell);
         let text = note.map(|n| n.text.clone()).unwrap_or_default();
-        let (mut w, mut h) = note.and_then(|n| n.note_box.as_ref()).and_then(|b| b.size_pt).map_or(DEFAULT, |(w, h)| ((w / 0.75) as f32, (h / 0.75) as f32));
+        let (mut w, mut h) =
+            note.and_then(|n| n.note_box.as_ref()).and_then(|b| b.size_pt).map_or(DEFAULT, |(w, h)| ((w / 0.75) as f32, (h / 0.75) as f32));
         if let Some((c, rw, rh)) = self.resizing
             && c == cell
         {
@@ -78,38 +79,58 @@ impl Notes {
         let mut commit = false;
         let mut start_edit = false;
         let mut new_size = None;
-        let area = egui::Area::new(egui::Id::unique("starsheets_note_card")).fixed_pos(at).constrain(false).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
-            let writing = self.editing.as_ref().is_some_and(|(doc, c, _)| *doc == uid && *c == cell);
-            let frame = crate::house::card_frame().inner_margin(egui::Margin::same(crate::house::M as i8)).show(ui, |ui| {
-                ui.set_min_size(vec2(w - 24.0, h - 24.0));
-                ui.set_max_size(vec2(w - 24.0, h - 24.0));
-                if let Some((_, _, draft)) = self.editing.as_mut().filter(|(doc, c, _)| *doc == uid && *c == cell) {
-                    let r = ui.add(egui::TextEdit::multiline(draft).frame(egui::Frame::NONE).text_color(TEXT).desired_width(w - 24.0).desired_rows(3).font(egui::FontId::proportional(14.0)));
-                    if self.focus {
-                        r.request_focus();
-                        self.focus = false;
+        let area = egui::Area::new(egui::Id::unique("starsheets_note_card"))
+            .fixed_pos(at)
+            .constrain(false)
+            .pivot(Align2::LEFT_TOP)
+            .order(egui::Order::Foreground)
+            .show(ui.ctx(), |ui| {
+                let writing = self.editing.as_ref().is_some_and(|(doc, c, _)| *doc == uid && *c == cell);
+                let frame = crate::house::card_frame().inner_margin(egui::Margin::same(crate::house::M as i8)).show(ui, |ui| {
+                    ui.set_min_size(vec2(w - 24.0, h - 24.0));
+                    ui.set_max_size(vec2(w - 24.0, h - 24.0));
+                    if let Some((_, _, draft)) = self.editing.as_mut().filter(|(doc, c, _)| *doc == uid && *c == cell) {
+                        let r = ui.add(
+                            egui::TextEdit::multiline(draft)
+                                .frame(egui::Frame::NONE)
+                                .text_color(TEXT)
+                                .desired_width(w - 24.0)
+                                .desired_rows(3)
+                                .font(egui::FontId::proportional(14.0)),
+                        );
+                        if self.focus {
+                            r.request_focus();
+                            self.focus = false;
+                        }
+                        if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                            commit = true;
+                        }
+                    } else {
+                        ui.add(egui::Label::new(RichText::new(&text).size(14.0).color(TEXT)).wrap().selectable(false));
                     }
-                    if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                        commit = true;
-                    }
-                } else {
-                    ui.add(egui::Label::new(RichText::new(&text).size(14.0).color(TEXT)).wrap().selectable(false));
+                });
+                // A click anywhere on the card starts writing, as in Sheets.
+                if !writing
+                    && ui
+                        .interact(frame.response.rect, egui::Id::unique("starsheets_note_card_click"), Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::Text)
+                        .clicked()
+                {
+                    start_edit = true;
                 }
+                // The resize grip: three short diagonal lines in the bottom-right corner, on the card's
+                // own layer (registered last, so it wins over the text under it).
+                let card = ui.min_rect();
+                let grip = Rect::from_min_size(card.right_bottom() - vec2(16.0, 16.0), vec2(14.0, 14.0));
+                for k in [4.0, 8.0, 12.0] {
+                    ui.painter().line_segment(
+                        [Pos2::new(grip.right() - k, grip.bottom()), Pos2::new(grip.right(), grip.bottom() - k)],
+                        Stroke::new(1.0, Color32::from_gray(0x80)),
+                    );
+                }
+                let g = ui.interact(grip, egui::Id::unique("starsheets_note_grip_drag"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeNwSe);
+                (g.dragged(), g.drag_stopped(), g.interact_pointer_pos())
             });
-            // A click anywhere on the card starts writing, as in Sheets.
-            if !writing && ui.interact(frame.response.rect, egui::Id::unique("starsheets_note_card_click"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text).clicked() {
-                start_edit = true;
-            }
-            // The resize grip: three short diagonal lines in the bottom-right corner, on the card's
-            // own layer (registered last, so it wins over the text under it).
-            let card = ui.min_rect();
-            let grip = Rect::from_min_size(card.right_bottom() - vec2(16.0, 16.0), vec2(14.0, 14.0));
-            for k in [4.0, 8.0, 12.0] {
-                ui.painter().line_segment([Pos2::new(grip.right() - k, grip.bottom()), Pos2::new(grip.right(), grip.bottom() - k)], Stroke::new(1.0, Color32::from_gray(0x80)));
-            }
-            let g = ui.interact(grip, egui::Id::unique("starsheets_note_grip_drag"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeNwSe);
-            (g.dragged(), g.drag_stopped(), g.interact_pointer_pos())
-        });
         let card = area.response.rect;
         self.last = Some((cell, card.expand(8.0)));
         let (dragging, stopped, pointer) = area.inner;

@@ -89,7 +89,41 @@ pub fn start() {
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
                     install_wake(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), input: crate::input::Router::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), spell: crate::spelling::Suggest::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default(), prefs_checked: 0.0, prefs_input: false }))
+                    Ok(Box::new(WebShell {
+                        app,
+                        inbox,
+                        prefs,
+                        shell: crate::shell::Shell::default(),
+                        bottom: crate::bottom::Bottom::default(),
+                        link: crate::linkcard::LinkCard::default(),
+                        autolink: crate::autolink::AutoLink::default(),
+                        cf: crate::cfpanel::CfPanel::default(),
+                        dates: crate::datepicker::DatePicker::default(),
+                        custom_date: crate::customdate::CustomDate::default(),
+                        custom_number: crate::customnumber::CustomNumber::default(),
+                        settings: crate::settings::SettingsWindow::default(),
+                        input: crate::input::Router::default(),
+                        notes: crate::notes::Notes::default(),
+                        calc: crate::calcpreview::CalcPreview::default(),
+                        merge: crate::merge::MergeGuard::default(),
+                        files: crate::files::Files::default(),
+                        spell: crate::spelling::Suggest::default(),
+                        copyto: crate::copyto::CopyTo::default(),
+                        home: crate::home::Home::new(),
+                        error_tip: crate::errortip::ErrorTip,
+                        account: crate::account::Account::default(),
+                        share: crate::share::Share::default(),
+                        live: crate::live::Live::default(),
+                        webfonts: crate::fonts::WebFontLoader::default(),
+                        dv: crate::dvpanel::DvPanel::default(),
+                        chart: crate::chartpanel::ChartPanel::default(),
+                        names: crate::namespanel::NamesPanel::default(),
+                        find: crate::findreplace::FindReplace::default(),
+                        protect: crate::protectpanel::ProtectPanel::default(),
+                        messages: crate::messages::Messages::default(),
+                        prefs_checked: 0.0,
+                        prefs_input: false,
+                    }))
                 }),
             )
             .await;
@@ -105,7 +139,6 @@ pub fn start() {
 fn query() -> String {
     web_sys::window().and_then(|w| w.location().search().ok()).unwrap_or_default()
 }
-
 
 struct WebShell {
     app: SheetApp,
@@ -770,7 +803,10 @@ fn set_tab_title(file: Option<&str>) {
     let title = match file {
         Some(name) => {
             let lower = name.to_ascii_lowercase();
-            let stem = [".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".ods"].iter().find(|e| lower.ends_with(*e)).map_or(name, |e| &name[..name.len() - e.len()]);
+            let stem = [".xlsx", ".xlsm", ".xls", ".csv", ".tsv", ".ods"]
+                .iter()
+                .find(|e| lower.ends_with(*e))
+                .map_or(name, |e| &name[..name.len() - e.len()]);
             if stem.trim().is_empty() { "Untitled spreadsheet".to_string() } else { stem.to_string() }
         }
         None => "StarSheets".to_string(),
