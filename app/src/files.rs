@@ -726,6 +726,10 @@ impl Files {
         let inbox = self.inbox.clone();
         let refresh = |_: u16, _: web_sys::Headers, _: Vec<u8>| Reply::Refresh;
         match action {
+            Action::Open(id, _) if self.browser.name_of(&id).is_some_and(|n| is_doc(&n)) => {
+                // A document opens in StarDocs, in a new tab (this tab keeps its spreadsheet).
+                open_url(&docs_url(&id, ""));
+            }
             Action::Open(id, new_tab) => {
                 // This tab only when the sheet here is completely blank; else a new tab.
                 let keep = app.session.active().is_some_and(|d| has_data(&d.wb)) || self.busy;
@@ -898,6 +902,26 @@ fn go_to(id: &str) {
     if let Some(w) = web_sys::window() {
         let _ = w.location().set_href(&page_url(id));
     }
+}
+
+/// Whether a file name is a StarDocs document (.docx, .odt): it opens in StarDocs, not here.
+pub fn is_doc(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.ends_with(".docx") || lower.ends_with(".odt")
+}
+
+/// StarDocs' page, which sits in `docs/` beside this one: `""` for a new document, else the
+/// file with that id. Extra query text (`&folder=…`) follows as given.
+pub fn docs_url(id: &str, extra: &str) -> String {
+    let path = web_sys::window().and_then(|w| w.location().pathname().ok()).unwrap_or_else(|| "/".into());
+    let dir = path.rsplit_once('/').map_or("/".to_string(), |(d, _)| format!("{d}/"));
+    let q = if id.is_empty() { "new=1".to_string() } else { format!("file={id}") };
+    format!("{dir}docs/?{q}{extra}")
+}
+
+/// The page a file opens on: StarDocs for a document, this page for a spreadsheet.
+pub fn file_url(id: &str, name: &str) -> String {
+    if is_doc(name) { docs_url(id, "") } else { page_url(id) }
 }
 
 /// Opens a new tab; false when the browser blocked it.

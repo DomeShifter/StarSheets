@@ -24,7 +24,17 @@ use serde_json::{Map, Value, json};
 /// Days something stays in the bin before it's deleted for good.
 pub const BIN_DAYS: i64 = 30;
 
-pub const EXTS: [&str; 5] = [".xlsx", ".xlsm", ".xls", ".csv", ".ods"];
+pub const EXTS: [&str; 7] = [".xlsx", ".xlsm", ".xls", ".csv", ".ods", ".docx", ".odt"];
+
+/// Documents (StarDocs) rather than spreadsheets: stored, listed, shared and versioned like any
+/// file, but never opened in a live spreadsheet room or drawn as a sheet preview.
+pub const DOC_EXTS: [&str; 2] = [".docx", ".odt"];
+
+/// Whether a file name is a StarDocs document.
+pub fn is_doc(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    DOC_EXTS.iter().any(|x| lower.ends_with(x))
+}
 
 /// A request that can't be done: (http status, message).
 #[derive(Debug)]
@@ -835,6 +845,8 @@ mod tests {
         assert_eq!(clean_name(Some(" ... ")), "Untitled spreadsheet");
         assert_eq!(split_name("Budget.XLSX"), ("Budget".into(), ".XLSX".into()));
         assert_eq!(split_name("notes.txt"), ("notes.txt".into(), ".xlsx".into()));
+        assert_eq!(split_name("Letter.docx"), ("Letter".into(), ".docx".into()));
+        assert!(is_doc("a/Letter.DOCX") && is_doc("b.odt") && !is_doc("c.xlsx"));
         assert_eq!(split_name(".xlsx"), (".xlsx".into(), ".xlsx".into()));
         assert_eq!(splitext("a.b.csv"), ("a.b".into(), ".csv".into()));
         assert!(rel(Some("a/../b")).is_err());

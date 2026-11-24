@@ -172,6 +172,9 @@ impl Home {
                 if house::menu_row(ui, Some("note_add"), "New spreadsheet", "", true) {
                     go(&page(&format!("?folder={}", enc(&into))));
                 }
+                if house::menu_row(ui, Some("description"), "New document", "", true) {
+                    go(&crate::files::docs_url("", &format!("&folder={}", enc(&into))));
+                }
                 if house::menu_row(ui, Some("create_new_folder"), "New folder", "", true) {
                     if here.is_none() {
                         self.navigate(View::Mine(self.space.clone()));
@@ -326,6 +329,7 @@ impl Home {
 
     pub(super) fn file_card(&mut self, ui: &mut Ui, ctx: &egui::Context, f: &FileRow, clicked_item: &mut bool) {
         let item = Item::File(f.id.clone());
+        let kind = if crate::files::is_doc(&f.name) { "stardocs" } else { "starsheets" };
         let (r, resp) = ui.allocate_exact_size(vec2(CARD_W, CARD_H), Sense::click_and_drag());
         if ui.is_rect_visible(r) {
             self.want_thumb(ctx, f);
@@ -425,7 +429,7 @@ impl Home {
                 Item::File(id) => self.file(id).map(|f| ListRow {
                     item: item.clone(),
                     name: f.name.clone(),
-                    icon: "starsheets",
+                    icon: if crate::files::is_doc(&f.name) { "stardocs" } else { "starsheets" },
                     owner: f.owner.clone(),
                     modified: f.modified,
                     size: Some(f.size),
@@ -534,7 +538,10 @@ impl Home {
             }
             // Files always open in a new tab, as from Google Drive, so the file browser stays
             // where it was (to-do 2 row 5; the separate "Open in new tab" entry went with it).
-            Item::File(id) => new_tab(&page(&format!("?file={id}"))),
+            Item::File(id) => {
+                let name = self.file(id).map(|f| f.name.clone()).unwrap_or_default();
+                new_tab(&crate::files::file_url(id, &name));
+            }
         }
     }
 

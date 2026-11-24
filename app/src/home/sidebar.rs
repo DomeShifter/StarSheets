@@ -26,6 +26,9 @@ impl Home {
             if house::menu_row(ui, Some("note_add"), "New spreadsheet", "", true) {
                 go(&page(&format!("?folder={}", enc(&folder))));
             }
+            if house::menu_row(ui, Some("description"), "New document", "", true) {
+                go(&crate::files::docs_url("", &format!("&folder={}", enc(&folder))));
+            }
             if house::menu_row(ui, Some("create_new_folder"), "New folder", "", true) {
                 call(&self.inbox, ui.ctx(), Method::Post, format!("api/folders?path={}&name=New%20folder", enc(&folder)), None, |b| {
                     let v: Json = serde_json::from_slice(&b).unwrap_or_default();

@@ -172,6 +172,14 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
         let _ = socket.send(Message::Text(text(&ToClient::Message { text: "You don't have access to this file.".into() }).into())).await;
         return;
     }
+    let is_doc = {
+        let (app, file) = (app.clone(), file.clone());
+        tokio::task::spawn_blocking(move || app.store.path_of(&file).ok().flatten().is_some_and(|p| crate::store::is_doc(&p))).await.unwrap_or(false)
+    };
+    if is_doc {
+        let _ = socket.send(Message::Text(text(&ToClient::Message { text: "That file is a document: open it in StarDocs.".into() }).into())).await;
+        return;
+    }
     let can_edit = role >= crate::sharing::Role::Edit;
     let (out, mut outbox) = unbounded_channel::<String>();
     app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), user, can_edit, out, have });

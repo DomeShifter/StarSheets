@@ -693,6 +693,9 @@ async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &Hea
             return Err(error(403, "You don't have access to that."));
         }
         let path = app.store.path_of(&f2).ok().flatten().ok_or_else(|| error(404, "no such file"))?;
+        if store::is_doc(&path) {
+            return Err(error(404, "documents have no preview picture yet"));
+        }
         let full = app.store.full(&path);
         let version = app.store.version_of(&full).map_err(|_| error(404, "no such file"))?;
         if let Some(png) = thumbs::cached(&app.store, &f2, &version) {
@@ -825,6 +828,10 @@ async fn serve_site(site: &Path, path: &str, headers: &HeaderMap) -> Response<Bo
         rel.push("index.html");
     }
     let mut full = site.join(&rel);
+    // A folder with its own page (StarDocs in docs/) serves that page.
+    if !escapes && full.is_dir() && full.join("index.html").is_file() {
+        full = full.join("index.html");
+    }
     if escapes || !full.is_file() {
         let base = rel.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         if base.contains('.') {
@@ -902,6 +909,19 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     }
     if m == "GET" && p.len() == 3 && p[0] == "files" && p[2] == "thumb" {
         return thumb(&app, me, p[1].clone(), &headers).await;
+    }
+    // StarDocs reads a document with a plain GET (spreadsheets open through their live room,
+    // which notes this itself): it counts as opened, for Recent.
+    if m == "GET" && p.len() == 2 && p[0] == "files"
+        && let Some(u) = me.clone()
+    {
+        let id = p[1].clone();
+        blocking(&app, move |a| {
+            if a.store.path_of(&id).ok().flatten().is_some_and(|path| store::is_doc(&path)) {
+                let _ = spaces::note_opened(&a.store, &u, &id);
+            }
+        })
+        .await;
     }
     let q = match gate(&app, &m, &p, q, me.clone(), &body).await {
         Ok(q) => q,

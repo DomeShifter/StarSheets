@@ -144,6 +144,11 @@ impl Browser {
         folders
     }
 
+    /// The name of the listed file with this id.
+    pub fn name_of(&self, id: &str) -> Option<String> {
+        self.file(id).map(|f| f.name.clone())
+    }
+
     fn file(&self, id: &str) -> Option<&FileInfo> {
         self.files.iter().find(|f| f.id == id)
     }
