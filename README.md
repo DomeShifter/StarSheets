@@ -1,5 +1,9 @@
 # StarSheets
 
+> **StarSheets has moved.** It now lives in [DomeShifter/Starbase](https://github.com/DomeShifter/Starbase)
+> (folder `starsheets/`), together with StarDocs and the home screen, with all of its history.
+> Please open issues and pull requests there. This repository stays as it was on 24 November 2026.
+
 A spreadsheet that looks and feels like Google Sheets, that you can run yourself.
 
 ![StarSheets showing a sales table with charts](docs/images/starsheets.png)
