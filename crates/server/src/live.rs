@@ -35,10 +35,28 @@ const EMPTY_FOR: Duration = Duration::from_secs(10);
 const CHECK_EVERY: u64 = 25;
 /// Changes kept for undo.
 const HISTORY: usize = 200;
+/// How often everyone's access to an open file is checked again (also at once after a sharing
+/// change, through [`Rooms::recheck_access`], and when the file moves).
+#[cfg(not(test))]
+const RECHECK: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const RECHECK: Duration = Duration::from_millis(300);
+/// A tab gets the whole file again (Resync) at most this often; asks in between are answered
+/// together when the time is up.
+#[cfg(not(test))]
+const RESYNC_GAP: Duration = Duration::from_secs(2);
+#[cfg(test)]
+const RESYNC_GAP: Duration = Duration::from_millis(500);
+
+/// Names for connections, made here so no tab can take another's (security review #3).
+static NEXT_CONNECTION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 enum RoomMsg {
     Join {
+        /// The connection's name, made by the server.
         client: String,
+        /// The id the tab chose (Hello `client`): with the username, whose undo history is whose.
+        tab: String,
         user: Option<crate::auth::User>,
         can_edit: bool,
         out: UnboundedSender<String>,
@@ -53,6 +71,8 @@ enum RoomMsg {
     },
     /// The file was replaced through the files API (a version restored): read it again.
     Replaced,
+    /// Sharing or accounts changed: check again who may still view or edit.
+    Recheck,
     /// Copy every sheet of this spreadsheet file (bytes, name) to the end of the room's file;
     /// answers with the new sheets' names.
     AddSheets {
@@ -105,6 +125,19 @@ impl Rooms {
             let _ = tx.send(RoomMsg::Replaced);
         }
     }
+
+    /// Sharing or accounts changed (a share added, changed or removed, an account removed or
+    /// made owner or not): every open file checks again who may still have it open. Someone who
+    /// lost access is told and disconnected; someone whose role changed gets the file again as
+    /// a viewer or an editor. Cheap: one message per open file; the check runs in each room.
+    // Called from main.rs after sharing and account changes; until that call is added there
+    // (the same change set), only the tests use it. Remove this allow once it is.
+    #[allow(dead_code)]
+    pub fn recheck_access(&self) {
+        for tx in self.map.lock().unwrap_or_else(|e| e.into_inner()).values() {
+            let _ = tx.send(RoomMsg::Recheck);
+        }
+    }
 }
 
 // ---------------------------------------------------------------- connections
@@ -114,7 +147,9 @@ pub async fn ws(State(app): State<Shared>, headers: HeaderMap, upgrade: WebSocke
         return crate::error(401, "please sign in").into_response();
     }
     let user = crate::current_user(&app, &headers);
-    upgrade.max_message_size(crate::MAX_BYTES as usize).on_upgrade(move |socket| connection(app, socket, user))
+    // A tab's biggest message is a change sent whole; packed it stays well under MAX_FRAME (and
+    // a frame may unpack to at most sync::MAX_UNPACKED).
+    upgrade.max_message_size(sync::MAX_FRAME).max_frame_size(sync::MAX_FRAME).on_upgrade(move |socket| connection(app, socket, user))
 }
 
 fn text(m: &ToClient) -> String {
@@ -128,17 +163,19 @@ fn who(user: &Option<crate::auth::User>) -> String {
 
 async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth::User>) {
     // The first message says which file.
-    let (file, client, have) = loop {
+    let (file, tab, have) = loop {
         match socket.recv().await {
             Some(Ok(Message::Text(t))) => match serde_json::from_str::<ToServer>(&t) {
                 Ok(ToServer::Hello { file, build, client, protocol, have }) => {
                     // Only a different protocol needs the tab to reload (not every new build).
                     if protocol != sync::PROTOCOL {
-                        crate::log::note(&app.store, &format!("tab of {} on an older StarSheets (build {build}) asked to reload", who(&user)));
+                        crate::log::note(&app.store, &format!("tab of {} on an older StarSheets (build {build:?}) asked to reload", who(&user)));
                         let _ = socket.send(Message::Text(text(&ToClient::Reload).into())).await;
                         return;
                     }
-                    break (file, client, have);
+                    // Only for undo after reconnecting (with the username); kept short.
+                    let tab: String = client.chars().take(64).collect();
+                    break (file, tab, have);
                 }
                 // A tab older than protocol 3 sends `{"t": "hello", …}` without "c": it reads our
                 // Reload (`{"t": "reload"}`) the same as before, and gets the new app.
@@ -153,23 +190,29 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
             _ => return,
         }
     };
-    // Only people the file is shared with get in; viewers can't change it.
+    // Only people the file is shared with get in; viewers can't change it. The role is checked
+    // before anything is noted, and the file id (the tab's text) is logged only quoted.
     let role = {
         let (app, user, file) = (app.clone(), user.clone(), file.clone());
         tokio::task::spawn_blocking(move || {
             let _g = app.lock.lock().unwrap_or_else(|e| e.into_inner());
+            let role = crate::sharing::file_role(&app.store, app.auth, user.as_ref(), &file);
+            if role == crate::sharing::Role::None {
+                crate::log::note(&app.store, &format!("{} was refused file {file:?} (no access)", who(&user)));
+                return role;
+            }
             if let Some(u) = &user {
                 let _ = crate::spaces::note_opened(&app.store, u, &file);
             }
-            let name = app.store.path_of(&file).ok().flatten().unwrap_or_else(|| file.clone());
+            let name = app.store.path_of(&file).ok().flatten().unwrap_or_else(|| format!("{file:?}"));
             crate::log::note(&app.store, &format!("{} opened {name}", who(&user)));
-            crate::sharing::file_role(&app.store, app.auth, user.as_ref(), &file)
+            role
         })
         .await
         .unwrap_or_default()
     };
     if role == crate::sharing::Role::None {
-        let _ = socket.send(Message::Text(text(&ToClient::Message { text: "You don't have access to this file.".into() }).into())).await;
+        let _ = socket.send(Message::Text(text(&ToClient::NoAccess { text: NO_ACCESS.into() }).into())).await;
         return;
     }
     let is_doc = {
@@ -181,8 +224,10 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
         return;
     }
     let can_edit = role >= crate::sharing::Role::Edit;
+    // The connection's name is the server's, never the tab's: a tab can't speak as another.
+    let client = format!("c{}", NEXT_CONNECTION.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let (out, mut outbox) = unbounded_channel::<String>();
-    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), user, can_edit, out, have });
+    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), tab, user, can_edit, out, have });
     // A ping now and then keeps proxies from closing a quiet connection.
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     ping.tick().await;
@@ -232,9 +277,20 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
 
 // ---------------------------------------------------------------- rooms
 
+const NO_ACCESS: &str = "You don't have access to this file.";
+
 struct Client {
     out: UnboundedSender<String>,
     can_edit: bool,
+    /// Who it is (None: a guest, with sign-in off), to check their access again.
+    user: Option<crate::auth::User>,
+    /// Whose undo history this tab uses: the username and the tab's own id, so the same tab
+    /// can undo its earlier changes after reconnecting but nobody can undo as someone else.
+    undo_as: String,
+    /// When this tab was last sent the whole file on asking (Resync), and whether it asked again
+    /// since (answered once RESYNC_GAP has passed).
+    resync_at: Option<Instant>,
+    resync_wanted: bool,
     person: sync::Person,
     /// Where the tab is (its last Presence), sent to people who join later.
     presence: Option<(usize, gridcraft_engine::selection::Selection)>,
@@ -247,7 +303,8 @@ struct Client {
 
 #[derive(Clone)]
 struct Step {
-    client: String,
+    /// Whose change it is (`Client::undo_as`).
+    by: String,
     before: Arc<Workbook>,
     after: Arc<Workbook>,
 }
@@ -287,6 +344,8 @@ struct Room {
     hash: Option<(u64, String)>,
     /// A save running in the background: the `seq` it saves and where its result comes.
     saving: Option<(u64, std::sync::mpsc::Receiver<Saved>)>,
+    /// When everyone's access was last checked again.
+    access_checked: Instant,
 }
 
 /// What a background save reports.
@@ -328,6 +387,7 @@ impl Room {
             pristine_seq: None,
             hash: None,
             saving: None,
+            access_checked: Instant::now(),
         };
         let opened = room.open();
         loop {
@@ -351,6 +411,10 @@ impl Room {
             if room.saving.is_none() && room.disk_checked.elapsed() >= DISK_CHECK {
                 room.check_disk();
             }
+            if room.access_checked.elapsed() >= RECHECK {
+                room.recheck();
+            }
+            room.serve_resyncs();
             room.save_if_due(false);
             if room.clients.is_empty()
                 && room.dirty_since.is_none()
@@ -450,7 +514,8 @@ impl Room {
 
     /// Welcome for a tab: without the workbook when the tab already opened exactly this version
     /// and nothing has changed here since (it checks the fingerprint, and asks again if it differs).
-    fn welcome(&mut self, have: Option<String>, can_edit: bool) -> ToClient {
+    fn welcome(&mut self, have: Option<String>, can_edit: bool, you: &str) -> ToClient {
+        let you = you.to_string();
         let last_edit = self.last_edit_now();
         let same = have.is_some() && have == self.disk && self.pristine_seq == Some(self.seq) && self.dirty_since.is_none();
         if same {
@@ -458,18 +523,25 @@ impl Room {
                 &self.app.store,
                 &format!("{}: the tab already had this version (sent a check, not the file)", self.path.clone().unwrap_or_default()),
             );
-            return ToClient::Welcome { seq: self.seq, workbook: None, spills: Vec::new(), hash: Some(self.whole_hash()), can_edit, last_edit };
+            return ToClient::Welcome { seq: self.seq, workbook: None, spills: Vec::new(), hash: Some(self.whole_hash()), can_edit, last_edit, you };
         }
         let (workbook, spills) = self.snapshot();
-        ToClient::Welcome { seq: self.seq, workbook: Some(workbook), spills, hash: None, can_edit, last_edit }
+        ToClient::Welcome { seq: self.seq, workbook: Some(workbook), spills, hash: None, can_edit, last_edit, you }
     }
 
     fn handle(&mut self, msg: RoomMsg) {
         match msg {
-            RoomMsg::Join { client, user, can_edit, out, have } => {
-                let _ = out.send(text(&self.welcome(have, can_edit)));
+            RoomMsg::Join { client, tab, user, can_edit, out, have } => {
+                // Names are the server's and never reused, so this doesn't happen; if it did, the
+                // one already here stays (nobody can push someone else out).
+                if self.clients.contains_key(&client) {
+                    let _ = out.send(text(&ToClient::Message { text: "This connection is already open.".into() }));
+                    return;
+                }
+                let _ = out.send(text(&self.welcome(have, can_edit, &client)));
+                let undo_as = format!("{}/{tab}", user.as_ref().map_or("", |u| u.username.as_str()));
                 // Without sign-in (STARSHEETS_AUTH=off) people are guests, numbered as they come.
-                let person = match user {
+                let person = match user.clone() {
                     Some(u) => sync::Person { client: client.clone(), username: u.username, name: u.name, colour: u.colour },
                     None => {
                         self.guests += 1;
@@ -482,7 +554,21 @@ impl Room {
                         let _ = out.send(text(&ToClient::Presence { client: other.clone(), sheet: *sheet, sel: sel.clone() }));
                     }
                 }
-                self.clients.insert(client, Client { out, person, can_edit, presence: None, blocked: None, redo: Vec::new() });
+                self.clients.insert(
+                    client,
+                    Client {
+                        out,
+                        person,
+                        can_edit,
+                        user,
+                        undo_as,
+                        resync_at: None,
+                        resync_wanted: false,
+                        presence: None,
+                        blocked: None,
+                        redo: Vec::new(),
+                    },
+                );
                 self.empty_since = None;
                 self.people();
             }
@@ -499,9 +585,12 @@ impl Room {
                 }
             }
             RoomMsg::Replaced => self.reload(),
+            RoomMsg::Recheck => self.recheck(),
             RoomMsg::AddSheets { name, bytes, by, reply } => {
                 let _ = reply.send(self.add_sheets(&name, &bytes, &by));
             }
+            // From a connection that isn't (or is no longer) in the room: nothing it says counts.
+            RoomMsg::From { client, .. } if !self.clients.contains_key(&client) => {}
             RoomMsg::From { client, msg }
                 if matches!(msg, ToServer::Change { .. } | ToServer::Undo | ToServer::Redo)
                     && !self.clients.get(&client).is_some_and(|c| c.can_edit) =>
@@ -515,8 +604,10 @@ impl Room {
                 ToServer::Undo => self.undo(&client),
                 ToServer::Redo => self.redo(&client),
                 ToServer::Resync => {
-                    let (workbook, spills) = self.snapshot();
-                    self.to(&client, &ToClient::Reset { seq: self.seq, workbook, spills });
+                    if let Some(c) = self.clients.get_mut(&client) {
+                        c.resync_wanted = true;
+                    }
+                    self.serve_resyncs();
                 }
                 ToServer::Presence { sheet, sel } => {
                     if let Some(c) = self.clients.get_mut(&client) {
@@ -598,7 +689,8 @@ impl Room {
 
     fn record(&mut self, client: &str, before: Arc<Workbook>, after: Arc<Workbook>) {
         self.seq += 1;
-        self.history.push_back(Step { client: client.to_string(), before, after });
+        let by = self.clients.get(client).map(|c| c.undo_as.clone()).unwrap_or_default();
+        self.history.push_back(Step { by, before, after });
         if self.history.len() > HISTORY {
             self.history.pop_front();
         }
@@ -621,7 +713,8 @@ impl Room {
     /// back; otherwise the cells it changed go back, as long as it changed only cells and nobody
     /// has changed those cells since (`sync::undo_cells`).
     fn undo(&mut self, client: &str) {
-        let Some(k) = self.history.iter().rposition(|s| s.client == client) else {
+        let Some(me) = self.clients.get(client).map(|c| c.undo_as.clone()) else { return };
+        let Some(k) = self.history.iter().rposition(|s| s.by == me) else {
             self.to(client, &ToClient::Message { text: "Nothing to undo.".into() });
             return;
         };
@@ -680,6 +773,92 @@ impl Room {
         self.last_change = Instant::now();
         let patch = sync::make_patch(&before, &after);
         self.all(&ToClient::Applied { seq: self.seq, client: String::new(), cseq: 0, change: Change::State { patch } });
+    }
+
+    /// Sends the whole file to tabs that asked (Resync), each at most once per RESYNC_GAP: a tab
+    /// asking over and over can't keep the room busy making copies of a big file.
+    fn serve_resyncs(&mut self) {
+        let due: Vec<String> = self
+            .clients
+            .iter()
+            .filter(|(_, c)| c.resync_wanted && c.resync_at.is_none_or(|t| t.elapsed() >= RESYNC_GAP))
+            .map(|(k, _)| k.clone())
+            .collect();
+        if due.is_empty() {
+            return;
+        }
+        let (workbook, spills) = self.snapshot();
+        let m = text(&ToClient::Reset { seq: self.seq, workbook, spills });
+        for k in due {
+            if let Some(c) = self.clients.get_mut(&k) {
+                c.resync_wanted = false;
+                c.resync_at = Some(Instant::now());
+                let _ = c.out.send(m.clone());
+            }
+        }
+    }
+
+    /// Checks again what everyone here may do, the same way joining does (security review
+    /// #10). Someone who may no longer open the file is told and disconnected; someone whose
+    /// role changed between viewing and editing gets the file again with the new role.
+    fn recheck(&mut self) {
+        self.access_checked = Instant::now();
+        if self.clients.is_empty() {
+            return;
+        }
+        let roles: Vec<(String, crate::sharing::Role)> = {
+            let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
+            // Accounts as they are now: removed ones are gone, owners may have changed.
+            let users = crate::auth::users(&self.app.store);
+            let mut seen: HashMap<Option<String>, crate::sharing::Role> = HashMap::new();
+            self.clients
+                .iter()
+                .map(|(k, c)| {
+                    let name = c.user.as_ref().map(|u| u.username.clone());
+                    let role = *seen.entry(name.clone()).or_insert_with(|| {
+                        let now = name.as_ref().and_then(|n| users.iter().find(|u| &u.username == n));
+                        // Someone signed in whose account is gone has no access (unlike a guest).
+                        if name.is_some() && now.is_none() {
+                            return crate::sharing::Role::None;
+                        }
+                        crate::sharing::file_role(&self.app.store, self.app.auth, now, &self.file)
+                    });
+                    (k.clone(), role)
+                })
+                .collect()
+        };
+        let mut left = false;
+        for (k, role) in roles {
+            if role == crate::sharing::Role::None {
+                if let Some(c) = self.clients.remove(&k) {
+                    crate::log::note(
+                        &self.app.store,
+                        &format!("{} no longer has access to {}: disconnected", who(&c.user), self.path.clone().unwrap_or_default()),
+                    );
+                    // Dropping `out` ends the connection once this is sent.
+                    let _ = c.out.send(text(&ToClient::NoAccess { text: NO_ACCESS.into() }));
+                }
+                left = true;
+                continue;
+            }
+            let can_edit = role >= crate::sharing::Role::Edit;
+            if self.clients.get(&k).is_some_and(|c| c.can_edit != can_edit) {
+                let welcome = self.welcome(None, can_edit, &k);
+                if let Some(c) = self.clients.get_mut(&k) {
+                    c.can_edit = can_edit;
+                    c.blocked = None;
+                    c.redo.clear();
+                    let _ = c.out.send(text(&welcome));
+                }
+            }
+        }
+        if left {
+            self.people();
+            if self.clients.is_empty() {
+                self.empty_since = Some(Instant::now());
+                self.save_if_due(true);
+            }
+        }
     }
 
     /// Starts a save once changes have rested (or have waited too long). The work (writing the
@@ -821,6 +1000,8 @@ impl Room {
         );
         self.all(&ToClient::Moved { name, folder, binned: now.is_none() });
         self.path = now;
+        // Moved to another folder or space: other shares may apply now.
+        self.recheck();
     }
 
     /// Copies the sheets of another spreadsheet file to the end of this one, as a change made by
@@ -919,20 +1100,18 @@ mod tests {
     }
 
     fn app() -> (Shared, String, std::path::PathBuf) {
+        app_with(false)
+    }
+
+    /// A test server with one file; `auth`: sign-in on (people and sharing apply).
+    fn app_with(auth: bool) -> (Shared, String, std::path::PathBuf) {
         let dir = std::env::temp_dir().join(format!("starsheets-live-{}", crate::store::random_hex(6)));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("t.csv"), "a,b\n1,2\n").unwrap();
         let store = Store { root: dir.clone(), keep: 3, spaces: false };
         let id = store.synced_index().unwrap().keys().next().unwrap().clone();
-        let app = Arc::new(App {
-            store,
-            base: dir.clone(),
-            lock: Mutex::new(()),
-            location: String::new(),
-            auth: false,
-            site: None,
-            rooms: Rooms::default(),
-        });
+        let app =
+            Arc::new(App { store, base: dir.clone(), lock: Mutex::new(()), location: String::new(), auth, site: None, rooms: Rooms::default() });
         (app, id, dir)
     }
 
@@ -952,8 +1131,13 @@ mod tests {
     }
 
     fn join(app: &Shared, file: &str, name: &str) -> Tab {
+        join_as(app, file, name, name, None, true)
+    }
+
+    /// Joins as connection `name` (the server's name for it), from a tab with id `tab`.
+    fn join_as(app: &Shared, file: &str, name: &str, tab: &str, user: Option<crate::auth::User>, can_edit: bool) -> Tab {
         let (out, rx) = unbounded_channel();
-        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), user: None, can_edit: true, out, have: None });
+        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), tab: tab.into(), user, can_edit, out, have: None });
         let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
         match next(&mut t) {
             ToClient::Welcome { seq, workbook, .. } => {
@@ -1041,7 +1225,7 @@ mod tests {
         let version = app.store.version_of(&dir.join("t.csv")).unwrap();
         let welcome = |have: Option<String>, name: &str| {
             let (out, rx) = unbounded_channel();
-            app.rooms.send(&app, &file, RoomMsg::Join { client: name.into(), user: None, can_edit: true, out, have });
+            app.rooms.send(&app, &file, RoomMsg::Join { client: name.into(), tab: name.into(), user: None, can_edit: true, out, have });
             let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
             next(&mut t)
         };
@@ -1219,6 +1403,105 @@ mod tests {
         take_applied(&mut b);
         app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Undo });
         assert!(matches!(next(&mut a), ToClient::Message { text } if text == sync::UNDO_CHANGED));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn person(username: &str) -> Option<crate::auth::User> {
+        Some(crate::auth::User { username: username.into(), name: username.into(), colour: "#000000".into(), owner: false })
+    }
+
+    /// Security review #3: a tab that reuses another tab's id (it is sent to everyone) gets its
+    /// own connection name from the server, so it can't push that tab out, edit as it (when it
+    /// may only view) or undo its changes.
+    #[test]
+    fn a_tab_cannot_pass_itself_off_as_another() {
+        let (app, file, dir) = app();
+        let mut ed = join_as(&app, &file, "c1", "tab1", person("ed"), true);
+        let mut viewer = join_as(&app, &file, "c2", "tab1", person("vi"), false);
+        // A second Join under a name already in the room is refused; the editor stays.
+        let (out, rx) = unbounded_channel();
+        app.rooms.send(&app, &file, RoomMsg::Join { client: "c1".into(), tab: "tab1".into(), user: person("vi"), can_edit: false, out, have: None });
+        let mut late = Tab { name: "late".into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
+        assert!(matches!(next(&mut late), ToClient::Message { text } if text.contains("already open")));
+        // The viewer's change is refused, whatever tab id it gave.
+        edit(&app, &file, &mut viewer, "cell.set", json!({"cell": "A9", "input": "viewer"}));
+        assert!(matches!(next(&mut viewer), ToClient::Rejected { .. }));
+        // The editor still edits, and gets its own changes back as its own.
+        edit(&app, &file, &mut ed, "cell.set", json!({"cell": "A5", "input": "ed's"}));
+        assert_eq!(take_applied(&mut ed), ("c1".into(), 1));
+        take_applied(&mut viewer);
+        // Another editor with the same tab id can't undo the first editor's change.
+        let mut mal = join_as(&app, &file, "c3", "tab1", person("mal"), true);
+        app.rooms.send(&app, &file, RoomMsg::From { client: "c3".into(), msg: ToServer::Undo });
+        assert!(matches!(next(&mut mal), ToClient::Message { text } if text == "Nothing to undo."));
+        // Nor can a connection that isn't in the room.
+        app.rooms.send(&app, &file, RoomMsg::From { client: "ghost".into(), msg: ToServer::Undo });
+        // The editor's own undo works (the first thing after the refused ones).
+        app.rooms.send(&app, &file, RoomMsg::From { client: "c1".into(), msg: ToServer::Undo });
+        assert_eq!(take_applied(&mut ed).0, "", "undo comes from the server");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Security review #10: access is checked again while the file is open, at once after a
+    /// sharing change (recheck_access) and every RECHECK anyway.
+    #[test]
+    fn access_is_checked_again_while_the_file_is_open() {
+        use crate::sharing::{Item, Role, Share};
+        let (app, file, dir) = app_with(true);
+        crate::auth::add(&app.store, "boss", "Boss", "a long password").unwrap();
+        let bob = crate::auth::add(&app.store, "bob", "Bob", "a long password").unwrap();
+        let share = |role: Role| {
+            let people = if role == Role::None { Vec::new() } else { vec![("bob".to_string(), role)] };
+            crate::sharing::set(&app.store, Item::File(&file), &Share { people, link: Role::None }).unwrap();
+        };
+        share(Role::Edit);
+        let mut b = join_as(&app, &file, "c1", "tab", Some(bob), true);
+        // Made a viewer: told at once, with the file again and its own name.
+        share(Role::View);
+        app.rooms.recheck_access();
+        match next(&mut b) {
+            ToClient::Welcome { can_edit, you, .. } => {
+                assert!(!can_edit);
+                assert_eq!(you, "c1");
+            }
+            m => panic!("expected welcome, got {m:?}"),
+        }
+        edit(&app, &file, &mut b, "cell.set", json!({"cell": "A1", "input": "x"}));
+        assert!(matches!(next(&mut b), ToClient::Rejected { .. }));
+        // Share taken away, nobody says so: the periodic check finds it and disconnects.
+        share(Role::None);
+        assert!(matches!(next(&mut b), ToClient::NoAccess { .. }));
+        for _ in 0..100 {
+            match b.rx.try_recv() {
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break,
+                _ => std::thread::sleep(Duration::from_millis(5)),
+            }
+        }
+        assert!(matches!(b.rx.try_recv(), Err(tokio::sync::mpsc::error::TryRecvError::Disconnected)), "the connection is ended");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A tab asking for the whole file over and over gets it at most once per RESYNC_GAP.
+    #[test]
+    fn resync_is_rate_limited() {
+        let (app, file, dir) = app();
+        let mut a = join(&app, &file, "a");
+        for _ in 0..5 {
+            app.rooms.send(&app, &file, RoomMsg::From { client: "a".into(), msg: ToServer::Resync });
+        }
+        assert!(matches!(next(&mut a), ToClient::Reset { .. }));
+        std::thread::sleep(Duration::from_millis(300));
+        let mut resets = 0;
+        while let Ok(m) = a.rx.try_recv() {
+            resets += usize::from(matches!(serde_json::from_str(&m).unwrap(), ToClient::Reset { .. }));
+        }
+        assert_eq!(resets, 0, "not again straight away");
+        std::thread::sleep(RESYNC_GAP);
+        let mut resets = 0;
+        while let Ok(m) = a.rx.try_recv() {
+            resets += usize::from(matches!(serde_json::from_str(&m).unwrap(), ToClient::Reset { .. }));
+        }
+        assert_eq!(resets, 1, "the asks in between are answered once");
         let _ = std::fs::remove_dir_all(dir);
     }
 }

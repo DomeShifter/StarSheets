@@ -74,6 +74,8 @@ pub struct Live {
     ws: Option<web_sys::WebSocket>,
     inbox: Rc<RefCell<Vec<Event>>>,
     _handlers: Vec<Closure<dyn FnMut(web_sys::Event)>>,
+    /// This tab's own id, sent in Hello: only so the server lets it undo its earlier changes
+    /// after reconnecting. The server's name for the connection is `you`.
     client: String,
     open: bool,
     joined: bool,
@@ -103,6 +105,11 @@ pub struct Live {
     sent_place_at: f64,
     /// False for someone who may only view this file.
     can_edit: bool,
+    /// The server said this person may not open the file (any more): stop connecting, keep
+    /// showing what's here, change nothing.
+    denied: bool,
+    /// Changes too big to send (`sync::fits`): dropped and said at the next frame.
+    too_big: RefCell<Vec<u64>>,
 }
 
 impl Default for Live {
@@ -135,6 +142,8 @@ impl Default for Live {
             sent_place: None,
             sent_place_at: 0.0,
             can_edit: true,
+            denied: false,
+            too_big: RefCell::default(),
         }
     }
 }
@@ -198,6 +207,14 @@ impl Live {
             return;
         }
         HANDLED.with(|h| *h.borrow_mut() = Some(doc));
+        if self.denied {
+            // No access (any more): nothing is sent or saved; the file stays on screen to read.
+            app.session.sync_log = None;
+            app.session.read_only = true;
+            let status = LiveStatus { doc, text: "No access".into(), unsaved: false, saved_at: self.saved_at, last_edit: self.last_edit.clone() };
+            STATUS.with(|s| *s.borrow_mut() = Some(status));
+            return;
+        }
         if self.ws.is_none() && now_ms() >= self.retry_at {
             self.connect(ctx);
         }
@@ -229,6 +246,16 @@ impl Live {
         let events: Vec<Event> = std::mem::take(&mut *self.inbox.borrow_mut());
         for ev in events {
             changed |= self.handle(app, ev);
+        }
+        let too_big = std::mem::take(&mut *self.too_big.borrow_mut());
+        if !too_big.is_empty() {
+            self.pending.retain(|p| !too_big.contains(&p.cseq));
+            self.rebuild(app, None);
+            app.message = Some((
+                "Change not saved".into(),
+                "That change is too big to send to the server in one go, so it was undone here. Try it in smaller parts.".into(),
+            ));
+            changed = true;
         }
         if changed {
             keep_sheet_views(app, views);
@@ -312,8 +339,10 @@ impl Live {
 
     fn message(&mut self, app: &mut SheetApp, m: ToClient) -> bool {
         match m {
-            ToClient::Welcome { seq, workbook, spills, hash, can_edit, last_edit } => {
+            ToClient::Welcome { seq, workbook, spills, hash, can_edit, last_edit, you } => {
                 self.have = None;
+                // The server's name for this connection: Applied with it is our own change.
+                self.you = you;
                 let current = app.session.active().map(|d| d.wb.clone());
                 let wb = match workbook {
                     Some(w) => sync::workbook_from_parts(&w, &spills, current.as_deref()).map(Arc::new),
@@ -357,13 +386,13 @@ impl Live {
                 self.seq = seq;
                 self.server_dirty = true;
                 // Who made it, for "Last edit … by …": you, someone here, or the server's own work.
-                let by = if client == self.client {
+                let by = if client == self.you {
                     "you".to_string()
                 } else {
                     self.people.iter().find(|p| p.client == client).map(|p| p.name.clone()).unwrap_or_else(|| "someone".into())
                 };
                 self.last_edit = Some(sync::LastEdit { by, at: (js_sys::Date::now() / 1000.0) as i64 });
-                if client == self.client {
+                if client == self.you {
                     if self.pending.front().is_some_and(|p| p.cseq == cseq) {
                         let p = self.pending.pop_front();
                         if self.pending.is_empty() {
@@ -469,6 +498,17 @@ impl Live {
             ToClient::Presence { client, sheet, sel } => {
                 self.places.insert(client, (sheet, sel, now_ms()));
                 false
+            }
+            // Not shared with this person (any more): say so once and stop connecting; what's
+            // on screen stays, read only.
+            ToClient::NoAccess { text } => {
+                self.denied = true;
+                self.disconnect();
+                self.pending.clear();
+                self.people.clear();
+                app.session.read_only = true;
+                app.message = Some(("No access".into(), text));
+                true
             }
             ToClient::Reload => {
                 // The server runs a newer build: reload once to get it; if that didn't help (the
@@ -591,7 +631,17 @@ impl Live {
         if let (Some(ws), true) = (&self.ws, self.open)
             && let Ok(t) = serde_json::to_string(m)
         {
-            let _ = match sync::pack(&t) {
+            let packed = sync::pack(&t);
+            // Too big for the server (it would end the connection, and the change would be sent
+            // again on reconnecting, over and over): dropped and said instead.
+            if !sync::fits(&t, packed.as_deref()) {
+                log::warn!("live editing: a message of {} bytes is too big to send", t.len());
+                if let ToServer::Change { cseq, .. } = m {
+                    self.too_big.borrow_mut().push(*cseq);
+                }
+                return;
+            }
+            let _ = match packed {
                 Some(packed) => ws.send_with_u8_array(&packed),
                 None => ws.send_with_str(&t),
             };

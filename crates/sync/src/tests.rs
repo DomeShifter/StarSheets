@@ -250,7 +250,15 @@ fn whole_workbooks_and_patches_round_trip_as_raw_text() {
     a.execute("file.new", json!({})).unwrap();
     a.execute("cell.set", json!({"cell": "B2", "input": "=1+2"})).unwrap();
     let before = a.active().unwrap().wb.clone();
-    let m = ToClient::Welcome { seq: 4, workbook: Some(workbook_json(&before)), spills: Vec::new(), hash: None, can_edit: true, last_edit: None };
+    let m = ToClient::Welcome {
+        seq: 4,
+        workbook: Some(workbook_json(&before)),
+        spills: Vec::new(),
+        hash: None,
+        can_edit: true,
+        last_edit: None,
+        you: "c1".into(),
+    };
     let t = serde_json::to_string(&m).unwrap();
     let ToClient::Welcome { workbook, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
     assert_eq!(fingerprint(&workbook_from_json(&workbook.unwrap(), None).unwrap()), fingerprint(&before));
@@ -324,6 +332,7 @@ fn welcome_carries_the_last_edit_and_old_welcomes_still_read() {
         hash: None,
         can_edit: true,
         last_edit: Some(edit.clone()),
+        you: "c1".into(),
     })
     .unwrap();
     let ToClient::Welcome { last_edit, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
@@ -401,4 +410,27 @@ fn big_messages_pack_and_unpack() {
     assert!(packed.len() * 10 < big.len(), "repetitive JSON shrinks a lot");
     assert_eq!(unpack(&packed).unwrap(), big);
     assert!(unpack(b"not deflate").is_err());
+}
+
+/// A small frame that would unpack to a huge message (a deflate bomb) is refused once it passes
+/// the limit, without unpacking the rest. (Shown with a 1 MB limit and 64 MB of spaces, which
+/// pack to about 64 KB; `unpack` uses the same code with MAX_UNPACKED.)
+#[test]
+fn a_deflate_bomb_is_refused() {
+    use std::io::Write as _;
+    let mut e = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+    let spaces = vec![b' '; 1024 * 1024];
+    for _ in 0..64 {
+        e.write_all(&spaces).unwrap();
+    }
+    let bomb = e.finish().unwrap();
+    assert!(bomb.len() < 1024 * 1024, "a small frame: {}", bomb.len());
+    let err = unpack_at_most(&bomb, 1024 * 1024).unwrap_err();
+    assert!(err.contains("too big"), "{err}");
+    // Right at the limit is fine; one byte over is not.
+    let at = pack(&"x".repeat(PACK_FROM * 2)).unwrap();
+    assert!(unpack_at_most(&at, PACK_FROM * 2).is_ok());
+    assert!(unpack_at_most(&at, PACK_FROM * 2 - 1).is_err());
+    assert!(fits("{}", None));
+    assert!(!fits("{}", Some(&vec![0; MAX_FRAME + 1])));
 }
