@@ -406,6 +406,7 @@ impl Room {
         let last_edit = self.last_edit_now();
         let same = have.is_some() && have == self.disk && self.pristine_seq == Some(self.seq) && self.dirty_since.is_none();
         if same {
+            crate::log::note(&self.app.store, &format!("{}: the tab already had this version (sent a check, not the file)", self.path.clone().unwrap_or_default()));
             return ToClient::Welcome { seq: self.seq, workbook: None, spills: Vec::new(), hash: Some(self.whole_hash()), can_edit, last_edit };
         }
         let (workbook, spills) = self.snapshot();
