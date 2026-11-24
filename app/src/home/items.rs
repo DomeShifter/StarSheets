@@ -362,14 +362,14 @@ impl Home {
                 p.image(tex.id(), pic, uv, Color32::WHITE);
             }
             _ => {
-                if let Some(img) = crate::icons::icon("starsheets") {
+                if let Some(img) = crate::icons::icon(kind) {
                     img.paint_at(ui, Rect::from_center_size(pic.center(), vec2(48.0, 48.0)));
                 }
             }
         }
         p.rect_stroke(pic, 6, Stroke::new(1.0, theme::DIVIDER), egui::StrokeKind::Inside);
         let line = Rect::from_min_max(egui::pos2(r.left() + 8.0, r.top() + PIC_H), r.max - vec2(8.0, 4.0));
-        if let Some(img) = crate::icons::icon("starsheets") {
+        if let Some(img) = crate::icons::icon(kind) {
             img.paint_at(ui, Rect::from_center_size(egui::pos2(line.left() + 10.0, line.top() + 16.0), vec2(18.0, 18.0)));
         }
         if !self.renaming_ui(ui, &item, Rect::from_min_size(egui::pos2(line.left() + 26.0, line.top() + 4.0), vec2(line.width() - 30.0, 26.0))) {
