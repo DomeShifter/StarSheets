@@ -68,6 +68,9 @@ pub struct Live {
     binned: bool,
     /// The open file: (document uid, file id on the server).
     file: Option<(u64, String)>,
+    /// The version of the file this tab opened, offered in the first Hello so the server needn't
+    /// send the workbook again; dropped after the first Welcome (a reconnect gets it whole).
+    have: Option<String>,
     ws: Option<web_sys::WebSocket>,
     inbox: Rc<RefCell<Vec<Event>>>,
     _handlers: Vec<Closure<dyn FnMut(web_sys::Event)>>,
@@ -107,6 +110,7 @@ impl Default for Live {
         Live {
             binned: false,
             file: None,
+            have: None,
             ws: None,
             inbox: Rc::default(),
             _handlers: Vec::new(),
@@ -179,6 +183,7 @@ impl Live {
             app.session.read_only = false;
             *self = Live { client: self.client.clone(), unsupported: self.unsupported, ..Live::default() };
             self.file = target.clone();
+            self.have = files.linked_version();
         }
         let Some((doc, _)) = self.file.clone() else {
             app.session.sync_log = None;
@@ -273,8 +278,11 @@ impl Live {
         match ev {
             Event::Open => {
                 self.open = true;
-                if let Some((_, id)) = &self.file {
-                    self.send(&ToServer::Hello { file: id.clone(), build: sync::BUILD.to_string(), client: self.client.clone(), protocol: sync::PROTOCOL });
+                if let Some((doc, id)) = &self.file {
+                    // Only while the tab's copy is still the file as opened.
+                    let untouched = self.pending.is_empty() && app.session.active().is_some_and(|d| d.uid == *doc && Arc::ptr_eq(&d.wb, &d.saved));
+                    let have = self.have.clone().filter(|_| untouched);
+                    self.send(&ToServer::Hello { file: id.clone(), build: sync::BUILD.to_string(), client: self.client.clone(), protocol: sync::PROTOCOL, have });
                 }
                 false
             }
@@ -296,15 +304,29 @@ impl Live {
 
     fn message(&mut self, app: &mut SheetApp, m: ToClient) -> bool {
         match m {
-            ToClient::Welcome { seq, workbook, can_edit, last_edit } => {
+            ToClient::Welcome { seq, workbook, spills, hash, can_edit, last_edit } => {
+                self.have = None;
+                let current = app.session.active().map(|d| d.wb.clone());
+                let wb = match workbook {
+                    Some(w) => sync::workbook_from_parts(&w, &spills, current.as_deref()).map(Arc::new),
+                    // The server's copy is the version this tab opened: check, and use ours.
+                    None => match current.filter(|c| hash.as_deref() == Some(sync::fingerprint(c).as_str())) {
+                        Some(c) => Ok(c),
+                        None => {
+                            log::warn!("live editing: this tab's copy isn't the server's; getting it whole");
+                            self.disconnect();
+                            self.retry_at = 0.0;
+                            return false;
+                        }
+                    },
+                };
                 self.last_edit = last_edit;
                 // A viewer's tab can't change the file (GridCraft refuses edits, patch 0042).
                 self.can_edit = can_edit;
                 app.session.read_only = !can_edit;
-                let current = app.session.active().map(|d| d.wb.clone());
-                match sync::workbook_from_json_recalc(&workbook, current.as_deref()) {
+                match wb {
                     Ok(wb) => {
-                        self.confirmed = Some(Arc::new(wb));
+                        self.confirmed = Some(wb);
                         self.acked.clear();
                         self.seq = seq;
                         self.joined = true;
@@ -378,9 +400,9 @@ impl Live {
                 }
                 false
             }
-            ToClient::Reset { seq, workbook } => {
+            ToClient::Reset { seq, workbook, spills } => {
                 let current = app.session.active().map(|d| d.wb.clone());
-                if let Ok(wb) = sync::workbook_from_json_recalc(&workbook, current.as_deref()) {
+                if let Ok(wb) = sync::workbook_from_parts(&workbook, &spills, current.as_deref()) {
                     self.confirmed = Some(Arc::new(wb));
                     self.acked.clear();
                     self.seq = seq;

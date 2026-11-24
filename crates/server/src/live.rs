@@ -37,7 +37,7 @@ const CHECK_EVERY: u64 = 25;
 const HISTORY: usize = 200;
 
 enum RoomMsg {
-    Join { client: String, user: Option<crate::auth::User>, can_edit: bool, out: UnboundedSender<String> },
+    Join { client: String, user: Option<crate::auth::User>, can_edit: bool, out: UnboundedSender<String>, have: Option<String> },
     Leave { client: String },
     From { client: String, msg: ToServer },
     /// The file was replaced through the files API (a version restored): read it again.
@@ -112,17 +112,17 @@ fn who(user: &Option<crate::auth::User>) -> String {
 
 async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth::User>) {
     // The first message says which file.
-    let (file, client) = loop {
+    let (file, client, have) = loop {
         match socket.recv().await {
             Some(Ok(Message::Text(t))) => match serde_json::from_str::<ToServer>(&t) {
-                Ok(ToServer::Hello { file, build, client, protocol }) => {
+                Ok(ToServer::Hello { file, build, client, protocol, have }) => {
                     // Only a different protocol needs the tab to reload (not every new build).
                     if protocol != sync::PROTOCOL {
                         crate::log::note(&app.store, &format!("tab of {} on an older StarSheets (build {build}) asked to reload", who(&user)));
                         let _ = socket.send(Message::Text(text(&ToClient::Reload).into())).await;
                         return;
                     }
-                    break (file, client);
+                    break (file, client, have);
                 }
                 // A tab older than protocol 3 sends `{"t": "hello", …}` without "c": it reads our
                 // Reload (`{"t": "reload"}`) the same as before, and gets the new app.
@@ -158,7 +158,7 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
     }
     let can_edit = role >= crate::sharing::Role::Edit;
     let (out, mut outbox) = unbounded_channel::<String>();
-    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), user, can_edit, out });
+    app.rooms.send(&app, &file, RoomMsg::Join { client: client.clone(), user, can_edit, out, have });
     // A ping now and then keeps proxies from closing a quiet connection.
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     ping.tick().await;
@@ -242,6 +242,20 @@ struct Room {
     last_edit: Option<(String, i64)>,
     /// The last "couldn't save" told to everyone, so it isn't repeated every 10 s.
     told: Option<String>,
+    /// `seq` right after the file was read: while it's still that, the room's workbook is
+    /// exactly what opening the file gives, so a tab that opened that version needn't get it.
+    pristine_seq: Option<u64>,
+    /// The whole-file fingerprint and the `seq` it is for (worked out once per revision).
+    hash: Option<(u64, String)>,
+    /// A save running in the background: the `seq` it saves and where its result comes.
+    saving: Option<(u64, std::sync::mpsc::Receiver<Saved>)>,
+}
+
+/// What a background save reports.
+struct Saved {
+    result: Result<Option<String>, SaveError>,
+    /// The editor it noted (given back on failure, for the next try).
+    editor: Option<String>,
 }
 
 /// Why a save didn't happen.
@@ -273,6 +287,9 @@ impl Room {
             last_editor: None,
             last_edit: None,
             told: None,
+            pristine_seq: None,
+            hash: None,
+            saving: None,
         };
         let opened = room.open();
         loop {
@@ -291,11 +308,13 @@ impl Room {
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
-            if room.disk_checked.elapsed() >= DISK_CHECK {
+            room.save_finished();
+            // Not while our own save writes the file: that would look like a change from outside.
+            if room.saving.is_none() && room.disk_checked.elapsed() >= DISK_CHECK {
                 room.check_disk();
             }
             room.save_if_due(false);
-            if room.clients.is_empty() && room.dirty_since.is_none() && room.empty_since.is_some_and(|t| t.elapsed() > EMPTY_FOR) && room.close(&rx) {
+            if room.clients.is_empty() && room.dirty_since.is_none() && room.saving.is_none() && room.empty_since.is_some_and(|t| t.elapsed() > EMPTY_FOR) && room.close(&rx) {
                 return;
             }
         }
@@ -332,6 +351,7 @@ impl Room {
             sync::clip_from_host(Arc::make_mut(&mut d.wb));
         }
         self.session = s;
+        self.pristine_seq = Some(self.seq);
         Ok(())
     }
 
@@ -360,18 +380,42 @@ impl Room {
         Some(sync::LastEdit { by, at })
     }
 
-    fn snapshot(&self) -> sync::Whole {
+    /// The whole workbook to send, with what its formulas spill.
+    fn snapshot(&self) -> (sync::Whole, Vec<sync::SheetSpill>) {
         match self.wb() {
-            Some(wb) => sync::workbook_json(&wb),
-            None => serde_json::value::to_raw_value(&serde_json::Value::Null).expect("null"),
+            Some(wb) => (sync::workbook_json(&wb), sync::workbook_spills(&wb)),
+            None => (serde_json::value::to_raw_value(&serde_json::Value::Null).expect("null"), Vec::new()),
         }
+    }
+
+    /// The fingerprint of the whole workbook now (worked out once per revision).
+    fn whole_hash(&mut self) -> String {
+        if let Some((seq, h)) = &self.hash
+            && *seq == self.seq
+        {
+            return h.clone();
+        }
+        let h = self.wb().map(|wb| sync::fingerprint(&wb)).unwrap_or_default();
+        self.hash = Some((self.seq, h.clone()));
+        h
+    }
+
+    /// Welcome for a tab: without the workbook when the tab already opened exactly this version
+    /// and nothing has changed here since (it checks the fingerprint, and asks again if it differs).
+    fn welcome(&mut self, have: Option<String>, can_edit: bool) -> ToClient {
+        let last_edit = self.last_edit_now();
+        let same = have.is_some() && have == self.disk && self.pristine_seq == Some(self.seq) && self.dirty_since.is_none();
+        if same {
+            return ToClient::Welcome { seq: self.seq, workbook: None, spills: Vec::new(), hash: Some(self.whole_hash()), can_edit, last_edit };
+        }
+        let (workbook, spills) = self.snapshot();
+        ToClient::Welcome { seq: self.seq, workbook: Some(workbook), spills, hash: None, can_edit, last_edit }
     }
 
     fn handle(&mut self, msg: RoomMsg) {
         match msg {
-            RoomMsg::Join { client, user, can_edit, out } => {
-                let last_edit = self.last_edit_now();
-                let _ = out.send(text(&ToClient::Welcome { seq: self.seq, workbook: self.snapshot(), can_edit, last_edit }));
+            RoomMsg::Join { client, user, can_edit, out, have } => {
+                let _ = out.send(text(&self.welcome(have, can_edit)));
                 // Without sign-in (STARSHEETS_AUTH=off) people are guests, numbered as they come.
                 let person = match user {
                     Some(u) => sync::Person { client: client.clone(), username: u.username, name: u.name, colour: u.colour },
@@ -415,7 +459,10 @@ impl Room {
                 ToServer::Change { cseq, base, change } => self.change(&client, cseq, base, change),
                 ToServer::Undo => self.undo(&client),
                 ToServer::Redo => self.redo(&client),
-                ToServer::Resync => self.to(&client, &ToClient::Reset { seq: self.seq, workbook: self.snapshot() }),
+                ToServer::Resync => {
+                    let (workbook, spills) = self.snapshot();
+                    self.to(&client, &ToClient::Reset { seq: self.seq, workbook, spills });
+                }
                 ToServer::Presence { sheet, sel } => {
                     if let Some(c) = self.clients.get_mut(&client) {
                         c.presence = Some((sheet, sel.clone()));
@@ -507,9 +554,10 @@ impl Room {
         self.last_change = Instant::now();
     }
 
-    fn check(&self) {
-        if let Some(wb) = self.wb() {
-            self.all(&ToClient::Check { seq: self.seq, hash: sync::fingerprint(&wb) });
+    fn check(&mut self) {
+        if self.wb().is_some() {
+            let hash = self.whole_hash();
+            self.all(&ToClient::Check { seq: self.seq, hash });
         }
     }
 
@@ -578,30 +626,64 @@ impl Room {
         self.all(&ToClient::Applied { seq: self.seq, client: String::new(), cseq: 0, change: Change::State { patch } });
     }
 
+    /// Starts a save once changes have rested (or have waited too long). The work (writing the
+    /// .xlsx, the preview picture) runs on its own thread, so the room keeps taking changes and
+    /// the server's file lock is held only while the file is written.
     fn save_if_due(&mut self, now_please: bool) {
         let Some(since) = self.dirty_since else { return };
-        if self.save_failed_at.is_some_and(|t| t.elapsed() < Duration::from_secs(10)) {
+        if self.saving.is_some() || self.save_failed_at.is_some_and(|t| t.elapsed() < Duration::from_secs(10)) {
             return;
         }
         if !now_please && self.last_change.elapsed() < SAVE_IDLE && since.elapsed() < SAVE_MAX {
             return;
         }
         let Some(wb) = self.wb() else { return };
-        match self.save(&wb) {
-            Ok(()) => {
-                self.dirty_since = None;
+        let thumb = self.clients.is_empty() || self.thumb_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60));
+        if thumb {
+            self.thumb_at = Some(Instant::now());
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (app, file, disk, editor) = (self.app.clone(), self.file.clone(), self.disk.clone(), self.last_editor.take());
+        std::thread::spawn(move || {
+            let result = save_file(&app, &file, &wb, disk.as_deref(), editor.as_deref());
+            if let Ok(Some(v)) = &result
+                && thumb
+                && let Ok(png) = crate::thumbs::draw(&wb)
+            {
+                let _ = crate::thumbs::keep(&app.store, &file, v, &png);
+            }
+            let _ = tx.send(Saved { result, editor });
+        });
+        self.saving = Some((self.seq, rx));
+    }
+
+    /// Takes in a background save's result, if it has finished.
+    fn save_finished(&mut self) {
+        let Some((seq, rx)) = &self.saving else { return };
+        let saved = match rx.try_recv() {
+            Ok(s) => s,
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Saved { result: Err(SaveError::Failed("the save stopped".into())), editor: None },
+        };
+        let seq = *seq;
+        self.saving = None;
+        match saved.result {
+            Ok(version) => {
+                self.disk = version;
+                // Changes made while it saved are still to be saved.
+                if self.seq == seq {
+                    self.dirty_since = None;
+                }
                 self.save_failed_at = None;
                 self.told = None;
                 self.all(&ToClient::Saved { at: now() as i64 });
-                if self.clients.is_empty() || self.thumb_at.is_none_or(|t| t.elapsed() > Duration::from_secs(60)) {
-                    self.thumb_at = Some(Instant::now());
-                    if let (Some(v), Ok(png)) = (self.disk.clone(), crate::thumbs::draw(&wb)) {
-                        let _ = crate::thumbs::keep(&self.app.store, &self.file, &v, &png);
-                    }
-                }
             }
-            Err(SaveError::Outside) => self.check_disk(),
+            Err(SaveError::Outside) => {
+                self.last_editor = self.last_editor.take().or(saved.editor);
+                self.check_disk();
+            }
             Err(SaveError::Failed(why)) => {
+                self.last_editor = self.last_editor.take().or(saved.editor);
                 self.save_failed_at = Some(Instant::now());
                 if self.told.as_deref() != Some(why.as_str()) {
                     crate::log::note(&self.app.store, &format!("couldn't save {}: {why}", self.path.clone().unwrap_or_default()));
@@ -614,29 +696,6 @@ impl Room {
                 }
             }
         }
-    }
-
-    fn save(&mut self, wb: &Workbook) -> Result<(), SaveError> {
-        let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
-        let failed = |e: String| SaveError::Failed(e);
-        let path = self.app.store.path_of(&self.file).map_err(|e| failed(e.to_string()))?.ok_or_else(|| failed("the file was moved to the bin".into()))?;
-        let full = self.app.store.full(&path);
-        if self.app.store.version_of(&full).ok() != self.disk {
-            return Err(SaveError::Outside);
-        }
-        // Cells with Google Sheets' Clip are listed in StarSheets' section (Excel has no such setting).
-        let mut wb = wb.clone();
-        sync::clip_into_host(&mut wb);
-        let bytes = gridcraft_engine::io::save_bytes(&wb, &crate::store::base_of(&path)).map_err(|e| failed(e.to_string()))?;
-        self.app.store.keep_version(&self.file, &full).map_err(|e| failed(e.to_string()))?;
-        self.app.store.write_file(&full, &bytes).map_err(|e| failed(e.to_string()))?;
-        self.disk = self.app.store.version_of(&full).ok();
-        let editor = self.last_editor.take();
-        if let Some(who) = &editor {
-            let _ = crate::spaces::note_changed(&self.app.store, &self.file, who);
-        }
-        crate::log::note(&self.app.store, &format!("saved {path} (last change by {})", editor.as_deref().unwrap_or("someone")));
-        Ok(())
     }
 
     /// The file's version on disk now (None: gone, moved to the bin, or unreadable).
@@ -736,10 +795,37 @@ impl Room {
             self.history.clear();
             self.dirty_since = None;
             self.seq += 1;
-            let wb = self.snapshot();
-            self.all(&ToClient::Reset { seq: self.seq, workbook: wb });
+            self.pristine_seq = Some(self.seq);
+            let (workbook, spills) = self.snapshot();
+            self.all(&ToClient::Reset { seq: self.seq, workbook, spills });
         }
     }
+}
+
+/// Writes `wb` over file `id`, as long as the file on disk is still `expected` (never over a
+/// change made outside StarSheets). The .xlsx is made before taking the server's file lock.
+/// Returns the file's new version.
+fn save_file(app: &Shared, id: &str, wb: &Workbook, expected: Option<&str>, editor: Option<&str>) -> Result<Option<String>, SaveError> {
+    let failed = |e: String| SaveError::Failed(e);
+    // Cells with Google Sheets' Clip are listed in StarSheets' section (Excel has no such setting).
+    let mut wb = wb.clone();
+    sync::clip_into_host(&mut wb);
+    let name = app.store.path_of(id).ok().flatten().map(|p| crate::store::base_of(&p)).unwrap_or_else(|| "file.xlsx".into());
+    let bytes = gridcraft_engine::io::save_bytes(&wb, &name).map_err(|e| failed(e.to_string()))?;
+    let _g = app.lock.lock().unwrap_or_else(|e| e.into_inner());
+    let path = app.store.path_of(id).map_err(|e| failed(e.to_string()))?.ok_or_else(|| failed("the file was moved to the bin".into()))?;
+    let full = app.store.full(&path);
+    if app.store.version_of(&full).ok().as_deref() != expected {
+        return Err(SaveError::Outside);
+    }
+    app.store.keep_version(id, &full).map_err(|e| failed(e.to_string()))?;
+    app.store.write_file(&full, &bytes).map_err(|e| failed(e.to_string()))?;
+    let version = app.store.version_of(&full).ok();
+    if let Some(who) = editor {
+        let _ = crate::spaces::note_changed(&app.store, id, who);
+    }
+    crate::log::note(&app.store, &format!("saved {path} (last change by {})", editor.unwrap_or("someone")));
+    Ok(version)
 }
 
 #[cfg(test)]
@@ -787,12 +873,12 @@ mod tests {
 
     fn join(app: &Shared, file: &str, name: &str) -> Tab {
         let (out, rx) = unbounded_channel();
-        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), user: None, can_edit: true, out });
+        app.rooms.send(app, file, RoomMsg::Join { client: name.into(), user: None, can_edit: true, out, have: None });
         let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
         match next(&mut t) {
             ToClient::Welcome { seq, workbook, .. } => {
                 t.session.execute("file.new", json!({})).unwrap();
-                sync::set_workbook(&mut t.session, sync::workbook_from_json(&workbook, None).unwrap());
+                sync::set_workbook(&mut t.session, sync::workbook_from_json(&workbook.expect("a test tab gets the workbook"), None).unwrap());
                 t.seq = seq;
             }
             m => panic!("expected welcome, got {m:?}"),
@@ -863,6 +949,35 @@ mod tests {
         let saved = std::fs::read_to_string(dir.join("t.csv")).unwrap();
         assert!(saved.contains("from a") && saved.contains("from b"), "{saved}");
         assert_eq!(std::fs::read_dir(dir.join(".starsheets/versions").join(&file)).unwrap().count(), 1, "the old copy is kept");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A tab that already opened the file's current version gets a fingerprint instead of the
+    /// whole workbook (protocol 5); a tab with another version, or once the file has changed
+    /// here, gets the workbook.
+    #[test]
+    fn a_tab_with_the_same_version_is_not_sent_the_workbook_again() {
+        let (app, file, dir) = app();
+        let version = app.store.version_of(&dir.join("t.csv")).unwrap();
+        let welcome = |have: Option<String>, name: &str| {
+            let (out, rx) = unbounded_channel();
+            app.rooms.send(&app, &file, RoomMsg::Join { client: name.into(), user: None, can_edit: true, out, have });
+            let mut t = Tab { name: name.into(), rx, session: Session::new(), seq: 0, cseq: 0, seen: Vec::new() };
+            next(&mut t)
+        };
+        let ToClient::Welcome { workbook: None, hash: Some(hash), .. } = welcome(Some(version.clone()), "same") else { panic!("expected no workbook") };
+        // The hash is the file as anyone opening it gets it.
+        let mut s = Session::new();
+        let b64 = gridcraft_engine::io::base64_encode(&std::fs::read(dir.join("t.csv")).unwrap());
+        s.execute("file.open", json!({ "name": "t.csv", "base64": b64 })).unwrap();
+        sync::clip_from_host(Arc::make_mut(&mut s.active_mut().unwrap().wb));
+        assert_eq!(hash, sync::fingerprint(&s.active().unwrap().wb));
+        assert!(matches!(welcome(Some("other".into()), "old"), ToClient::Welcome { workbook: Some(_), .. }));
+        assert!(matches!(welcome(None, "none"), ToClient::Welcome { workbook: Some(_), .. }));
+        let mut a = join(&app, &file, "a");
+        edit(&app, &file, &mut a, "cell.set", json!({"cell": "C1", "input": "x"}));
+        take_applied(&mut a);
+        assert!(matches!(welcome(Some(version), "late"), ToClient::Welcome { workbook: Some(_), .. }), "changed since: sent whole");
         let _ = std::fs::remove_dir_all(dir);
     }
 

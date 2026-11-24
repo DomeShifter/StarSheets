@@ -17,6 +17,12 @@ new features and the last one for fixes.
   file, which could slow down opening and listing files for everyone.
 - The browser does less work on every frame (fonts and settings are only checked when
   something changed).
+- Big files open about twice as fast: the browser no longer gets the whole file a second time
+  from the server after reading it (unless someone changed it in between).
+- Undo and redo on big files no longer recalculate the whole file in every open tab.
+- Saving a big file no longer holds up other people's edits or other files while it writes.
+- Fixed: after an undo (and some other changes), saving could drop parts of a sheet StarSheets
+  keeps without showing them (for example Excel-only features).
 
 ### Added (for developers)
 - A speed check on a big 31-tab, 2-million-cell workbook (`cargo run --release -p

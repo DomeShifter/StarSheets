@@ -99,6 +99,11 @@ impl Files {
         self.link.as_ref().map(|l| (l.doc, l.id.clone()))
     }
 
+    /// The version (ETag) of the file as it was opened, for live editing's Hello.
+    pub fn linked_version(&self) -> Option<String> {
+        self.link.as_ref().map(|l| l.version.clone()).filter(|v| !v.is_empty())
+    }
+
     pub fn logic(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         // A new workbook is "Untitled spreadsheet", as in Sheets (GridCraft calls it Book1). The
         // workbook appears after the first frames, so this is checked every frame.
@@ -224,7 +229,7 @@ impl Files {
             }
             "copy" => {
                 let Some(d) = app.session.active() else { return };
-                let Ok(bytes) = gridcraft_engine::io::save_bytes(&d.wb, "copy.xlsx") else { return };
+                let Ok(bytes) = xlsx(&d.wb, "copy.xlsx") else { return };
                 let name = format!("Copy of {}", d.title);
                 send(Method::Post, format!("{API}?name={}", enc(&name)), Some(bytes), None, self.inbox.clone(), ctx.clone(), |_, _, body| {
                     let v: Json = serde_json::from_slice(&body).unwrap_or_default();
@@ -330,6 +335,10 @@ impl Files {
                         }
                         let doc = app.session.active().map_or(0, |d| d.uid);
                         if let Some(d) = app.session.active_mut() {
+                            // As the server does on opening (Google Sheets' Clip, kept in
+                            // StarSheets' section of the file), so both have the same workbook and
+                            // the server needn't send it again (live.rs Hello `have`).
+                            starsheets_sync::clip_from_host(Arc::make_mut(&mut d.wb));
                             d.title = stem(&name);
                             d.path = None;
                             d.saved = d.wb.clone();
@@ -409,7 +418,7 @@ impl Files {
         let sent = d.wb.clone();
         let doc = d.uid;
         let title = display_name(d);
-        let bytes = match gridcraft_engine::io::save_bytes(&sent, "book.xlsx") {
+        let bytes = match xlsx(&sent, "book.xlsx") {
             Ok(b) => b,
             Err(e) => {
                 self.error = Some(e.to_string());
@@ -691,6 +700,14 @@ impl Files {
 /// Whether any sheet has anything in it.
 /// Whether a workbook holds anything worth a file: a value or formula, a note, a chart or a
 /// picture. Formatting alone (a format previewed on a blank sheet) doesn't count.
+/// The workbook as .xlsx bytes, with Google Sheets' Clip put back in StarSheets' section of the
+/// file (cells carry it while open: the server's and this tab's copies are read the same way).
+pub(crate) fn xlsx(wb: &Workbook, name: &str) -> Result<Vec<u8>, String> {
+    let mut wb = wb.clone();
+    starsheets_sync::clip_into_host(&mut wb);
+    gridcraft_engine::io::save_bytes(&wb, name).map_err(|e| e.to_string())
+}
+
 fn has_data(wb: &Workbook) -> bool {
     wb.sheets.iter().any(|s| {
         s.cells.iter().any(|(_, c)| c.formula.is_some() || !matches!(c.value, gridcraft_engine::core::Value::Empty))

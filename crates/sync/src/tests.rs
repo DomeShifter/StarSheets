@@ -131,7 +131,7 @@ fn the_server_runs_only_editing_commands() {
 
 #[test]
 fn messages_round_trip() {
-    let m = ToServer::Change { cseq: 3, base: 9, change: Change::State { patch: Patch { rest: serde_json::value::to_raw_value(&json!({})).unwrap(), sheets: vec![] } } };
+    let m = ToServer::Change { cseq: 3, base: 9, change: Change::State { patch: Patch { rest: serde_json::value::to_raw_value(&json!({})).unwrap(), sheets: vec![], spills: vec![] } } };
     let t = serde_json::to_string(&m).unwrap();
     assert!(matches!(serde_json::from_str::<ToServer>(&t).unwrap(), ToServer::Change { cseq: 3, base: 9, .. }));
 }
@@ -246,10 +246,10 @@ fn whole_workbooks_and_patches_round_trip_as_raw_text() {
     a.execute("file.new", json!({})).unwrap();
     a.execute("cell.set", json!({"cell": "B2", "input": "=1+2"})).unwrap();
     let before = a.active().unwrap().wb.clone();
-    let m = ToClient::Welcome { seq: 4, workbook: workbook_json(&before), can_edit: true, last_edit: None };
+    let m = ToClient::Welcome { seq: 4, workbook: Some(workbook_json(&before)), spills: Vec::new(), hash: None, can_edit: true, last_edit: None };
     let t = serde_json::to_string(&m).unwrap();
     let ToClient::Welcome { workbook, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
-    assert_eq!(fingerprint(&workbook_from_json(&workbook, None).unwrap()), fingerprint(&before));
+    assert_eq!(fingerprint(&workbook_from_json(&workbook.unwrap(), None).unwrap()), fingerprint(&before));
     a.execute("cell.set", json!({"cell": "C3", "input": "x"})).unwrap();
     let after = a.active().unwrap().wb.clone();
     let m = ToClient::Applied { seq: 5, client: String::new(), cseq: 0, change: Change::State { patch: make_patch(&before, &after) } };
@@ -294,7 +294,8 @@ fn whole_workbook_from_the_server_shows_spilled_values() {
     let shown = |w: &Workbook, at: &str| w.sheet(0).unwrap().value(gridcraft_engine::core::CellRef::parse(at).unwrap());
     assert_eq!(format!("{:?}", shown(&wb(&a), "D2")), format!("{:?}", shown(&wb(&a), "A3")));
     let plain = workbook_from_json(&workbook_json(&wb(&a)), None).unwrap();
-    let fixed = workbook_from_json_recalc(&workbook_json(&wb(&a)), None).unwrap();
+    // Protocol 5: what spills travels beside the JSON, so nothing is recalculated.
+    let fixed = workbook_from_parts(&workbook_json(&wb(&a)), &workbook_spills(&wb(&a)), None).unwrap();
     assert_ne!(format!("{:?}", shown(&plain, "D2")), format!("{:?}", shown(&wb(&a), "A3")), "JSON drops spills");
     for at in ["D1", "E1", "D2", "E2", "D3", "E3"] {
         assert_eq!(format!("{:?}", shown(&fixed, at)), format!("{:?}", shown(&wb(&a), at)), "{at}");
@@ -310,7 +311,7 @@ fn welcome_carries_the_last_edit_and_old_welcomes_still_read() {
     assert_eq!(last_edit, None);
     let raw = serde_json::value::to_raw_value(&serde_json::Value::Null).unwrap();
     let edit = crate::LastEdit { by: "Ada".into(), at: 1_795_000_000 };
-    let t = serde_json::to_string(&ToClient::Welcome { seq: 2, workbook: raw, can_edit: true, last_edit: Some(edit.clone()) }).unwrap();
+    let t = serde_json::to_string(&ToClient::Welcome { seq: 2, workbook: Some(raw), spills: Vec::new(), hash: None, can_edit: true, last_edit: Some(edit.clone()) }).unwrap();
     let ToClient::Welcome { last_edit, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
     assert_eq!(last_edit, Some(edit));
 }
@@ -332,4 +333,24 @@ fn an_edit_fingerprint_tells_different_results_apart() {
     let mut taller = edited(5, 1.0);
     taller.sheet_mut(0).unwrap().rows.insert(5, Default::default());
     assert_ne!(a, change_fingerprint(&base, &taller), "a row size changed too");
+}
+
+/// A sheet that comes whole in a change keeps what JSON doesn't carry (unmodelled file content,
+/// the file's sheet id), so the server's next save doesn't drop it; and what it spills comes too.
+#[test]
+fn a_sheet_sent_whole_keeps_its_unmodelled_parts_and_spills() {
+    let mut a = session();
+    a.execute("cell.set", json!({"cell": "A1", "input": "1"})).unwrap();
+    a.execute("cell.set", json!({"cell": "A2", "input": "2"})).unwrap();
+    let mut before = (*wb(&a)).clone();
+    before.sheet_mut(0).unwrap().file_id = 7;
+    let before = Arc::new(before);
+    set_workbook(&mut a, (*before).clone());
+    a.execute("cell.set", json!({"cell": "C1", "input": "=SORT(A1:A2,1,FALSE)"})).unwrap();
+    let after = wb(&a);
+    let patch = make_patch(&before, &after);
+    assert!(!patch.spills.is_empty(), "the SORT spill travels with the sheet");
+    let got = apply_patch(&before, &patch).unwrap();
+    assert_eq!(got.sheets[0].file_id, 7);
+    assert_eq!(got.sheets[0].spill, after.sheets[0].spill);
 }

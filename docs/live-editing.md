@@ -53,6 +53,12 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
   just the 64-row bands it copied), hashed field by field: on a million-cell tab it is under a
   millisecond, where hashing the whole tab as JSON took about 90 ms on every edit. Changing how
   fingerprints are made needs a protocol bump.
+- Opening: the tab has already read the .xlsx, so its Hello says which version; if the server's
+  copy is still exactly that (nothing changed since it read the file), Welcome brings only a
+  fingerprint to check. Whole workbooks and sheets travel with what their array formulas spill
+  (JSON leaves it out), so no tab recalculates the whole file to show them.
+- Saving runs on its own thread; the file lock is held only for the write, and the "changed
+  outside StarSheets" check waits while our own save is writing.
 - The server finds an open file by its index entry and one file check, and lists the folder
   tree only when the file isn't there any more: listing a big tree on a network share every few
   seconds for each open file held up every other request.

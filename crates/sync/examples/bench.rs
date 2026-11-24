@@ -77,7 +77,9 @@ fn main() {
     let opened = rep.time("Open the .xlsx (as the browser and server do)", || gridcraft_engine::io::open_bytes("bench.xlsx", &xlsx).expect("open").0);
     let json = rep.time("Whole workbook as JSON (the server's Welcome)", || starsheets_sync::workbook_json(&opened));
     rep.note(format!("{:.1} MB", json.get().len() as f64 / 1e6));
-    let back = rep.time("Read that JSON back + recalculate (a tab joining)", || starsheets_sync::workbook_from_json_recalc(&json, Some(&opened)).expect("json"));
+    let spills = starsheets_sync::workbook_spills(&opened);
+    let back = rep.time("Read that JSON back (a tab that gets it whole)", || starsheets_sync::workbook_from_parts(&json, &spills, Some(&opened)).expect("json"));
+    rep.time("Fingerprint of the whole file (a tab that opened the same version)", || starsheets_sync::fingerprint(&back));
     drop(json);
 
     // One edit, as GridCraft makes it (only that cell's band is copied): on a middle tab, then on
@@ -98,11 +100,7 @@ fn main() {
     }
     rep.time("Fingerprint of the whole file (every 25 edits, every tab)", || starsheets_sync::fingerprint(&after));
     let patch = rep.time("Patch for an undo of that edit (one tab sent whole)", || starsheets_sync::make_patch(&before, &after));
-    rep.time("Apply that patch + recalculate (undo in each tab)", || {
-        let mut wb = starsheets_sync::apply_patch(&before, &patch).expect("patch");
-        gridcraft_engine::calc::Calc::new().recalc_all(&mut wb);
-        wb
-    });
+    rep.time("Apply that patch (undo in each tab)", || starsheets_sync::apply_patch(&before, &patch).expect("patch"));
 
     let tabs = sheets + u32::from(big > 0);
     let mut out = format!("### StarSheets speed check: {tabs} tabs, {cells} cells\n\n| Step | ms | Size |\n|---|---:|---|\n");

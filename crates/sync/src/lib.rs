@@ -22,7 +22,9 @@ use serde_json::Value as Json;
 /// checked by fingerprint, and a difference falls back to sending the finished state.) Also bump
 /// it when fingerprints are worked out differently (4: only a change's differing cells, no JSON
 /// per cell), or every change from an older tab would fall back to the finished state.
-pub const PROTOCOL: u32 = 4;
+/// 5: Hello says which version of the file the tab already has; Welcome can then leave the
+/// workbook out; spilled array values travel with whole workbooks and sheets.
+pub const PROTOCOL: u32 = 5;
 
 pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
     Some(b) => b,
@@ -45,6 +47,10 @@ pub enum ToServer {
         /// PROTOCOL (0 from tabs older than it).
         #[serde(default)]
         protocol: u32,
+        /// The version (ETag) of the file this tab opened and hasn't changed since: when the
+        /// server's copy is that version, Welcome doesn't send the workbook again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        have: Option<String>,
     },
     /// A change made on top of the server's revision `base`.
     Change { cseq: u64, base: u64, change: Change },
@@ -75,10 +81,16 @@ pub struct LastEdit {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "t", content = "c", rename_all = "snake_case")]
 pub enum ToClient {
-    /// The file as the server has it, at revision `seq`.
+    /// The file as the server has it, at revision `seq`. No `workbook` when the tab already has
+    /// it (its Hello `have`): then `hash` is its fingerprint, to check that's so.
     Welcome {
         seq: u64,
-        workbook: Whole,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        workbook: Option<Whole>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        spills: Vec<SheetSpill>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hash: Option<String>,
         /// False for someone who may only view the file.
         #[serde(default = "yes")]
         can_edit: bool,
@@ -94,7 +106,12 @@ pub enum ToClient {
     /// changes after it again.
     NeedState { cseq: u64 },
     /// Replace the whole file (undo, redo, or a tab that fell out of step).
-    Reset { seq: u64, workbook: Whole },
+    Reset {
+        seq: u64,
+        workbook: Whole,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        spills: Vec<SheetSpill>,
+    },
     /// The fingerprint of the whole file at `seq`, to check against.
     Check { seq: u64, hash: String },
     /// Saved to the server's folder (Unix seconds).
@@ -132,6 +149,41 @@ pub type Whole = Box<serde_json::value::RawValue>;
 pub struct Patch {
     pub rest: Whole,
     pub sheets: Vec<PatchSheet>,
+    /// What array formulas spill on the sheets sent whole (JSON leaves it out).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spills: Vec<SheetSpill>,
+}
+
+/// The values array formulas spill on one sheet (`sheet`: its index), which a workbook's JSON
+/// leaves out (it's calculation state). Sent beside a whole workbook or sheet, so the tab that
+/// gets it shows them without calculating the whole file again.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct SheetSpill {
+    pub sheet: usize,
+    pub values: Vec<(CellRef, gridcraft_engine::core::Value)>,
+    pub ranges: Vec<(CellRef, gridcraft_engine::core::RangeRef)>,
+}
+
+fn spill_of(i: usize, sh: &Sheet) -> Option<SheetSpill> {
+    (!sh.spill.is_empty() || !sh.spill_ranges.is_empty()).then(|| SheetSpill {
+        sheet: i,
+        values: sh.spill.iter().map(|(k, v)| (*k, v.clone())).collect(),
+        ranges: sh.spill_ranges.iter().map(|(k, r)| (*k, *r)).collect(),
+    })
+}
+
+/// What every sheet of `wb` spills.
+pub fn workbook_spills(wb: &Workbook) -> Vec<SheetSpill> {
+    wb.sheets.iter().enumerate().filter_map(|(i, sh)| spill_of(i, sh)).collect()
+}
+
+fn put_spills(wb: &mut Workbook, spills: &[SheetSpill]) {
+    for s in spills {
+        if let Some(sh) = wb.sheet_mut(s.sheet) {
+            sh.spill = s.values.iter().cloned().collect();
+            sh.spill_ranges = s.ranges.iter().copied().collect();
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,9 +293,10 @@ pub fn apply(s: &mut Session, change: &Change) -> Result<(), String> {
         Change::Cmd { sheet, sel, id, params, locale, .. } => apply_cmd(s, *sheet, sel, id, params, locale),
         Change::State { patch } => {
             let current = s.active().map(|d| d.wb.clone()).ok_or("no workbook")?;
+            // The sender's finished state: values (spilled ones too) as it calculated them, and
+            // every sheet whose values its change moved comes whole, so nothing to recalculate.
             let wb = apply_patch(&current, patch)?;
-            // Sheets that came as JSON lost their spilled values (calc state, not saved).
-            set_workbook_recalc(s, wb);
+            set_workbook(s, wb);
             Ok(())
         }
     }
@@ -348,6 +401,13 @@ pub fn set_workbook_recalc(s: &mut Session, wb: Workbook) {
 
 /// What JSON doesn't carry (unmodelled parts of the .xlsx, macros) comes from `from`.
 fn keep_unserialized(wb: &mut Workbook, from: &Workbook) {
+    for i in 0..wb.sheets.len() {
+        keep_sheet_unserialized(wb, i, from);
+    }
+    keep_workbook_unserialized(wb, from);
+}
+
+fn keep_workbook_unserialized(wb: &mut Workbook, from: &Workbook) {
     wb.preserved = from.preserved.clone();
     wb.source_dir = from.source_dir.clone();
     wb.source_path = from.source_path.clone();
@@ -355,6 +415,26 @@ fn keep_unserialized(wb: &mut Workbook, from: &Workbook) {
     wb.macros = from.macros.clone();
     wb.macros_unread = from.macros_unread.clone();
     wb.vba_project = from.vba_project.clone();
+}
+
+/// A sheet that came as JSON gets back what JSON doesn't carry (its unmodelled file content and
+/// the file's sheet id) from the sheet of the same name in `from`: without them, saving dropped
+/// whatever GridCraft keeps unread for that sheet.
+fn keep_sheet_unserialized(wb: &mut Workbook, i: usize, from: &Workbook) {
+    let Some(name) = wb.sheets.get(i).map(|sh| sh.name.clone()) else { return };
+    let Some(old) = from.sheets.iter().find(|o| o.name == name) else { return };
+    if old.preserved.is_none() && old.file_id == 0 {
+        return;
+    }
+    let (preserved, file_id) = (old.preserved.clone(), old.file_id);
+    if let Some(sh) = wb.sheet_mut(i) {
+        if sh.preserved.is_none() {
+            sh.preserved = preserved;
+        }
+        if sh.file_id == 0 {
+            sh.file_id = file_id;
+        }
+    }
 }
 
 pub fn workbook_json(wb: &Workbook) -> Whole {
@@ -366,6 +446,14 @@ pub fn workbook_from_json(v: &Whole, current: Option<&Workbook>) -> Result<Workb
     if let Some(c) = current {
         keep_unserialized(&mut wb, c);
     }
+    Ok(wb)
+}
+
+/// A whole workbook from the server with what its formulas spill: complete, nothing to
+/// recalculate (protocol 5; before, every tab recalculated the whole file on joining).
+pub fn workbook_from_parts(v: &Whole, spills: &[SheetSpill], current: Option<&Workbook>) -> Result<Workbook, String> {
+    let mut wb = workbook_from_json(v, current)?;
+    put_spills(&mut wb, spills);
     Ok(wb)
 }
 
@@ -384,15 +472,20 @@ pub fn workbook_from_json_recalc(v: &Whole, current: Option<&Workbook>) -> Resul
 pub fn make_patch(before: &Workbook, after: &Workbook) -> Patch {
     let mut rest = after.clone();
     rest.sheets = Vec::new();
+    let mut spills = Vec::new();
     let sheets = after
         .sheets
         .iter()
-        .map(|sh| match before.sheets.iter().position(|b| Arc::ptr_eq(b, sh)) {
-            Some(i) => PatchSheet::Keep(i),
-            None => PatchSheet::Sheet(whole(&**sh)),
+        .enumerate()
+        .map(|(i, sh)| match before.sheets.iter().position(|b| Arc::ptr_eq(b, sh)) {
+            Some(k) => PatchSheet::Keep(k),
+            None => {
+                spills.extend(spill_of(i, sh));
+                PatchSheet::Sheet(whole(&**sh))
+            }
         })
         .collect();
-    Patch { rest: whole(&rest), sheets }
+    Patch { rest: whole(&rest), sheets, spills }
 }
 
 pub fn apply_patch(current: &Workbook, patch: &Patch) -> Result<Workbook, String> {
@@ -411,7 +504,12 @@ pub fn apply_patch(current: &Workbook, patch: &Patch) -> Result<Workbook, String
         return Err("a workbook needs a sheet".into());
     }
     wb.sheets = sheets;
-    keep_unserialized(&mut wb, current);
+    let kept = |i: usize| matches!(patch.sheets.get(i), Some(PatchSheet::Keep(_)));
+    for i in (0..wb.sheets.len()).filter(|i| !kept(*i)) {
+        keep_sheet_unserialized(&mut wb, i, current);
+    }
+    keep_workbook_unserialized(&mut wb, current);
+    put_spills(&mut wb, &patch.spills);
     Ok(wb)
 }
 

@@ -69,7 +69,7 @@ fn sheet_bytes(app: &SheetApp, i: usize) -> Result<(String, Vec<u8>), String> {
     let mut wb = (*s.active().ok_or("no workbook")?.wb).clone();
     wb.sheets.clear();
     let name = starsheets_sync::copy_sheet_into(&src, i, &mut wb).ok_or("That sheet isn't there any more.")?;
-    let bytes = gridcraft_engine::io::save_bytes(&wb, "copy.xlsx").map_err(|e| e.to_string())?;
+    let bytes = crate::files::xlsx(&wb, "copy.xlsx")?;
     Ok((name, bytes))
 }
 
