@@ -32,6 +32,13 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
   A viewer's tab refuses edits (GridCraft's `read_only`), and the server refuses them too.
 - Changes from other people never go through the clipboard, files on their computer or macros:
   a paste carries its own contents, and the server only accepts commands on an allow-list.
+- **Who is who** (protocol 8): the server names each connection; a tab can't speak, edit or
+  undo as another tab. Access is checked again every 30 s and at once after a sharing change:
+  someone who lost access is disconnected, someone made a viewer (or an editor) gets the file
+  again with the new role.
+- **Size limits:** a tab's message may be at most 16 MB as sent and 256 MB unpacked
+  (`sync::MAX_FRAME`, `MAX_UNPACKED`); a change bigger than that is undone in the tab with a
+  message. A tab gets the whole file again (Resync) at most every 2 s.
 
 ## Steps
 
