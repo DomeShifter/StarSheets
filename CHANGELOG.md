@@ -7,6 +7,7 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Fixed
+- No more dark flashes in the grid area while a spreadsheet opens or the page reloads.
 - Typing, Delete or Enter while a dialog without a text box is open (Settings, the merge warning,
   "Open link?") no longer changes the cells behind it.
 - Excel files: rows of ordinary 11 pt text open at Excel's height again (they were 2 px too

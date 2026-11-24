@@ -198,6 +198,13 @@ impl WebShell {
 }
 
 impl eframe::App for WebShell {
+    /// What shows wherever a frame draws nothing: the page colour. eframe's default is a
+    /// near-black grey, which flashed in the grid area each time a file was opened or the page
+    /// reloaded (the menus and tabs are drawn before the file arrives; the grid is not).
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        crate::theme::PAGE.to_normalized_gamma_f32()
+    }
+
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
