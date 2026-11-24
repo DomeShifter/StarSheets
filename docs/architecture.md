@@ -6,6 +6,10 @@ browser
    ├─ web.rs     eframe web runner, file open/download, preferences   (adapted from GridCraft)
    ├─ shell.rs   title row, menu bar, toolbar: data tables → command ids
    ├─ theme.rs   Sheets palette installed over GridCraft's tokens
+   ├─ panels.rs  side panels (formatting, validation, charts, names, protection): one at a time
+   ├─ home/      home screen: mod.rs (state, loading, navigation), sidebar, items (cards and
+   │             list), actions (menus, Move to, Details), input (drag, keys), bin
+   ├─ live.rs    live editing with the server (crates/sync, crates/server)
    └─ GridCraft  SheetApp (ui-egui): formula bar, grid, sheet tabs, dialogs
                  Session (engine): every action is a command `Session::execute(id, params)`
                  calc, formula, functions, model, xlsx, chart …

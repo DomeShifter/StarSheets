@@ -8,3 +8,4 @@
 - This repo is **public**: no hostnames, IP addresses, credentials or details of anyone's home server. Deployment specifics live outside the repo.
 - Keep docs short and in plain words; update ROADMAP.md checkboxes as work lands.
 - Licence headers: files adapted from GridCraft say so in their first lines.
+- **No warnings:** run `cargo fmt --all` and keep clippy clean (CI's "Format and lint" job fails on any warning). Fix rather than `#[allow]`; an allow says why above it.

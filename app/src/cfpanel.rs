@@ -114,6 +114,8 @@ impl Draft {
 #[derive(Default)]
 pub struct CfPanel {
     pub open: bool,
+    /// Opened by this frame's intercept (panels.rs).
+    pub just_opened: bool,
     draft: Option<Draft>,
     error: Option<String>,
     /// Live preview while editing, as in Sheets: the draft is on the sheet for real. Each change

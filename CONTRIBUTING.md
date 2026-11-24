@@ -20,8 +20,11 @@ matching Google Sheets is the goal.
    scripts/fetch-upstream.sh             # GridCraft at the pinned commit of our fork
    python3 scripts/fetch-fonts.py        # the web fonts (needed for a full build)
    cd app && trunk build --release       # the web app, in app/dist/
-   cargo test -p starsheets
+   cargo test -p starsheets -p starsheets-server -p starsheets-sync
    ```
+   Before a pull request: `cargo fmt --all`, and no clippy warnings
+   (`cargo clippy -p starsheets --target wasm32-unknown-unknown`, and
+   `cargo clippy -p starsheets-server -p starsheets-sync --all-targets`). CI checks both.
 3. Keep pull requests small and about one thing. Say what it changes for someone using StarSheets.
 4. Menus and the toolbar are tables in `app/src/shell.rs`; a test checks that every entry names a
    real command.

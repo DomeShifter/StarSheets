@@ -27,6 +27,10 @@ new features and the last one for fixes.
   keeps without showing them (for example Excel-only features).
 
 ### Added (for developers)
+- No compiler or clippy warnings, code formatted with GridCraft's settings (`rustfmt.toml`); a CI
+  job "Format and lint" keeps it that way. `.git-blame-ignore-revs` skips the formatting commit.
+- The home screen's code is split by part (`app/src/home/`); the side panels share one shape
+  (`app/src/panels.rs`).
 - A speed check on a big 31-tab, 2-million-cell workbook (`cargo run --release -p
   starsheets-sync --example bench`), run by CI with its table in the run's summary.
 - The example Docker Compose file caps the server's memory.

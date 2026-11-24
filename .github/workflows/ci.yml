@@ -114,6 +114,31 @@ jobs:
       - name: Test
         run: cargo test -p starsheets -p starsheets-server -p starsheets-sync
 
+  lint:
+    # Formatting (rustfmt.toml) and clippy with warnings as errors: the web app as it is built
+    # (wasm32), the server and the sync crate with their tests. Fix, don't silence: an #[allow]
+    # says why on the line above it.
+    name: Format and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch GridCraft at the pinned commit of our fork
+        run: scripts/fetch-upstream.sh
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: lint
+      - name: Formatting
+        run: cargo fmt --all --check
+      - name: Clippy (web app)
+        run: cargo clippy -p starsheets --target wasm32-unknown-unknown -- -D warnings
+      - name: Clippy (server and sync, with tests)
+        run: cargo clippy -p starsheets-server -p starsheets-sync --all-targets -- -D warnings
+
   speed:
     # Speed and memory check on a big many-tab workbook (crates/sync/examples/bench.rs): the
     # table lands in the run's summary. Not a pass/fail test and not needed for a release.
@@ -155,7 +180,7 @@ jobs:
   release:
     name: Release (Docker image + draft release)
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [web, test, server, gridcraft]
+    needs: [web, test, server, gridcraft, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:

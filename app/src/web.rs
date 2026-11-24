@@ -89,41 +89,7 @@ pub fn start() {
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
                     install_wake(&cc.egui_ctx);
-                    Ok(Box::new(WebShell {
-                        app,
-                        inbox,
-                        prefs,
-                        shell: crate::shell::Shell::default(),
-                        bottom: crate::bottom::Bottom::default(),
-                        link: crate::linkcard::LinkCard::default(),
-                        autolink: crate::autolink::AutoLink::default(),
-                        cf: crate::cfpanel::CfPanel::default(),
-                        dates: crate::datepicker::DatePicker::default(),
-                        custom_date: crate::customdate::CustomDate::default(),
-                        custom_number: crate::customnumber::CustomNumber::default(),
-                        settings: crate::settings::SettingsWindow::default(),
-                        input: crate::input::Router::default(),
-                        notes: crate::notes::Notes::default(),
-                        calc: crate::calcpreview::CalcPreview::default(),
-                        merge: crate::merge::MergeGuard::default(),
-                        files: crate::files::Files::default(),
-                        spell: crate::spelling::Suggest::default(),
-                        copyto: crate::copyto::CopyTo::default(),
-                        home: crate::home::Home::new(),
-                        error_tip: crate::errortip::ErrorTip,
-                        account: crate::account::Account::default(),
-                        share: crate::share::Share::default(),
-                        live: crate::live::Live::default(),
-                        webfonts: crate::fonts::WebFontLoader::default(),
-                        dv: crate::dvpanel::DvPanel::default(),
-                        chart: crate::chartpanel::ChartPanel::default(),
-                        names: crate::namespanel::NamesPanel::default(),
-                        find: crate::findreplace::FindReplace::default(),
-                        protect: crate::protectpanel::ProtectPanel::default(),
-                        messages: crate::messages::Messages::default(),
-                        prefs_checked: 0.0,
-                        prefs_input: false,
-                    }))
+                    Ok(Box::new(WebShell::new(app, inbox, prefs)))
                 }),
             )
             .await;
@@ -145,15 +111,12 @@ struct WebShell {
     inbox: Inbox,
     shell: crate::shell::Shell,
     bottom: crate::bottom::Bottom,
-    chart: crate::chartpanel::ChartPanel,
-    names: crate::namespanel::NamesPanel,
+    /// Conditional formatting, data validation, charts, named and protected ranges (panels.rs).
+    panels: crate::panels::SidePanels,
     find: crate::findreplace::FindReplace,
-    protect: crate::protectpanel::ProtectPanel,
     messages: crate::messages::Messages,
     link: crate::linkcard::LinkCard,
     autolink: crate::autolink::AutoLink,
-    cf: crate::cfpanel::CfPanel,
-    dv: crate::dvpanel::DvPanel,
     dates: crate::datepicker::DatePicker,
     custom_date: crate::customdate::CustomDate,
     custom_number: crate::customnumber::CustomNumber,
@@ -180,6 +143,42 @@ struct WebShell {
     prefs: crate::prefs::PrefsSync,
 }
 
+impl WebShell {
+    fn new(app: SheetApp, inbox: Inbox, prefs: crate::prefs::PrefsSync) -> WebShell {
+        WebShell {
+            app,
+            inbox,
+            prefs,
+            home: crate::home::Home::new(),
+            error_tip: crate::errortip::ErrorTip,
+            shell: Default::default(),
+            bottom: Default::default(),
+            panels: Default::default(),
+            find: Default::default(),
+            messages: Default::default(),
+            link: Default::default(),
+            autolink: Default::default(),
+            dates: Default::default(),
+            custom_date: Default::default(),
+            custom_number: Default::default(),
+            settings: Default::default(),
+            input: Default::default(),
+            notes: Default::default(),
+            calc: Default::default(),
+            merge: Default::default(),
+            files: Default::default(),
+            copyto: Default::default(),
+            spell: Default::default(),
+            live: Default::default(),
+            account: Default::default(),
+            share: Default::default(),
+            webfonts: Default::default(),
+            prefs_checked: 0.0,
+            prefs_input: false,
+        }
+    }
+}
+
 fn local_storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok()?
 }
@@ -190,46 +189,11 @@ fn stored(key: &str) -> Option<String> {
 }
 
 impl WebShell {
-    /// Opens our side panels in place of GridCraft's dialogs; the newest one wins.
+    /// Opens our side panels in place of GridCraft's dialogs; the newest one wins (panels.rs).
     fn side_panels(&mut self, ctx: &egui::Context) {
-        let cf_was = self.cf.open;
-        self.cf.intercept(&mut self.app);
-        self.dv.intercept(&mut self.app, ctx);
-        self.chart.intercept(&mut self.app, ctx);
-        self.names.intercept(&mut self.app);
-        self.protect.intercept(&mut self.app, ctx);
+        self.panels.intercept(&mut self.app, ctx);
+        // The link card isn't a side panel, but takes GridCraft's link dialog the same way.
         self.link.intercept(&mut self.app);
-        // Only one side panel at a time: the one that just opened wins.
-        let opened = if self.chart.just_opened {
-            "chart"
-        } else if self.names.just_opened {
-            "names"
-        } else if self.protect.just_opened {
-            "protect"
-        } else if self.dv.just_opened {
-            "dv"
-        } else if self.cf.open && !cf_was {
-            "cf"
-        } else {
-            ""
-        };
-        if !opened.is_empty() {
-            if opened != "cf" {
-                self.cf.close(&mut self.app);
-            }
-            if opened != "dv" {
-                self.dv.close();
-            }
-            if opened != "chart" {
-                self.chart.close();
-            }
-            if opened != "names" {
-                self.names.close();
-            }
-            if opened != "protect" {
-                self.protect.close();
-            }
-        }
     }
 }
 
@@ -336,11 +300,7 @@ impl eframe::App for WebShell {
         // Data validation likewise; only one side panel shows at a time.
         let ctx = ui.ctx().clone();
         self.side_panels(&ctx);
-        self.cf.ui(&mut self.app, ui);
-        self.dv.ui(&mut self.app, ui);
-        self.chart.ui(&mut self.app, ui);
-        self.names.ui(&mut self.app, ui);
-        self.protect.ui(&mut self.app, ui);
+        self.panels.ui(&mut self.app, ui);
         // Before GridCraft draws: its alerts are shown as house dialogs instead.
         self.messages.ui(&mut self.app, &ctx);
         self.spell.before(&ctx);
@@ -374,7 +334,7 @@ impl eframe::App for WebShell {
         self.merge.ui(&mut self.app, &ctx);
         self.files.ui(&mut self.app, ui);
         self.copyto.ui(&self.app, &ctx);
-        self.protect.warning_ui(&mut self.app, &ctx);
+        self.panels.protect.warning_ui(&mut self.app, &ctx);
         self.spell.ui(&mut self.app, &ctx);
         crate::house::style_tooltips(&ctx);
         copy_without_https(ui.ctx());

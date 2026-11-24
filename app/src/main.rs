@@ -39,6 +39,7 @@ mod merge;
 mod messages;
 mod namespanel;
 mod notes;
+mod panels;
 #[cfg(target_arch = "wasm32")]
 mod prefs;
 mod protectpanel;
