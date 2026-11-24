@@ -314,3 +314,22 @@ fn welcome_carries_the_last_edit_and_old_welcomes_still_read() {
     let ToClient::Welcome { last_edit, .. } = serde_json::from_str::<ToClient>(&t).unwrap() else { panic!("{t}") };
     assert_eq!(last_edit, Some(edit));
 }
+
+#[test]
+fn an_edit_fingerprint_tells_different_results_apart() {
+    use gridcraft_engine::core::{CellRef, Value};
+    use gridcraft_engine::model::Cell;
+    let base = wb(&session());
+    let edited = |row: u32, v: f64| {
+        let mut w = (*base).clone();
+        w.sheet_mut(0).unwrap().cells.set(CellRef::new(row, 0), Cell::value(Value::Number(v)));
+        w
+    };
+    let a = change_fingerprint(&base, &edited(5, 1.0));
+    assert_eq!(a, change_fingerprint(&base, &edited(5, 1.0)), "the same change, the same fingerprint");
+    assert_ne!(a, change_fingerprint(&base, &edited(5, 2.0)), "another value");
+    assert_ne!(a, change_fingerprint(&base, &edited(6, 1.0)), "another cell");
+    let mut taller = edited(5, 1.0);
+    taller.sheet_mut(0).unwrap().rows.insert(5, Default::default());
+    assert_ne!(a, change_fingerprint(&base, &taller), "a row size changed too");
+}

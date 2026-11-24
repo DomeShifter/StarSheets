@@ -89,7 +89,7 @@ pub fn start() {
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
                     install_wake(&cc.egui_ctx);
-                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), input: crate::input::Router::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), spell: crate::spelling::Suggest::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default() }))
+                    Ok(Box::new(WebShell { app, inbox, prefs, shell: crate::shell::Shell::default(), bottom: crate::bottom::Bottom::default(), link: crate::linkcard::LinkCard::default(), autolink: crate::autolink::AutoLink::default(), cf: crate::cfpanel::CfPanel::default(), dates: crate::datepicker::DatePicker::default(), custom_date: crate::customdate::CustomDate::default(), custom_number: crate::customnumber::CustomNumber::default(), settings: crate::settings::SettingsWindow::default(), input: crate::input::Router::default(), notes: crate::notes::Notes::default(), calc: crate::calcpreview::CalcPreview::default(), merge: crate::merge::MergeGuard::default(), files: crate::files::Files::default(), spell: crate::spelling::Suggest::default(), copyto: crate::copyto::CopyTo::default(), home: crate::home::Home::new(), error_tip: crate::errortip::ErrorTip, account: crate::account::Account::default(), share: crate::share::Share::default(), live: crate::live::Live::default(), webfonts: crate::fonts::WebFontLoader::default(), dv: crate::dvpanel::DvPanel::default(), chart: crate::chartpanel::ChartPanel::default(), names: crate::namespanel::NamesPanel::default(), find: crate::findreplace::FindReplace::default(), protect: crate::protectpanel::ProtectPanel::default(), messages: crate::messages::Messages::default(), prefs_checked: 0.0, prefs_input: false }))
                 }),
             )
             .await;
@@ -141,6 +141,9 @@ struct WebShell {
     share: crate::share::Share,
     error_tip: crate::errortip::ErrorTip,
     webfonts: crate::fonts::WebFontLoader,
+    /// When preferences were last compared with what's stored, and whether last frame had input.
+    prefs_checked: f64,
+    prefs_input: bool,
     prefs: crate::prefs::PrefsSync,
 }
 
@@ -246,7 +249,18 @@ impl eframe::App for WebShell {
         crate::house::keep(ctx);
         self.app.logic(ctx);
         // Store changed preferences straight away: a reload or closed tab runs no exit code (#1562).
-        let changed = self.prefs.changed(&self.app);
+        // Settings change after input (the frame of a click or key and the one after it, as the
+        // change happens in `ui`), so only then, and once a second for anything else.
+        let input = ctx.input(|i| !i.events.is_empty() || i.pointer.any_down() || i.pointer.any_released());
+        let now = ctx.input(|i| i.time);
+        let due = input || self.prefs_input || now - self.prefs_checked >= 1.0;
+        self.prefs_input = input;
+        let changed = if due {
+            self.prefs_checked = now;
+            self.prefs.changed(&self.app)
+        } else {
+            Vec::new()
+        };
         if !changed.is_empty() {
             match local_storage() {
                 Some(store) => {

@@ -349,6 +349,19 @@ impl Store {
         }
     }
 
+    /// Where file `id` is now. The index is trusted while the file is still at the path it
+    /// gives, which costs one file check; only when it isn't (moved or binned outside
+    /// StarSheets) is the whole folder tree listed again ([`Self::synced_index`]). Listing a big
+    /// tree over a network share every few seconds for each open file held up everyone else.
+    pub fn path_of(&self, id: &str) -> io::Result<Option<String>> {
+        if let Some(path) = self.load_index().get(id)
+            && self.full(path).is_file()
+        {
+            return Ok(Some(path.clone()));
+        }
+        Ok(self.synced_index()?.get(id).cloned())
+    }
+
     /// The index ({id: path}), in line with the folder tree: new files get ids, gone ones drop.
     pub fn synced_index(&self) -> io::Result<Index> {
         let mut index = self.load_index();
@@ -824,5 +837,24 @@ mod tests {
         assert_eq!(parent_of("a/b/c.xlsx"), "a/b");
         assert_eq!(base_of("c.xlsx"), "c.xlsx");
         assert_eq!(stamp().len(), 15);
+    }
+
+    #[test]
+    fn path_of_follows_a_file_moved_outside_starsheets() {
+        let dir = std::env::temp_dir().join(format!("starsheets-store-{}", random_hex(6)));
+        fs::create_dir_all(dir.join("old")).unwrap();
+        fs::write(dir.join("old/a.xlsx"), b"x").unwrap();
+        let store = Store { root: dir.clone(), keep: 3, spaces: false };
+        let id = store.synced_index().unwrap().keys().next().unwrap().clone();
+        assert_eq!(store.path_of(&id).unwrap().as_deref(), Some("old/a.xlsx"));
+        // Moved over the file share: the index is out of date, so the tree is listed again.
+        fs::create_dir_all(dir.join("new")).unwrap();
+        fs::rename(dir.join("old/a.xlsx"), dir.join("new/a.xlsx")).unwrap();
+        let moved = store.path_of(&id).unwrap();
+        assert!(moved.is_none() || moved.as_deref() == Some("new/a.xlsx"), "{moved:?}");
+        // Deleted: gone.
+        let _ = fs::remove_file(dir.join("new/a.xlsx"));
+        assert_eq!(store.path_of(&id).unwrap(), None);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

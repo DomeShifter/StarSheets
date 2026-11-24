@@ -49,6 +49,13 @@ Why this design, and what was rejected: [decisions.md](decisions.md) (2026-11-22
 - A replayed command is checked by a fingerprint of what it changed (formula *results* are left
   out, since NOW() and RAND() differ). On a mismatch the server asks the tab for the finished
   state of that change, so a command we didn't know reads outside state still ends up right.
+- That fingerprint covers only the cells the change made different (`CellStore::diff` visits
+  just the 64-row bands it copied), hashed field by field: on a million-cell tab it is under a
+  millisecond, where hashing the whole tab as JSON took about 90 ms on every edit. Changing how
+  fingerprints are made needs a protocol bump.
+- The server finds an open file by its index entry and one file check, and lists the folder
+  tree only when the file isn't there any more: listing a big tree on a network share every few
+  seconds for each open file held up every other request.
 - GridCraft's active sheet is view state stored in the workbook without making a new version, so
   switching sheets is never sent as a change.
 - Typed input depends on the person's date and number settings, so each command carries them.

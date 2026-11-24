@@ -602,7 +602,7 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
 /// its type) to the end of file ID, through its live room. Needs edit rights on ID.
 async fn add_sheets(app: &Shared, me: Option<auth::User>, file: String, q: &HashMap<String, String>, body: Bytes) -> Response<Body> {
     let (app2, f2, me2) = (app.clone(), file.clone(), me.clone());
-    let (role, path) = blocking(app, move |a| (sharing::file_role(&a.store, a.auth, me2.as_ref(), &f2), a.store.synced_index().ok().and_then(|i| i.get(&f2).cloned()).unwrap_or_default())).await.unwrap_or_default();
+    let (role, path) = blocking(app, move |a| (sharing::file_role(&a.store, a.auth, me2.as_ref(), &f2), a.store.path_of(&f2).ok().flatten().unwrap_or_default())).await.unwrap_or_default();
     // A .csv (or other one-sheet type) can't hold another tab.
     if !matches!(path.rsplit_once('.').map(|(_, e)| e.to_lowercase()).as_deref(), Some("xlsx" | "xlsm" | "ods")) && role > sharing::Role::None {
         return error(400, "That file can only hold one sheet (it's a .csv or similar). Pick an .xlsx spreadsheet, or copy to a new spreadsheet.");
@@ -632,7 +632,7 @@ async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &Hea
         if sharing::file_role(&app.store, app.auth, me.as_ref(), &f2) < sharing::Role::View {
             return Err(error(403, "You don't have access to that."));
         }
-        let path = app.store.synced_index().ok().and_then(|i| i.get(&f2).cloned()).ok_or_else(|| error(404, "no such file"))?;
+        let path = app.store.path_of(&f2).ok().flatten().ok_or_else(|| error(404, "no such file"))?;
         let full = app.store.full(&path);
         let version = app.store.version_of(&full).map_err(|_| error(404, "no such file"))?;
         if let Some(png) = thumbs::cached(&app.store, &f2, &version) {

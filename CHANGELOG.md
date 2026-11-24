@@ -10,6 +10,18 @@ new features and the last one for fixes.
 - No more dark flashes in the grid area while a spreadsheet opens or the page reloads.
 - The formula bar and cells no longer blink off and on a few times while a spreadsheet opens:
   fonts arriving from the server used to blank them for a moment each.
+- Big tabs: each edit is checked with the server in well under a millisecond (it re-read the
+  whole tab before, about 90 ms on a million cells and more in the browser). The regular
+  whole-file check is about four times faster.
+- The server no longer lists every folder on the file share every few seconds for each open
+  file, which could slow down opening and listing files for everyone.
+- The browser does less work on every frame (fonts and settings are only checked when
+  something changed).
+
+### Added (for developers)
+- A speed check on a big 31-tab, 2-million-cell workbook (`cargo run --release -p
+  starsheets-sync --example bench`), run by CI with its table in the run's summary.
+- The example Docker Compose file caps the server's memory.
 - Typing, Delete or Enter while a dialog without a text box is open (Settings, the merge warning,
   "Open link?") no longer changes the cells behind it.
 - Excel files: rows of ordinary 11 pt text open at Excel's height again (they were 2 px too

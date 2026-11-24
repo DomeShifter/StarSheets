@@ -145,7 +145,7 @@ async fn connection(app: Shared, mut socket: WebSocket, user: Option<crate::auth
             if let Some(u) = &user {
                 let _ = crate::spaces::note_opened(&app.store, u, &file);
             }
-            let name = app.store.synced_index().ok().and_then(|i| i.get(&file).cloned()).unwrap_or_else(|| file.clone());
+            let name = app.store.path_of(&file).ok().flatten().unwrap_or_else(|| file.clone());
             crate::log::note(&app.store, &format!("{} opened {name}", who(&user)));
             crate::sharing::file_role(&app.store, app.auth, user.as_ref(), &file)
         })
@@ -316,8 +316,7 @@ impl Room {
     fn open(&mut self) -> Result<(), String> {
         let (name, bytes) = {
             let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
-            let index = self.app.store.synced_index().map_err(|e| format!("Can't read the file list: {e}"))?;
-            let path = index.get(&self.file).cloned().ok_or("This file isn't on the server any more.")?;
+            let path = self.app.store.path_of(&self.file).map_err(|e| format!("Can't read the file list: {e}"))?.ok_or("This file isn't on the server any more.")?;
             let full = self.app.store.full(&path);
             self.path = Some(path.clone());
             let bytes = std::fs::read(&full).map_err(|e| format!("Can't read the file: {e}"))?;
@@ -620,8 +619,7 @@ impl Room {
     fn save(&mut self, wb: &Workbook) -> Result<(), SaveError> {
         let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
         let failed = |e: String| SaveError::Failed(e);
-        let index = self.app.store.synced_index().map_err(|e| failed(e.to_string()))?;
-        let path = index.get(&self.file).cloned().ok_or_else(|| failed("the file was moved to the bin".into()))?;
+        let path = self.app.store.path_of(&self.file).map_err(|e| failed(e.to_string()))?.ok_or_else(|| failed("the file was moved to the bin".into()))?;
         let full = self.app.store.full(&path);
         if self.app.store.version_of(&full).ok() != self.disk {
             return Err(SaveError::Outside);
@@ -644,7 +642,7 @@ impl Room {
     /// The file's version on disk now (None: gone, moved to the bin, or unreadable).
     fn disk_now(&self) -> Option<String> {
         let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
-        let path = self.app.store.synced_index().ok()?.get(&self.file).cloned()?;
+        let path = self.app.store.path_of(&self.file).ok()??;
         self.app.store.version_of(&self.app.store.full(&path)).ok()
     }
 
@@ -682,7 +680,7 @@ impl Room {
     fn check_place(&mut self) {
         let now = {
             let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
-            self.app.store.synced_index().ok().and_then(|i| i.get(&self.file).cloned())
+            self.app.store.path_of(&self.file).ok().flatten()
         };
         if now == self.path {
             return;
@@ -723,7 +721,7 @@ impl Room {
     fn keep_copy(&self, wb: &Workbook) -> Result<String, String> {
         let _g = self.app.lock.lock().unwrap_or_else(|e| e.into_inner());
         let store = &self.app.store;
-        let path = store.synced_index().map_err(|e| e.to_string())?.get(&self.file).cloned().ok_or("the file is gone")?;
+        let path = store.path_of(&self.file).map_err(|e| e.to_string())?.ok_or("the file is gone")?;
         let folder = crate::store::parent_of(&path);
         let (stem, _) = crate::store::split_name(&crate::store::base_of(&path));
         let name = store.claim_name(&folder, &format!("{stem} (StarSheets copy {})", crate::store::readable_stamp()), ".xlsx", None).map_err(|e| e.msg)?;

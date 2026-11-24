@@ -49,6 +49,8 @@ pub fn slug(menu: &str) -> String {
 pub struct WebFontLoader {
     requested: std::collections::HashSet<String>,
     previews: bool,
+    /// The open workbooks (uid, revision) last looked at: the fonts they use change only with it.
+    seen: Option<Vec<(u64, u64)>>,
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -58,6 +60,13 @@ impl WebFontLoader {
             self.previews = true;
             load_previews(ctx);
         }
+        // Looking through every style of every open workbook each frame is wasted work on a big
+        // file: only when a workbook changed (or another was opened).
+        let key: Vec<(u64, u64)> = app.session.documents().iter().map(|d| (d.uid, d.revision)).collect();
+        if self.seen.as_ref() == Some(&key) {
+            return;
+        }
+        self.seen = Some(key);
         for name in app.used_fonts() {
             if self.requested.contains(&name) {
                 continue;

@@ -114,6 +114,23 @@ jobs:
       - name: Test
         run: cargo test -p starsheets -p starsheets-server -p starsheets-sync
 
+  speed:
+    # Speed and memory check on a big many-tab workbook (crates/sync/examples/bench.rs): the
+    # table lands in the run's summary. Not a pass/fail test and not needed for a release.
+    name: Speed check (big workbook)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch GridCraft at the pinned commit of our fork
+        run: scripts/fetch-upstream.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: speed
+      - name: Speed check
+        run: cargo run --release -p starsheets-sync --example bench
+
   gridcraft:
     # GridCraft's own tests, on our fork's pinned commit: every crate, including the Google
     # functions (sheets-functions). Our changes to the engine, the xlsx reader/writer and the

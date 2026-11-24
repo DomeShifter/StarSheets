@@ -13,4 +13,7 @@ services:
       STARSHEETS_PASSWORD: "change-me"
       # How the app describes where files are kept.
       LOCATION: "the server"
+    # A cap, so one enormous file can't push the whole machine into swap (no swap for it either).
+    mem_limit: 1536m
+    memswap_limit: 1536m
     restart: unless-stopped

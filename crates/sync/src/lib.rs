@@ -10,7 +10,8 @@
 use std::sync::Arc;
 
 use gridcraft_engine::Session;
-use gridcraft_engine::model::{Sheet, Workbook};
+use gridcraft_engine::core::CellRef;
+use gridcraft_engine::model::{Cell, Sheet, Workbook};
 use gridcraft_engine::selection::Selection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as Json;
@@ -18,8 +19,10 @@ use serde_json::Value as Json;
 /// Tabs and server must run the same engine. CI sets STARSHEETS_BUILD to the commit for both.
 /// How tabs and the server talk. Bump it when a message changes shape: only then must open tabs
 /// reload. (A tab on another build of the same protocol keeps working: replayed changes are
-/// checked by fingerprint, and a difference falls back to sending the finished state.)
-pub const PROTOCOL: u32 = 3;
+/// checked by fingerprint, and a difference falls back to sending the finished state.) Also bump
+/// it when fingerprints are worked out differently (4: only a change's differing cells, no JSON
+/// per cell), or every change from an older tab would fall back to the finished state.
+pub const PROTOCOL: u32 = 4;
 
 pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
     Some(b) => b,
@@ -431,31 +434,110 @@ impl Fnv {
     }
 }
 
-fn hash_sheet(h: &mut Fnv, i: usize, sh: &Sheet) {
-    h.bytes(&(i as u64).to_le_bytes());
-    h.bytes(sh.name.as_bytes());
-    for (at, cell) in sh.cells.iter() {
-        h.json(&at);
-        h.json(&cell.style);
-        // A formula's result can differ from tab to tab (NOW, RAND): only its text counts.
-        match &cell.formula {
-            Some(f) => h.json(&**f),
-            None => h.json(&cell.value),
-        }
+impl Fnv {
+    fn u32(&mut self, x: u32) {
+        self.bytes(&x.to_le_bytes());
     }
+    fn str(&mut self, s: &str) {
+        self.bytes(&(s.len() as u64).to_le_bytes());
+        self.bytes(s.as_bytes());
+    }
+}
+
+/// One cell, hashed field by field (no JSON per cell: a big sheet has millions). A formula's
+/// result can differ from tab to tab (NOW, RAND): only its text counts.
+fn hash_cell(h: &mut Fnv, at: CellRef, cell: Option<&Cell>) {
+    use gridcraft_engine::core::Value;
+    h.u32(at.row);
+    h.u32(at.col);
+    let Some(cell) = cell else {
+        h.bytes(b"-");
+        return;
+    };
+    h.u32(cell.style.0);
+    if let Some(f) = &cell.formula {
+        h.bytes(b"=");
+        h.str(&f.text);
+        if let Some(r) = &f.array {
+            h.json(r);
+        }
+        return;
+    }
+    if let Some(py) = &cell.py {
+        h.bytes(b"p");
+        h.json(&**py);
+        return;
+    }
+    match &cell.value {
+        Value::Empty => h.bytes(b"e"),
+        Value::Number(n) => {
+            h.bytes(b"n");
+            h.bytes(&n.to_bits().to_le_bytes());
+        }
+        Value::Text(t) => {
+            h.bytes(b"t");
+            h.str(t);
+        }
+        Value::Bool(b) => h.bytes(if *b { b"T" } else { b"F" }),
+        Value::Error(e) => {
+            h.bytes(b"!");
+            h.json(e);
+        }
+        Value::Array(_) => h.json(&cell.value),
+    }
+}
+
+/// A sheet's name, merges and row and column sizes.
+fn hash_sheet_shape(h: &mut Fnv, i: usize, sh: &Sheet) {
+    h.bytes(&(i as u64).to_le_bytes());
+    h.str(&sh.name);
     h.json(&sh.merges);
     h.json(&sh.cols);
     h.json(&sh.rows);
 }
 
-/// Fingerprint of what a change altered: the sheets that changed between `before` and `after`,
-/// the sheet names, the defined names and the size of the style table.
+fn hash_sheet(h: &mut Fnv, i: usize, sh: &Sheet) {
+    hash_sheet_shape(h, i, sh);
+    for (at, cell) in sh.cells.iter() {
+        hash_cell(h, at, Some(cell));
+    }
+}
+
+/// A sheet a change altered, given the sheet it was before: only the cells that differ, which
+/// `CellStore::diff` finds by visiting just the 64-row bands the change copied.
+fn hash_sheet_change(h: &mut Fnv, i: usize, before: &Sheet, after: &Sheet) {
+    h.bytes(&(i as u64).to_le_bytes());
+    h.str(&after.name);
+    // Only what changed: hashing a big sheet's row sizes on every edit would cost as much as
+    // the cells did.
+    if after.merges != before.merges {
+        h.json(&after.merges);
+    }
+    if after.cols != before.cols {
+        h.json(&after.cols);
+    }
+    if after.rows != before.rows {
+        h.json(&after.rows);
+    }
+    for at in after.cells.diff(&before.cells) {
+        hash_cell(h, at, after.cells.get(at));
+    }
+}
+
+/// Fingerprint of what a change altered: in each sheet it changed, the cells that differ (a
+/// sheet it added, in full), the sheet names, the defined names and the size of the style table.
+/// The tab and the server each work it out from their own copy; equal means the change did the
+/// same thing on both.
 pub fn change_fingerprint(before: &Workbook, after: &Workbook) -> String {
     let mut h = Fnv::new();
     for (i, sh) in after.sheets.iter().enumerate() {
-        h.bytes(sh.name.as_bytes());
-        if !before.sheets.iter().any(|b| Arc::ptr_eq(b, sh)) {
-            hash_sheet(&mut h, i, sh);
+        h.str(&sh.name);
+        if before.sheets.iter().any(|b| Arc::ptr_eq(b, sh)) {
+            continue;
+        }
+        match before.sheets.iter().find(|b| b.uid.get() == sh.uid.get()) {
+            Some(b) => hash_sheet_change(&mut h, i, b, sh),
+            None => hash_sheet(&mut h, i, sh),
         }
     }
     h.json(&after.names);
