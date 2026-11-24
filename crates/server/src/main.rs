@@ -4,7 +4,9 @@
 //!
 //! Settings (environment): STORE (folder, default /data), KEEP (versions kept, 6), PORT (8080),
 //! LOCATION (how people are told where files are kept), STARSHEETS_AUTH (off = no login),
-//! STARSHEETS_PASSWORD, SITE (a built StarSheets site to serve).
+//! STARSHEETS_PASSWORD, SITE (a built StarSheets site to serve), and the security settings in
+//! guard.rs (STARSHEETS_PUBLIC_URL, STARSHEETS_ALLOWED_HOSTS, STARSHEETS_TRUSTED_PROXY,
+//! STARSHEETS_SECURE_COOKIE).
 
 // Request handlers return a ready HTTP response as their error (axum's usual way); boxing it to
 // make the error smaller would only add an allocation on the error path.
@@ -12,6 +14,7 @@
 
 mod auth;
 mod backup;
+mod guard;
 mod live;
 mod log;
 mod sharing;
@@ -20,20 +23,36 @@ mod store;
 mod thumbs;
 
 use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::extract::State;
-use axum::http::{HeaderMap, Method, Response, Uri, header};
+use axum::extract::{Request, State};
+use axum::http::{HeaderMap, Method, Response, header};
 use percent_encoding::percent_decode_str;
 use serde_json::{Value, json};
 
 use store::{Bad, Reply, Store};
 
+/// The biggest file that can be sent (uploads, saves); live.rs uses it for its messages too.
 const MAX_BYTES: u64 = 200 * 1024 * 1024;
+/// The biggest body of any other request (sign-in, sharing, settings: all small JSON).
+const SMALL_BYTES: u64 = 1024 * 1024;
+/// How long reading a request's body may take (a slow upload of a big file gets longer).
+const SMALL_WAIT: Duration = Duration::from_secs(30);
+const BIG_WAIT: Duration = Duration::from_secs(600);
+/// Big bodies read at once (each can be MAX_BYTES in memory); more wait their turn.
+static BIG_AT_ONCE: LazyLock<tokio::sync::Semaphore> = LazyLock::new(|| tokio::sync::Semaphore::new(3));
+/// Password hashes worked out at once (Argon2 is slow and uses memory on purpose).
+static ARGON_AT_ONCE: LazyLock<tokio::sync::Semaphore> = LazyLock::new(|| tokio::sync::Semaphore::new(4));
+/// The wait after a wrong password or code, to slow down guessing.
+#[cfg(not(test))]
+const WRONG_WAIT: Duration = Duration::from_millis(1500);
+#[cfg(test)]
+const WRONG_WAIT: Duration = Duration::from_millis(10);
 const COOKIE: &str = "starsheets_session";
 
 struct App {
@@ -100,7 +119,9 @@ fn reply(r: Result<Reply, Bad>) -> Response<Body> {
             if !version.is_empty() {
                 b = b.header(header::ETAG, version);
             }
-            b.body(Body::from(data)).unwrap()
+            // The apps read files with fetch(); a browser sent here directly saves the file
+            // rather than showing it.
+            b.header(header::CONTENT_DISPOSITION, "attachment").body(Body::from(data)).unwrap()
         }
         Err(e) => error(e.code, &e.msg),
     }
@@ -128,16 +149,25 @@ fn signed_in(app: &App, headers: &HeaderMap) -> bool {
     !app.auth || current_user(app, headers).is_some()
 }
 
+/// What the request says about who sent it: their address (for the try limits) and whether
+/// it came over HTTPS (the sign-in cookie is then Secure). See guard.rs.
+#[derive(Clone, Copy, Debug, Default)]
+struct Ask {
+    ip: Option<IpAddr>,
+    secure: bool,
+}
+
 fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
-fn cookie_reply(value: &str, max_age: u64, body: Value) -> Response<Body> {
+fn cookie_reply(value: &str, max_age: u64, body: Value, secure: bool) -> Response<Body> {
+    let secure = if secure { "; Secure" } else { "" };
     Response::builder()
         .status(200)
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::CACHE_CONTROL, "no-store")
-        .header(header::SET_COOKIE, format!("{COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict"))
+        .header(header::SET_COOKIE, format!("{COOKIE}={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict{secure}"))
         .body(Body::from(serde_json::to_vec(&body).unwrap_or_default()))
         .unwrap()
 }
@@ -153,6 +183,24 @@ async fn blocking<T: Send + 'static>(app: &Shared, f: impl FnOnce(&App) -> T + S
     .ok()
 }
 
+/// Runs password hashing or checking (Argon2: slow on purpose) off the async threads and NOT
+/// under the store lock, a few at a time, so sign-in tries can't hold up everyone's files.
+async fn slow<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Option<T> {
+    let _turn = ARGON_AT_ONCE.acquire().await.ok()?;
+    tokio::task::spawn_blocking(f).await.ok()
+}
+
+fn too_many() -> Response<Body> {
+    error(429, "Too many tries. Wait a few minutes, then try again.")
+}
+
+fn session_reply(app: &App, user: &auth::User, secure: bool) -> Response<Body> {
+    match auth::new_session(&app.store, &user.username) {
+        Ok(t) => cookie_reply(&t, auth::SESSION_DAYS * 86400, json!({ "ok": true, "user": user.json() }), secure),
+        Err(_) => error(500, "storage error"),
+    }
+}
+
 fn field(body: &Value, key: &str) -> String {
     body.get(key).and_then(Value::as_str).unwrap_or("").to_string()
 }
@@ -161,16 +209,30 @@ fn opt_field(body: &Value, key: &str) -> Option<String> {
     body.get(key).and_then(Value::as_str).map(str::to_string)
 }
 
+/// Waits a moment after a wrong password or code (slows down guessing), then says so.
+async fn wrong(code: u16, why: &str) -> Response<Body> {
+    tokio::time::sleep(WRONG_WAIT).await;
+    error(code, why)
+}
+
 /// /api/info, /api/setup, /api/signup, /api/login, /api/logout, /api/me and /api/users; `None` for other paths.
-async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, String>, headers: &HeaderMap, body: &[u8]) -> Option<Response<Body>> {
+/// Password hashes are made and checked outside the store lock (slow()); sign-in, sign-up and
+/// setup tries are limited per address and per username (guard.rs).
+async fn accounts(
+    app: &Shared,
+    m: &str,
+    p: &[String],
+    q: &HashMap<String, String>,
+    headers: &HeaderMap,
+    body: &[u8],
+    ask: Ask,
+) -> Option<Response<Body>> {
+    use guard::{LIMITS, ip_key};
     let path: Vec<&str> = p.iter().map(String::as_str).collect();
     let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
     let me = current_user(app, headers);
     let on = app.auth;
-    let session = |app: &App, user: &auth::User| match auth::new_session(&app.store, &user.username) {
-        Ok(t) => cookie_reply(&t, auth::SESSION_DAYS * 86400, json!({ "ok": true, "user": user.json() })),
-        Err(_) => error(500, "storage error"),
-    };
+    let secure = ask.secure;
     Some(match (path.as_slice(), m) {
         (["info"], "GET") => {
             let setup = on && !auth::any_users(&app.store);
@@ -185,29 +247,46 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             if !on {
                 return Some(error(400, "Sign-in is off on this server."));
             }
+            if !LIMITS.take(&ip_key("setup", ask.ip), guard::SETUP_IP) {
+                return Some(too_many());
+            }
+            let (username, name, password, code) = (field(&json, "username"), field(&json, "name"), field(&json, "password"), field(&json, "code"));
+            let (u2, n2) = (username.clone(), name.clone());
             let r = blocking(app, move |app| {
                 if auth::any_users(&app.store) {
                     return Err((400, "This server already has an owner. Sign in instead.".to_string()));
                 }
-                if !same(field(&json, "code").trim().as_bytes(), auth::setup_code(&app.store).as_bytes()) {
+                if !same(code.trim().as_bytes(), auth::setup_code(&app.store).as_bytes()) {
                     return Err((401, "That setup code isn't right.".to_string()));
                 }
-                let user =
-                    auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map_err(|e| (400, e))?;
+                auth::check_new(&app.store, &u2, &n2).map_err(|e| (400, e))
+            })
+            .await;
+            match r {
+                Some(Ok(())) => {}
+                Some(Err((401, why))) => return Some(wrong(401, &why).await),
+                Some(Err((code, why))) => return Some(error(code, &why)),
+                None => return Some(error(500, "server error")),
+            }
+            let hash = match slow(move || auth::hash_new(&password)).await {
+                Some(Ok(h)) => h,
+                Some(Err(why)) => return Some(error(400, &why)),
+                None => return Some(error(500, "server error")),
+            };
+            let r = blocking(app, move |app| {
+                if auth::any_users(&app.store) {
+                    return Err((400, "This server already has an owner. Sign in instead.".to_string()));
+                }
+                let user = auth::add_hashed(&app.store, &username, &name, hash).map_err(|e| (400, e))?;
                 let _ = std::fs::remove_file(app.store.meta().join("setup-code"));
                 // Files already in the folder become the new owner's.
                 spaces::migrate(&app.store).map_err(|e| (500, e.to_string()))?;
-                Ok(session(app, &user))
+                Ok(session_reply(app, &user, secure))
             })
             .await;
             match r {
                 Some(Ok(resp)) => resp,
-                Some(Err((code, why))) => {
-                    if code == 401 {
-                        tokio::time::sleep(Duration::from_millis(1500)).await;
-                    }
-                    error(code, &why)
-                }
+                Some(Err((code, why))) => error(code, &why),
                 None => error(500, "server error"),
             }
         }
@@ -215,21 +294,38 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             if !on {
                 return Some(error(400, "Sign-in is off on this server."));
             }
+            if !LIMITS.take(&ip_key("signup", ask.ip), guard::SIGNUP_IP) {
+                return Some(too_many());
+            }
+            let (username, name, password, code) = (field(&json, "username"), field(&json, "name"), field(&json, "password"), field(&json, "code"));
+            let (u2, n2) = (username.clone(), name.clone());
             let r = blocking(app, move |app| {
-                let user =
-                    auth::sign_up(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password"), &field(&json, "code"))?;
+                auth::signup_allowed(&app.store, &code)?;
+                auth::check_new(&app.store, &u2, &n2).map_err(|e| (400, e))
+            })
+            .await;
+            match r {
+                Some(Ok(())) => {}
+                Some(Err((401, why))) => return Some(wrong(401, &why).await),
+                Some(Err((code, why))) => return Some(error(code, &why)),
+                None => return Some(error(500, "server error")),
+            }
+            let hash = match slow(move || auth::hash_new(&password)).await {
+                Some(Ok(h)) => h,
+                Some(Err(why)) => return Some(error(400, &why)),
+                None => return Some(error(500, "server error")),
+            };
+            let r = blocking(app, move |app| {
+                // Sign-up could have been turned off meanwhile.
+                auth::signup(&app.store).on.then_some(()).ok_or((403, "This server doesn't let people make their own account.".to_string()))?;
+                let user = auth::add_hashed(&app.store, &username, &name, hash).map_err(|e| (400, e))?;
                 let _ = spaces::ensure_space(&app.store, &user.username);
-                Ok(session(app, &user))
+                Ok(session_reply(app, &user, secure))
             })
             .await;
             match r {
                 Some(Ok(resp)) => resp,
-                Some(Err((code, why))) => {
-                    if code == 401 {
-                        tokio::time::sleep(Duration::from_millis(1500)).await; // slows down guessing
-                    }
-                    error(code, &why)
-                }
+                Some(Err((code, why))) => error(code, &why),
                 None => error(500, "server error"),
             }
         }
@@ -256,14 +352,20 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             if !on {
                 return Some(send_json(&json!({ "ok": true }), 200));
             }
-            let r = blocking(app, move |app| auth::check(&app.store, &field(&json, "username"), &field(&json, "password")).map(|u| session(app, &u)))
-                .await
-                .flatten();
-            match r {
-                Some(resp) => resp,
+            let (username, password) = (field(&json, "username"), field(&json, "password"));
+            let user_key = format!("login-user:{}", username.trim().to_lowercase());
+            // Every try counts for the address; only wrong ones for the username.
+            if !LIMITS.can(&user_key, guard::LOGIN_USER) || !LIMITS.take(&ip_key("login", ask.ip), guard::LOGIN_IP) {
+                return Some(too_many());
+            }
+            let found = blocking(app, move |app| auth::login_hash(&app.store, &username)).await.flatten();
+            let (hash, user) = found.map_or((None, None), |(u, h)| (Some(h), Some(u)));
+            let right = slow(move || auth::verify(&password, hash.as_deref())).await.unwrap_or(false);
+            match user.filter(|_| right) {
+                Some(user) => blocking(app, move |app| session_reply(app, &user, secure)).await.unwrap_or_else(|| error(500, "server error")),
                 None => {
-                    tokio::time::sleep(Duration::from_millis(1500)).await; // slows down guessing
-                    error(401, "That username or password isn't right.")
+                    LIMITS.take(&user_key, guard::LOGIN_USER);
+                    wrong(401, "That username or password isn't right.").await
                 }
             }
         }
@@ -271,34 +373,43 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             if let Some(t) = cookie_token(headers) {
                 blocking(app, move |app| auth::end_session(&app.store, &t)).await;
             }
-            cookie_reply("", 0, json!({ "ok": true }))
+            cookie_reply("", 0, json!({ "ok": true }), secure)
         }
         (["me"], "POST") => {
             let Some(me) = me else { return Some(error(401, "please sign in")) };
-            let r = blocking(app, move |app| {
-                let new_password = opt_field(&json, "password");
-                if new_password.is_some() && auth::check(&app.store, &me.username, &field(&json, "current_password")).is_none() {
-                    return Err("Your current password isn't right.".to_string());
+            let mut new_hash = None;
+            if let Some(new_password) = opt_field(&json, "password") {
+                let user_key = format!("login-user:{}", me.username);
+                if !LIMITS.can(&user_key, guard::LOGIN_USER) {
+                    return Some(too_many());
                 }
-                auth::update(
-                    &app.store,
-                    &me.username,
-                    opt_field(&json, "name").as_deref(),
-                    opt_field(&json, "colour").as_deref(),
-                    new_password.as_deref(),
-                )
-                .and_then(|u| {
-                    if json.get("password").is_some() {
-                        auth::new_session(&app.store, &u.username).map(|t| (u, Some(t))).map_err(|e| e.to_string())
-                    } else {
-                        Ok((u, None))
-                    }
-                })
+                let (current, who) = (field(&json, "current_password"), me.username.clone());
+                let stored = blocking(app, move |app| auth::login_hash(&app.store, &who).map(|(_, h)| h)).await.flatten();
+                if !slow(move || auth::verify(&current, stored.as_deref())).await.unwrap_or(false) {
+                    LIMITS.take(&user_key, guard::LOGIN_USER);
+                    return Some(wrong(400, "Your current password isn't right.").await);
+                }
+                new_hash = match slow(move || auth::hash_new(&new_password)).await {
+                    Some(Ok(h)) => Some(h),
+                    Some(Err(why)) => return Some(error(400, &why)),
+                    None => return Some(error(500, "server error")),
+                };
+            }
+            let r = blocking(app, move |app| {
+                let changed_password = new_hash.is_some();
+                auth::update_hashed(&app.store, &me.username, opt_field(&json, "name").as_deref(), opt_field(&json, "colour").as_deref(), new_hash)
+                    .and_then(|u| {
+                        if changed_password {
+                            auth::new_session(&app.store, &u.username).map(|t| (u, Some(t))).map_err(|e| e.to_string())
+                        } else {
+                            Ok((u, None))
+                        }
+                    })
             })
             .await;
             match r {
                 // A new password signs out everywhere else; this tab gets a new session.
-                Some(Ok((u, Some(t)))) => cookie_reply(&t, auth::SESSION_DAYS * 86400, json!({ "ok": true, "user": u.json() })),
+                Some(Ok((u, Some(t)))) => cookie_reply(&t, auth::SESSION_DAYS * 86400, json!({ "ok": true, "user": u.json() }), secure),
                 Some(Ok((u, None))) => send_json(&json!({ "ok": true, "user": u.json() }), 200),
                 Some(Err(why)) => error(400, &why),
                 None => error(500, "server error"),
@@ -315,16 +426,34 @@ async fn accounts(app: &Shared, m: &str, p: &[String], q: &HashMap<String, Strin
             let Some(me) = me.filter(|u| u.owner) else { return Some(error(403, "Only the owner can do that.")) };
             let (reset, deleting) = (path.len() == 2, m == "DELETE");
             let who = q.get("username").cloned().unwrap_or_default();
+            // A new or reset password is hashed first, outside the store lock.
+            let hash = if deleting {
+                None
+            } else {
+                let password = field(&json, "password");
+                match slow(move || auth::hash_new(&password)).await {
+                    Some(Ok(h)) => Some(h),
+                    Some(Err(why)) => return Some(error(400, &why)),
+                    None => return Some(error(500, "server error")),
+                }
+            };
             let r = blocking(app, move |app| {
                 if deleting {
                     if who == me.username {
                         return Err("You can't remove your own account.".to_string());
                     }
-                    auth::remove(&app.store, &who).map(|_| json!({ "ok": true }))
+                    auth::remove(&app.store, &who)?;
+                    // Their folder goes to the owner as "Removed – <username>"; their shares go.
+                    let moved = spaces::retire(&app.store, &who).map_err(|e| e.to_string())?;
+                    if let Some(to) = &moved {
+                        log::note(&app.store, &format!("account {who:?} removed; their folder is now {to:?}"));
+                    }
+                    Ok(json!({ "ok": true, "folder": moved }))
                 } else if reset {
-                    auth::update(&app.store, &field(&json, "username"), None, None, Some(&field(&json, "password"))).map(|u| u.json())
+                    auth::update_hashed(&app.store, &field(&json, "username"), None, None, hash).map(|u| u.json())
                 } else {
-                    auth::add(&app.store, &field(&json, "username"), &field(&json, "name"), &field(&json, "password")).map(|u| {
+                    let hash = hash.unwrap_or_default();
+                    auth::add_hashed(&app.store, &field(&json, "username"), &field(&json, "name"), hash).map(|u| {
                         let _ = spaces::ensure_space(&app.store, &u.username);
                         u.json()
                     })
@@ -550,17 +679,38 @@ fn has_starsheets(dir: &Path) -> bool {
     dir.join(".starsheets").join("users.json").is_file()
 }
 
-/// GET/POST /api/storage: where files are kept. The server's owner (or anyone while the server is
-/// being set up, or with sign-in off) can choose another folder inside the base folder: "move"
-/// takes everything there (files, versions, bin, accounts), "use" switches to StarSheets files
-/// already there. Refused while a spreadsheet is open. The server then restarts itself (exit;
-/// Docker starts it again) so nothing still points at the old place.
-async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> Response<Body> {
+/// GET/POST /api/storage: where files are kept. The server's owner (or, while the server is
+/// being set up, whoever has the setup code: `code` in the query or the body; or anyone with
+/// sign-in off) can choose another folder inside the base folder: "move" takes everything there
+/// (files, versions, bin, accounts), "use" switches to StarSheets files already there. Refused
+/// while a spreadsheet is open. The server then restarts itself (exit; Docker starts it again)
+/// so nothing still points at the old place.
+async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8], q: &HashMap<String, String>, ask: Ask) -> Response<Body> {
     let setting_up = app.auth && !auth::any_users(&app.store);
     if app.auth && !setting_up && !me.as_ref().is_some_and(|u| u.owner) {
         return error(403, "Only the owner of this server can choose where files are kept.");
     }
     let current = chosen_root(&app.base).unwrap_or_default();
+    let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    if setting_up {
+        let code = if m == "GET" { q.get("code").cloned().unwrap_or_default() } else { field(&json, "code") };
+        let right = !code.trim().is_empty()
+            && blocking(app, move |a| same(code.trim().as_bytes(), auth::setup_code(&a.store).as_bytes())).await.unwrap_or(false);
+        if !right {
+            let tried = !q.get("code").is_none_or(|c| c.trim().is_empty()) || !field(&json, "code").trim().is_empty();
+            if tried && !guard::LIMITS.take(&guard::ip_key("setup", ask.ip), guard::SETUP_IP) {
+                return too_many();
+            }
+            if m == "GET" {
+                // The setup page asks again once the code is typed; until then, no folder list.
+                return send_json(
+                    &json!({ "location": app.location, "current": current, "folders": [], "has_files": [], "top_has_files": false, "locked": true }),
+                    200,
+                );
+            }
+            return wrong(401, "That setup code isn't right.").await;
+        }
+    }
     if m == "GET" {
         let base = app.base.clone();
         let mut folders = tokio::task::spawn_blocking(move || storage_folders(&base)).await.unwrap_or_default();
@@ -573,7 +723,6 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
             200,
         );
     }
-    let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
     let Ok(to) = store::rel(json.get("folder").and_then(Value::as_str)) else { return error(400, "That isn't a folder name.") };
     let mode = field(&json, "mode");
     if to == current {
@@ -1015,7 +1164,36 @@ async fn serve_site(site: &Path, path: &str, headers: &HeaderMap) -> Response<Bo
 
 // ---------------------------------------------------------------- requests
 
-async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: HeaderMap, body: Body) -> Response<Body> {
+/// Requests whose body can be a whole file (up to MAX_BYTES); every other body is small JSON.
+fn takes_a_file(m: &str, p: &[String]) -> bool {
+    let p: Vec<&str> = p.iter().map(String::as_str).collect();
+    matches!((m, p.as_slice()), ("POST", ["files"]) | ("PUT", ["files", _]) | ("POST", ["files", _, "add-sheets"]))
+}
+
+/// Paths answered before (or without) sign-in: accounts and, while setting up, storage.
+fn before_sign_in(p: &[String]) -> bool {
+    matches!(p.first().map(String::as_str), Some("info" | "setup" | "signup" | "login" | "logout" | "me" | "users" | "storage"))
+}
+
+/// Reads a request's body: at most `limit` bytes, within `wait`.
+async fn read_body(body: Body, headers: &HeaderMap, limit: u64, wait: Duration) -> Result<Bytes, Response<Body>> {
+    let length: u64 = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(0);
+    let too_big = || error(413, if limit == MAX_BYTES { "file too large" } else { "request too large" });
+    if length > limit {
+        return Err(too_big());
+    }
+    match tokio::time::timeout(wait, axum::body::to_bytes(body, limit as usize)).await {
+        Ok(Ok(b)) => Ok(b),
+        Ok(Err(_)) => Err(too_big()),
+        Err(_) => Err(error(408, "The request took too long to arrive.")),
+    }
+}
+
+async fn handle(State(app): State<Shared>, req: Request) -> Response<Body> {
+    let (parts, body) = req.into_parts();
+    let (method, uri, headers) = (parts.method, parts.uri, parts.headers);
+    let peer = guard::peer(&parts.extensions);
+    let ask = Ask { ip: guard::client_ip(peer, &headers, guard::config()), secure: guard::secure(peer, &headers, guard::config()) };
     let path = uri.path().to_string();
     if path == "/healthz" {
         return Response::builder().header(header::CONTENT_TYPE, "text/plain").body(Body::from("ok")).unwrap();
@@ -1035,21 +1213,31 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     for (k, v) in form_urlencoded::parse(uri.query().unwrap_or("").as_bytes()) {
         q.entry(k.into_owned()).or_insert_with(|| v.into_owned());
     }
-    let length: u64 = headers.get(header::CONTENT_LENGTH).and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(0);
-    if length > MAX_BYTES {
-        return error(413, "file too large");
-    }
-    let body: Bytes = match axum::body::to_bytes(body, MAX_BYTES as usize).await {
-        Ok(b) => b,
-        Err(_) => return error(413, "file too large"),
-    };
     let m = method.as_str().to_string();
-    if let Some(resp) = accounts(&app, &m, &p, &q, &headers, &body).await {
+    // Nothing is read (a body can be big) before we know who is asking: only the account and
+    // setup requests come before sign-in, with small bodies.
+    let early = before_sign_in(&p);
+    if !early && !signed_in(&app, &headers) {
+        return error(401, "please sign in");
+    }
+    let body: Bytes = if !early && takes_a_file(&m, &p) {
+        let Ok(_turn) = BIG_AT_ONCE.acquire().await else { return error(503, "server busy") };
+        match read_body(body, &headers, MAX_BYTES, BIG_WAIT).await {
+            Ok(b) => b,
+            Err(resp) => return resp,
+        }
+    } else {
+        match read_body(body, &headers, SMALL_BYTES, SMALL_WAIT).await {
+            Ok(b) => b,
+            Err(resp) => return resp,
+        }
+    };
+    if let Some(resp) = accounts(&app, &m, &p, &q, &headers, &body, ask).await {
         return resp;
     }
     if p.first().map(String::as_str) == Some("storage") && p.len() == 1 && (m == "GET" || m == "POST") {
         let me = current_user(&app, &headers);
-        return storage(&app, &m, me, &body).await;
+        return storage(&app, &m, me, &body, &q, ask).await;
     }
     if !signed_in(&app, &headers) {
         return error(401, "please sign in");
@@ -1131,6 +1319,17 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     }
 }
 
+/// Every route, behind the checks in guard.rs (cross-site requests, host names, how many at
+/// once, safety headers). Bodies are read and limited by handle() itself.
+fn router(app: Shared) -> Router {
+    Router::new()
+        .route("/api/live", axum::routing::get(live::ws))
+        .fallback(handle)
+        .with_state(app)
+        .layer(axum::extract::DefaultBodyLimit::disable())
+        .layer(axum::middleware::from_fn(guard::middleware))
+}
+
 async fn shutdown() {
     let ctrl_c = async {
         let _ = tokio::signal::ctrl_c().await;
@@ -1181,6 +1380,10 @@ async fn main() {
     };
     let port: u16 = env("PORT", "8080").parse().unwrap_or(8080);
     let auth = !matches!(env("STARSHEETS_AUTH", "on").trim().to_lowercase().as_str(), "off" | "false" | "0" | "no");
+    if let Some(why) = auth::given_setup_code().and_then(|c| auth::weak_setup_code(&c)) {
+        eprintln!("{why}");
+        std::process::exit(1);
+    }
     let site = Some(env("SITE", "")).filter(|s| !s.is_empty()).map(PathBuf::from);
     let app = Arc::new(App { store, base, lock: Mutex::new(()), location: env("LOCATION", "the server"), auth, site, rooms: live::Rooms::default() });
     if let Err(e) = std::fs::create_dir_all(app.store.meta()) {
@@ -1191,7 +1394,11 @@ async fn main() {
     if !auth {
         println!("Sign-in is OFF (STARSHEETS_AUTH=off): anyone who can reach this port can read and change every file.");
     } else if !auth::any_users(&app.store) {
-        println!("No accounts yet. Open StarSheets and create the owner account with this setup code: {}", auth::setup_code(&app.store));
+        if auth::given_setup_code().is_some() {
+            println!("No accounts yet. Open StarSheets and create the owner account with the setup code set in STARSHEETS_PASSWORD.");
+        } else {
+            println!("No accounts yet. Open StarSheets and create the owner account with this setup code: {}", auth::setup_code(&app.store));
+        }
     } else {
         println!("Sign-in is on ({} accounts).", auth::users(&app.store).len());
         match spaces::migrate(&app.store) {
@@ -1204,11 +1411,7 @@ async fn main() {
         }
     }
     tokio::spawn(backup_schedule(app.clone()));
-    let router = Router::new()
-        .route("/api/live", axum::routing::get(live::ws))
-        .fallback(handle)
-        .with_state(app)
-        .layer(axum::extract::DefaultBodyLimit::disable());
+    let router = router(app);
     let listener = match tokio::net::TcpListener::bind(("0.0.0.0", port)).await {
         Ok(l) => l,
         Err(e) => {
@@ -1216,7 +1419,7 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    if let Err(e) = axum::serve(listener, router).with_graceful_shutdown(shutdown()).await {
+    if let Err(e) = axum::serve(listener, router.into_make_service_with_connect_info::<SocketAddr>()).with_graceful_shutdown(shutdown()).await {
         eprintln!("server stopped: {e}");
     }
 }
@@ -1224,46 +1427,201 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower::ServiceExt;
 
-    async fn send(app: &Shared, method: Method, uri: &str, headers: HeaderMap, body: Vec<u8>) -> (u16, HeaderMap, Vec<u8>) {
-        let r = handle(State(app.clone()), method, uri.parse().unwrap(), headers, Body::from(body)).await;
-        let (parts, body) = r.into_parts();
-        (parts.status.as_u16(), parts.headers, axum::body::to_bytes(body, usize::MAX).await.unwrap().to_vec())
+    fn app(auth: bool) -> Shared {
+        let dir = std::env::temp_dir().join(format!("starsheets-main-{}", store::random_hex(6)));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store = Store { root: dir.clone(), keep: 3, spaces: auth };
+        std::fs::create_dir_all(store.meta()).unwrap();
+        Arc::new(App { store, base: dir, lock: Mutex::new(()), location: "here".into(), auth, site: None, rooms: live::Rooms::default() })
+    }
+
+    /// A made-up address per call site, so the try limits of one test don't touch another's.
+    fn address() -> String {
+        let r = store::random_hex(3);
+        let b = |i: usize| u8::from_str_radix(&r[i..i + 2], 16).unwrap();
+        format!("10.{}.{}.{}", b(0), b(2), b(4))
+    }
+
+    struct Got {
+        status: u16,
+        headers: HeaderMap,
+        json: Value,
+        bytes: Vec<u8>,
+    }
+
+    async fn send(app: &Shared, ip: &str, method: &str, uri: &str, cookie: &str, extra: &[(&str, &str)], body: Vec<u8>) -> Got {
+        let mut b = axum::http::Request::builder().method(method).uri(uri).header(header::HOST, "192.168.1.5:8080");
+        if !cookie.is_empty() {
+            b = b.header(header::COOKIE, cookie);
+        }
+        for (k, v) in extra {
+            b = b.header(*k, *v);
+        }
+        let mut req = b.body(Body::from(body)).unwrap();
+        req.extensions_mut().insert(axum::extract::ConnectInfo(SocketAddr::new(ip.parse().unwrap(), 50000)));
+        let resp = router(app.clone()).oneshot(req).await.unwrap();
+        let status = resp.status().as_u16();
+        let headers = resp.headers().clone();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        Got { status, headers, json: serde_json::from_slice(&bytes).unwrap_or(Value::Null), bytes: bytes.to_vec() }
+    }
+
+    async fn post(app: &Shared, ip: &str, uri: &str, cookie: &str, v: Value) -> Got {
+        send(app, ip, "POST", uri, cookie, &[], serde_json::to_vec(&v).unwrap()).await
+    }
+
+    fn cookie_of(g: &Got) -> String {
+        g.headers.get(header::SET_COOKIE).and_then(|v| v.to_str().ok()).unwrap_or("").split(';').next().unwrap_or("").to_string()
+    }
+
+    /// A server with its owner ("boss"), signed in: (app, address, owner's cookie).
+    async fn owned() -> (Shared, String, String) {
+        let app = app(true);
+        let ip = address();
+        let code = auth::setup_code(&app.store);
+        let g = post(&app, &ip, "/api/setup", "", json!({"code": code, "username": "boss", "name": "Boss", "password": "bosspassword"})).await;
+        assert_eq!(g.status, 200, "{:?}", g.json);
+        (app, ip, cookie_of(&g))
+    }
+
+    #[tokio::test]
+    async fn setup_needs_the_code_and_storage_does_too() {
+        let app = app(true);
+        let ip = address();
+        // Storage while setting up: no folders, nothing moves, without the code.
+        std::fs::create_dir_all(app.base.join("Elsewhere")).unwrap();
+        let g = send(&app, &ip, "GET", "/api/storage", "", &[], vec![]).await;
+        assert_eq!((g.status, g.json["locked"].as_bool(), g.json["folders"].as_array().map(Vec::len)), (200, Some(true), Some(0)));
+        let g = post(&app, &ip, "/api/storage", "", json!({"folder": "Elsewhere", "mode": "move"})).await;
+        assert_eq!(g.status, 401);
+        let code = auth::setup_code(&app.store);
+        let g = send(&app, &ip, "GET", &format!("/api/storage?code={code}"), "", &[], vec![]).await;
+        assert_eq!(g.json["folders"], json!(["Elsewhere"]), "with the code: the folders");
+        // Setup.
+        let g = post(&app, &ip, "/api/setup", "", json!({"code": "wrong-code-here", "username": "boss", "name": "Boss", "password": "bosspassword"}))
+            .await;
+        assert_eq!(g.status, 401);
+        let long = "x".repeat(auth::MAX_PASSWORD + 1);
+        let g = post(&app, &ip, "/api/setup", "", json!({"code": code, "username": "boss", "name": "Boss", "password": long})).await;
+        assert_eq!(g.status, 400, "a password over 1 KiB");
+        let g = post(&app, &ip, "/api/setup", "", json!({"code": code, "username": "boss", "name": "Boss", "password": "bosspassword"})).await;
+        assert_eq!(g.status, 200);
+        let set = g.headers.get(header::SET_COOKIE).unwrap().to_str().unwrap().to_string();
+        assert!(set.contains("HttpOnly") && !set.contains("Secure"), "plain HTTP on a home network keeps working: {set}");
+        // Now only the owner chooses where files are kept.
+        assert_eq!(send(&app, &ip, "GET", &format!("/api/storage?code={code}"), "", &[], vec![]).await.status, 403);
+        let g = send(&app, &ip, "GET", "/api/storage", &cookie_of(&g), &[], vec![]).await;
+        assert_eq!((g.status, g.json.get("locked")), (200, None));
+    }
+
+    #[tokio::test]
+    async fn too_many_wrong_passwords() {
+        let (app, _, _) = owned().await;
+        for i in 0..10 {
+            let g = post(&app, &address(), "/api/login", "", json!({"username": "boss", "password": format!("wrong {i}")})).await;
+            assert_eq!(g.status, 401);
+        }
+        let g = post(&app, &address(), "/api/login", "", json!({"username": "boss", "password": "bosspassword"})).await;
+        assert_eq!(g.status, 429, "the username is resting, from any address");
+        // Unknown usernames answer just like wrong passwords.
+        let g = post(&app, &address(), "/api/login", "", json!({"username": "nobody", "password": "bosspassword"})).await;
+        assert_eq!((g.status, g.json["error"].as_str()), (401, Some("That username or password isn't right.")));
+        // One address can't try endlessly either.
+        let ip = address();
+        let mut statuses = Vec::new();
+        for i in 0..21 {
+            statuses.push(post(&app, &ip, "/api/login", "", json!({"username": format!("someone{i}"), "password": "whatever1"})).await.status);
+        }
+        assert!(statuses.iter().take(20).all(|s| *s == 401) && statuses[20] == 429, "{statuses:?}");
+    }
+
+    #[tokio::test]
+    async fn sign_up_is_limited_per_address() {
+        let (app, ip, boss) = owned().await;
+        assert_eq!(post(&app, &ip, "/api/signup/settings", &boss, json!({"on": true})).await.status, 200);
+        let other = address();
+        for i in 0..5 {
+            let g = post(&app, &other, "/api/signup", "", json!({"username": format!("new{i}"), "name": "N", "password": "longenough"})).await;
+            assert_eq!(g.status, 200, "{:?}", g.json);
+        }
+        let g = post(&app, &other, "/api/signup", "", json!({"username": "new9", "name": "N", "password": "longenough"})).await;
+        assert_eq!(g.status, 429);
+    }
+
+    #[tokio::test]
+    async fn nothing_is_read_before_sign_in() {
+        let (app, ip, boss) = owned().await;
+        let big = vec![b'x'; 2 * 1024 * 1024];
+        // Signed out: refused before the body is read, whatever its size.
+        assert_eq!(send(&app, &ip, "PUT", "/api/files/abc", "", &[], big.clone()).await.status, 401);
+        // Small requests: at most 1 MiB.
+        assert_eq!(send(&app, &ip, "POST", "/api/login", "", &[], big.clone()).await.status, 413);
+        assert_eq!(send(&app, &ip, "POST", "/api/folders?name=A", &boss, &[], big.clone()).await.status, 413);
+        // A file: big is fine once signed in.
+        let g = send(&app, &ip, "POST", "/api/files?name=Big.csv", &boss, &[], big).await;
+        assert_eq!(g.status, 201, "{:?}", g.json);
+        // Downloads are attachments; every answer has the safety headers.
+        let g = send(&app, &ip, "GET", &format!("/api/files/{}", g.json["id"].as_str().unwrap()), &boss, &[], vec![]).await;
+        assert_eq!(g.headers.get(header::CONTENT_DISPOSITION).unwrap(), "attachment");
+        assert_eq!(g.headers.get(header::X_FRAME_OPTIONS).unwrap(), "DENY");
+        assert_eq!(g.headers.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
+        assert!(g.headers.get(header::CONTENT_SECURITY_POLICY).unwrap().to_str().unwrap().contains("frame-ancestors 'none'"));
+        assert_eq!(g.headers.get(header::REFERRER_POLICY).unwrap(), "same-origin");
+    }
+
+    #[tokio::test]
+    async fn other_sites_cant_send_requests() {
+        let (app, ip, boss) = owned().await;
+        let evil = [("origin", "https://evil.example")];
+        let same = [("origin", "http://192.168.1.5:8080")];
+        assert_eq!(send(&app, &ip, "POST", "/api/folders?name=A", &boss, &evil, vec![]).await.status, 403);
+        assert_eq!(send(&app, &ip, "GET", "/api/live", &boss, &evil, vec![]).await.status, 403, "the live WebSocket");
+        assert_eq!(send(&app, &ip, "POST", "/api/folders?name=A", &boss, &same, vec![]).await.status, 201);
+        // StarDocs: a plain same-origin PUT of the file's bytes, no special headers.
+        let g = send(&app, &ip, "POST", "/api/files?name=Doc.docx", &boss, &same, b"one".to_vec()).await;
+        let id = g.json["id"].as_str().unwrap().to_string();
+        let put = [("origin", "http://192.168.1.5:8080"), ("content-type", "application/octet-stream")];
+        assert_eq!(send(&app, &ip, "PUT", &format!("/api/files/{id}"), &boss, &put, b"two".to_vec()).await.status, 200);
+    }
+
+    #[tokio::test]
+    async fn removing_someone_moves_their_folder_to_the_owner() {
+        let (app, ip, boss) = owned().await;
+        assert_eq!(post(&app, &ip, "/api/users", &boss, json!({"username": "ann", "name": "Ann", "password": "annpassword"})).await.status, 200);
+        std::fs::write(app.store.full("ann/Notes.csv"), "a,b").unwrap();
+        let g = send(&app, &ip, "DELETE", "/api/users?username=ann", &boss, &[], vec![]).await;
+        assert_eq!((g.status, g.json["folder"].as_str()), (200, Some("boss/Removed – ann")));
+        assert!(app.store.full("boss/Removed – ann/Notes.csv").is_file());
+        assert_eq!(post(&app, &ip, "/api/users", &boss, json!({"username": "ann", "name": "Ann 2", "password": "annpassword"})).await.status, 200);
+        let g = post(&app, &ip, "/api/login", "", json!({"username": "ann", "password": "annpassword"})).await;
+        let files = send(&app, &ip, "GET", "/api/files", &cookie_of(&g), &[], vec![]).await;
+        assert_eq!(files.json["files"], json!([]), "the new ann starts empty");
     }
 
     /// StarDocs sends a picture of a document; the home screen gets it back until the file changes.
     #[tokio::test]
     async fn documents_picture_round_trip() {
-        let dir = std::env::temp_dir().join(format!("starsheets-main-{}", store::random_hex(6)));
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("Letter.docx"), b"doc").unwrap();
-        let store = Store { root: dir.clone(), keep: 3, spaces: false };
-        let id = store.synced_index().unwrap().keys().next().unwrap().clone();
-        let app: Shared = Arc::new(App {
-            store,
-            base: dir.clone(),
-            lock: Mutex::new(()),
-            location: String::new(),
-            auth: false,
-            site: None,
-            rooms: live::Rooms::default(),
-        });
+        let app = app(false);
+        std::fs::write(app.store.root.join("Letter.docx"), b"doc").unwrap();
+        let id = app.store.synced_index().unwrap().keys().next().unwrap().clone();
         let full = app.store.full("Letter.docx");
         let v = app.store.version_of(&full).unwrap();
+        let ip = address();
         let url = format!("/api/files/{id}/thumb");
-        assert_eq!(send(&app, Method::GET, &url, HeaderMap::new(), vec![]).await.0, 404, "no picture yet");
+        assert_eq!(send(&app, &ip, "GET", &url, "", &[], vec![]).await.status, 404, "no picture yet");
         let pic = tiny_skia::Pixmap::new(thumbs::WIDTH, thumbs::HEIGHT).unwrap().encode_png().unwrap();
-        assert_eq!(send(&app, Method::PUT, &format!("{url}?version=0-0"), HeaderMap::new(), pic.clone()).await.0, 409);
-        let (code, _, body) = send(&app, Method::PUT, &format!("{url}?version={v}"), HeaderMap::new(), pic.clone()).await;
-        assert_eq!((code, serde_json::from_slice::<Value>(&body).unwrap()), (200, json!({"ok": true})));
-        let (code, headers, body) = send(&app, Method::GET, &url, HeaderMap::new(), vec![]).await;
-        assert_eq!((code, body), (200, pic));
-        let mut again = HeaderMap::new();
-        again.insert(header::IF_NONE_MATCH, headers[header::ETAG].clone());
-        assert_eq!(send(&app, Method::GET, &url, again, vec![]).await.0, 304);
+        assert_eq!(send(&app, &ip, "PUT", &format!("{url}?version=0-0"), "", &[], pic.clone()).await.status, 409);
+        let g = send(&app, &ip, "PUT", &format!("{url}?version={v}"), "", &[], pic.clone()).await;
+        assert_eq!((g.status, g.json), (200, json!({"ok": true})));
+        let g = send(&app, &ip, "GET", &url, "", &[], vec![]).await;
+        assert_eq!((g.status, &g.bytes), (200, &pic));
+        let etag = g.headers[header::ETAG].to_str().unwrap().to_string();
+        assert_eq!(send(&app, &ip, "GET", &url, "", &[("if-none-match", &etag)], vec![]).await.status, 304);
         // Saved again (StarDocs hasn't sent the new picture yet): the old one isn't shown.
         std::fs::write(&full, b"a longer document").unwrap();
-        assert_eq!(send(&app, Method::GET, &url, HeaderMap::new(), vec![]).await.0, 404);
-        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(send(&app, &ip, "GET", &url, "", &[], vec![]).await.status, 404);
+        let _ = std::fs::remove_dir_all(&app.store.root);
     }
 }

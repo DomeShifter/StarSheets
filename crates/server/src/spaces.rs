@@ -112,6 +112,35 @@ pub fn migrate(store: &Store) -> io::Result<usize> {
     Ok(moved)
 }
 
+/// After `username`'s account is removed: their folder goes into the server owner's folder as
+/// "Removed – <username>" (nothing is lost, and the owner decides what to keep), they are taken
+/// off every share, and their stars and recent list go. A new account with the same name then
+/// starts empty. Returns where the folder went.
+pub fn retire(store: &Store, username: &str) -> io::Result<Option<String>> {
+    sharing::forget_person(store, username)?;
+    let _ = fs::remove_file(prefs_path(store, username));
+    let owner = sharing::server_owner(store);
+    if !store.spaces || username.is_empty() || owner.is_empty() || owner == username || !store.full(username).is_dir() {
+        return Ok(None);
+    }
+    // Ids first, so the files and folders keep theirs (versions, and shares they gave, stay).
+    store.synced_index()?;
+    store.synced_folders()?;
+    let name = free_name(store, &owner, &format!("Removed – {username}"), true)?;
+    let to = join(&owner, &name);
+    fs::rename(store.full(username), store.full(&to))?;
+    rewrite_paths(store, &[(username.to_string(), to.clone())])?;
+    // Their bin went along inside the folder; the bin list forgets it.
+    let bin_index = store.meta().join("bin.json");
+    let mut bins = store.load_json(&bin_index);
+    let before = bins.len();
+    bins.retain(|k, _| !k.starts_with(&format!("{username}/")));
+    if bins.len() != before {
+        store.save_json(&bin_index, &Value::Object(bins))?;
+    }
+    Ok(Some(to))
+}
+
 fn free_name(store: &Store, space: &str, name: &str, is_dir: bool) -> io::Result<String> {
     let (stem, ext) = if is_dir { (name.to_string(), String::new()) } else { split_ext(name) };
     for n in 1..10000 {
@@ -296,6 +325,49 @@ mod tests {
         assert_eq!(sharing::file_role(&s, true, Some(&ann), &plan), Role::Edit);
         assert_eq!(sharing::file_role(&s, true, Some(&ann), &anns), Role::Owner);
         assert_eq!(sharing::file_role(&s, true, Some(&ann), &budget), Role::None);
+        let _ = fs::remove_dir_all(&s.root);
+    }
+
+    #[test]
+    fn a_removed_account_leaves_nothing_to_a_new_one_of_the_same_name() {
+        let s = store();
+        auth::add(&s, "boss", "Boss", "bosspassword").unwrap();
+        auth::add(&s, "ann", "Ann", "annpassword").unwrap();
+        let bob = auth::add(&s, "bob", "Bob", "bobpassword").unwrap();
+        migrate(&s).unwrap();
+        fs::create_dir_all(s.root.join("ann/Team")).unwrap();
+        fs::write(s.root.join("ann/Team/Plan.xlsx"), "p").unwrap();
+        fs::create_dir_all(s.root.join("boss/Shared")).unwrap();
+        fs::write(s.root.join("boss/Shared/Q1.xlsx"), "q").unwrap();
+        fs::create_dir_all(s.root.join("boss/Removed – bob")).unwrap(); // the name is taken
+        let index = s.synced_index().unwrap();
+        let id = |p: &str| index.iter().find(|(_, v)| *v == p).unwrap().0.clone();
+        let (plan, q1) = (id("ann/Team/Plan.xlsx"), id("boss/Shared/Q1.xlsx"));
+        let folders = s.synced_folders().unwrap();
+        let shared = folders.iter().find(|(_, p)| *p == "boss/Shared").unwrap().0.clone();
+        sharing::update(&s, Item::File(&q1), "boss/Shared/Q1.xlsx", &json!({"people": {"bob": "edit", "ann": "view"}})).unwrap();
+        sharing::update(&s, Item::Folder(&shared), "boss/Shared", &json!({"people": {"bob": "view"}})).unwrap();
+        set_star(&s, &bob, "f:x", true).unwrap();
+
+        auth::remove(&s, "bob").unwrap();
+        assert_eq!(retire(&s, "bob").unwrap().as_deref(), Some("boss/Removed – bob (2)"), "a free name");
+        assert!(sharing::get(&s, Item::File(&q1)).people == vec![("ann".to_string(), Role::View)], "taken off shares, others kept");
+        assert!(sharing::get(&s, Item::Folder(&shared)).people.is_empty());
+        let bob2 = auth::add(&s, "bob", "New Bob", "bobpassword2").unwrap();
+        assert_eq!(sharing::file_role(&s, true, Some(&bob2), &q1), Role::None, "a new bob gets nothing of the old one's");
+        assert!(starred(&s, &bob2).is_empty());
+
+        auth::remove(&s, "ann").unwrap();
+        assert_eq!(retire(&s, "ann").unwrap().as_deref(), Some("boss/Removed – ann"));
+        assert!(!s.root.join("ann").exists() && s.root.join("boss/Removed – ann/Team/Plan.xlsx").is_file());
+        assert_eq!(s.synced_index().unwrap()[&plan], "boss/Removed – ann/Team/Plan.xlsx", "the id goes with it");
+        let ann2 = auth::add(&s, "ann", "New Ann", "annpassword2").unwrap();
+        ensure_space(&s, "ann").unwrap();
+        assert_eq!(sharing::file_role(&s, true, Some(&ann2), &plan), Role::None);
+        // A second removal of the same name gets its own folder.
+        fs::write(s.root.join("ann/New.xlsx"), "n").unwrap();
+        auth::remove(&s, "ann").unwrap();
+        assert_eq!(retire(&s, "ann").unwrap().as_deref(), Some("boss/Removed – ann (2)"));
         let _ = fs::remove_dir_all(&s.root);
     }
 

@@ -49,7 +49,7 @@ class Server:
     def __init__(self, cmd, store, site, auth):
         self.port = free_port()
         env = dict(os.environ, STORE=store, PORT=str(self.port), KEEP="2", LOCATION="the test", SITE=site,
-                   STARSHEETS_AUTH="on" if auth else "off", STARSHEETS_PASSWORD="pw")
+                   STARSHEETS_AUTH="on" if auth else "off", STARSHEETS_PASSWORD="parity-setup-code")
         self.proc = subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         self.cookie = ""
         for _ in range(100):
@@ -273,10 +273,10 @@ def accounts():
         got.append(("new server asks for setup", info["setup"] and not info["signed_in"]))
         got.append(("files need sign-in", s.call("GET", "/api/files")[0] == 401))
         got.append(("wrong setup code", post("/api/setup", {"code": "nope", "username": "owner", "name": "O", "password": "longpassword"})[0] == 401))
-        got.append(("setup", post("/api/setup", {"code": "pw", "username": "Owner", "name": "The Owner", "password": "longpassword"})[0] == 200))
+        got.append(("setup", post("/api/setup", {"code": "parity-setup-code", "username": "Owner", "name": "The Owner", "password": "longpassword"})[0] == 200))
         info = json.loads(s.call("GET", "/api/info")[2])
         got.append(("signed in as owner", info["user"]["username"] == "owner" and info["user"]["owner"] and not info["setup"]))
-        got.append(("second setup refused", post("/api/setup", {"code": "pw", "username": "x2", "name": "X", "password": "longpassword"})[0] == 400))
+        got.append(("second setup refused", post("/api/setup", {"code": "parity-setup-code", "username": "x2", "name": "X", "password": "longpassword"})[0] == 400))
         got.append(("owner adds a person", post("/api/users", {"username": "bob", "name": "Bob", "password": "bobspassword"})[0] == 200))
         got.append(("files open", s.call("GET", "/api/files")[0] == 200))
         s.call("POST", "/api/logout")

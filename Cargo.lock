@@ -5288,6 +5288,7 @@ dependencies = [
  "starsheets-sync",
  "tiny-skia",
  "tokio",
+ "tower",
 ]
 
 [[package]]

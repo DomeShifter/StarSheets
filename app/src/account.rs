@@ -191,6 +191,9 @@ pub struct Account {
     storage: Option<Json>,
     storage_pick: Option<String>,
     storage_use: bool,
+    /// First-time setup: the setup code the folder list was last asked for with (the server
+    /// lists folders only to someone with the code).
+    storage_code: String,
     restarting: Option<f64>,
     polled: f64,
     /// Backups (owner): what the server said, the backups kept (None = loading, or not set up),
@@ -817,6 +820,13 @@ impl Account {
             house::label(ui, "Setup code", "");
             let r = Self::field(ui, &mut self.code, "From the server's log", false);
             self.first(&r);
+            // With the code typed, ask again for the folders files could be kept in.
+            let code = self.code.trim().to_string();
+            if code.len() >= 10 && code != self.storage_code {
+                self.storage_code = code.clone();
+                let url = format!("api/storage?code={}", crate::files::enc(&code));
+                call(&self.inbox, ctx, Method::Get, &url, None, Reply::Storage);
+            }
             house::gap(ui);
             house::label(ui, "Your name", "What other people see next to your cursor.");
             Self::field(ui, &mut self.name, "Name", false);
