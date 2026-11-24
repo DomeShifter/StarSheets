@@ -83,7 +83,8 @@ spreadsheets are kept as `.xlsx` files in the `starsheets` volume. There's a rea
   as it happens, with each other's cursors.
 - On a private network you trust, `STARSHEETS_AUTH=off` turns sign-in off (everyone is a guest).
 - Copy and paste work best over HTTPS (browsers limit the clipboard on plain `http://`), so a
-  reverse proxy with a certificate is a good idea if you use it from other machines.
+  reverse proxy with a certificate is a good idea if you use it from other machines. Behind a
+  proxy, or reachable from the internet, see the security settings in [docs/deploy.md](docs/deploy.md).
 
 ## Build it yourself
 
