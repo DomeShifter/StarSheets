@@ -7,6 +7,8 @@ services:
       - "8080:8080"
     volumes:
       - ./spreadsheets:/data
+      # Backups (avatar › Backups…): best on another disk or share than the files themselves.
+      # - /mnt/backup-disk/starbase:/backups
     environment:
       # The first visit makes the owner's account with a setup code: this one, or (without it) a
       # code printed in the log on first start. Other people get accounts from the owner.

@@ -11,6 +11,7 @@
 #![allow(clippy::result_large_err)]
 
 mod auth;
+mod backup;
 mod live;
 mod log;
 mod sharing;
@@ -652,6 +653,134 @@ async fn storage(app: &Shared, m: &str, me: Option<auth::User>, body: &[u8]) -> 
     }
 }
 
+// ---------------------------------------------------------------- backups
+
+/// /api/backup… (the owner only; anyone with sign-in off): scheduled, encrypted backups in
+/// restic's format (see backup.rs).
+/// GET backup: settings and how the last one went. GET backup/key: the recovery key.
+/// GET backup/list: the backups kept. POST backup {to, on, hour, key?}: choose the folder (an empty
+/// one is set up; one with backups in it opens with the key given, or this server's key).
+/// POST backup/run: one now. POST backup/restore {id}: copies the asker's own folder (everything,
+/// with sign-in off) out of backup ID into a new folder "Restored from backup <when>" beside it.
+async fn backup_api(app: &Shared, m: &str, p: &[String], me: Option<auth::User>, body: &[u8]) -> Response<Body> {
+    if app.auth && !me.as_ref().is_some_and(|u| u.owner) {
+        return error(403, "Only the owner of this server can look after backups.");
+    }
+    let base = app.base.clone();
+    let json: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let what = p.get(1).map(String::as_str).unwrap_or("");
+    let work = {
+        let app = app.clone();
+        let m = m.to_string();
+        let what = what.to_string();
+        move || -> Result<Value, (u16, String)> {
+            let bad = |e: String| (400u16, e);
+            match (m.as_str(), what.as_str()) {
+                ("GET", "") => {
+                    let s = backup::load(&base);
+                    let suggest = ["/backups", "/backup"].into_iter().find(|d| Path::new(d).is_dir()).unwrap_or("");
+                    Ok(json!({
+                        "set_up": s.get("to").and_then(Value::as_str).is_some_and(|t| !t.is_empty()),
+                        "on": s.get("on").and_then(Value::as_bool).unwrap_or(false),
+                        "to": s.get("to").cloned().unwrap_or(json!("")),
+                        "hour": s.get("hour").and_then(Value::as_i64).unwrap_or(3),
+                        "timezone": jiff::Zoned::now().time_zone().iana_name().unwrap_or("UTC"),
+                        "running": backup::running(),
+                        "last": s.get("last").cloned().unwrap_or(Value::Null),
+                        "last_ok": s.get("last_ok").cloned().unwrap_or(Value::Null),
+                        "suggest": suggest,
+                    }))
+                }
+                ("GET", "key") => Ok(json!({ "key": backup::load(&base).get("key").cloned().unwrap_or(Value::Null) })),
+                ("GET", "list") => backup::list(&base).map(|l| json!(l)).map_err(bad),
+                ("POST", "") => {
+                    let to = json.get("to").and_then(Value::as_str).unwrap_or("").trim().trim_end_matches('/').to_string();
+                    let s = backup::load(&base);
+                    let mut key = s.get("key").and_then(Value::as_str).map(str::to_string);
+                    let given = json.get("key").and_then(Value::as_str).map(backup::clean_key).filter(|k| !k.is_empty());
+                    if given.is_some() {
+                        key = given;
+                    }
+                    let key = key.unwrap_or_else(backup::new_key);
+                    let hour = json.get("hour").and_then(Value::as_i64).unwrap_or(3).clamp(0, 23);
+                    let on = json.get("on").and_then(Value::as_bool).unwrap_or(true);
+                    let mut said = "saved";
+                    if s.get("to").and_then(Value::as_str) != Some(to.as_str()) || s.get("key").and_then(Value::as_str) != Some(key.as_str()) {
+                        if to.is_empty() {
+                            return Err(bad("Choose a folder for the backups.".into()));
+                        }
+                        said = backup::prepare(&to, &key).map_err(bad)?;
+                    }
+                    backup::update(&base, |s| {
+                        s.insert("to".into(), json!(to));
+                        s.insert("key".into(), json!(key));
+                        s.insert("hour".into(), json!(hour));
+                        s.insert("on".into(), json!(on));
+                    })
+                    .map_err(|e| (500, e.to_string()))?;
+                    log::note(&app.store, &format!("backups: {said} in {to}, daily at {hour}:00, {}", if on { "on" } else { "off" }));
+                    Ok(json!({ "ok": true, "result": said }))
+                }
+                ("POST", "run") => {
+                    if backup::running() {
+                        return Err(bad("A backup is running already.".into()));
+                    }
+                    let app2 = app.clone();
+                    std::thread::spawn(move || {
+                        let r = backup::run(&app2.base, &app2.store.root, "now");
+                        log::note(&app2.store, &format!("backup (asked for): {}", r.unwrap_or_else(|e| format!("FAILED: {e}"))));
+                    });
+                    Ok(json!({ "ok": true, "running": true }))
+                }
+                ("POST", "restore") => {
+                    let id = json.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+                    let list = backup::list(&base).map_err(bad)?;
+                    let Some(snap) = list.iter().find(|s| s["id"].as_str() == Some(id.as_str())) else {
+                        return Err(bad("That backup isn't there any more.".into()));
+                    };
+                    // Into the asker's own folder (sign-in on: only their own files come back).
+                    let space = me.as_ref().map(|u| u.username.clone()).unwrap_or_default();
+                    let stem = format!("Restored from backup {}", snap["label"].as_str().unwrap_or(""));
+                    let mut name = stem.clone();
+                    let mut n = 2;
+                    while app.store.full(&store::join(&space, &name)).exists() {
+                        name = format!("{stem} ({n})");
+                        n += 1;
+                    }
+                    let rel = store::join(&space, &name);
+                    let files = backup::restore(&base, &id, &space, &app.store.full(&rel)).map_err(bad)?;
+                    log::note(&app.store, &format!("backup {}: restored {files} files into {rel:?}", snap["short"].as_str().unwrap_or("")));
+                    Ok(json!({ "ok": true, "folder": name, "files": files }))
+                }
+                _ => Err((404, "not found".into())),
+            }
+        }
+    };
+    // Backups can be slow (a big NAS folder): off the async threads, and not under the store lock.
+    match tokio::task::spawn_blocking(work).await {
+        Ok(Ok(v)) => send_json(&v, 200),
+        Ok(Err((code, why))) => error(code, &why),
+        Err(_) => error(500, "server error"),
+    }
+}
+
+/// Checks once a minute whether a scheduled backup is due (backup::due) and makes it.
+async fn backup_schedule(app: Shared) {
+    let mut tick = tokio::time::interval(Duration::from_secs(60));
+    loop {
+        tick.tick().await;
+        let app2 = app.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if backup::running() || !backup::due(&backup::load(&app2.base), &jiff::Zoned::now()) {
+                return;
+            }
+            let r = backup::run(&app2.base, &app2.store.root, "daily");
+            log::note(&app2.store, &format!("backup (daily): {}", r.unwrap_or_else(|e| format!("FAILED: {e}"))));
+        })
+        .await;
+    }
+}
+
 /// POST /api/files/ID/add-sheets: copies the sheets of the spreadsheet in the body (?name= gives
 /// its type) to the end of file ID, through its live room. Needs edit rights on ID.
 async fn add_sheets(app: &Shared, me: Option<auth::User>, file: String, q: &HashMap<String, String>, body: Bytes) -> Response<Body> {
@@ -904,6 +1033,9 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
         return error(401, "please sign in");
     }
     let me = current_user(&app, &headers);
+    if p.first().map(String::as_str) == Some("backup") && p.len() <= 2 {
+        return backup_api(&app, &m, &p, me, &body).await;
+    }
     if m == "POST" && p.len() == 3 && p[0] == "files" && p[2] == "add-sheets" {
         return add_sheets(&app, me, p[1].clone(), &q, body).await;
     }
@@ -1046,6 +1178,7 @@ async fn main() {
             }
         }
     }
+    tokio::spawn(backup_schedule(app.clone()));
     let router = Router::new()
         .route("/api/live", axum::routing::get(live::ws))
         .fallback(handle)

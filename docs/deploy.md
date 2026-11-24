@@ -23,6 +23,19 @@ to `/data/.starsheets-root` and **restarts itself**, so run the container with a
 (`--restart unless-stopped`, as in the README and `docker/compose.yml`). To offer more folders,
 mount a bigger folder as `/data`.
 
+**Backups.** Mount a second disk or share as `/backups` (for example
+`- /mnt/usb-disk/starbase-backups:/backups` in compose), then the owner chooses avatar › Backups…
+and sets it up. Once a day, at the hour chosen, the server copies every file, version, bin and
+account there, encrypted with a recovery key. It keeps the last 7 days, 4 weeks and 12 months.
+The settings and the key are kept in `/data/.starsheets-backup.json`. **Keep a copy of the key
+somewhere else**, because the backups can't be opened without it. Restore (in the same dialog)
+copies your own files from a backup into a new folder, so nothing is overwritten.
+
+The backups are a [restic](https://restic.net) repository, so if the server itself is lost, any
+restic or rustic program can get everything back, with the recovery key as the password:
+`restic -r /path/to/backups restore latest --target /somewhere` gives a folder `starbase` holding
+the whole files folder (accounts and versions too). Point a new server's `/data` at it.
+
 ## By hand
 
 - The app is a static site (`dist/` from `trunk build --release`). Serve WebAssembly as

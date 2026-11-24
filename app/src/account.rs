@@ -83,6 +83,9 @@ pub fn me_ui(ui: &mut Ui) {
         if me.owner && house::menu_row(ui, Some("folder"), "Where files are kept…", "", true) {
             ask(ui, "storage");
         }
+        if me.owner && house::menu_row(ui, Some("history"), "Backups…", "", true) {
+            ask(ui, "backups");
+        }
         if me.owner && house::menu_row(ui, Some("group"), "People…", "", true) {
             ask(ui, "people");
         }
@@ -131,6 +134,13 @@ enum Reply {
     SetUp,
     /// The server is restarting in its new folder: wait for it, then start the page again.
     Restarting,
+    /// Backup settings and how the last one went (GET /api/backup).
+    Backup(Json),
+    /// The backups kept (GET /api/backup/list).
+    BackupList(Vec<Json>),
+    BackupKey(String),
+    /// Settings saved, a backup started or a restore done: say so and look again.
+    BackupDone(String),
 }
 
 #[derive(Default, PartialEq)]
@@ -144,6 +154,7 @@ enum Dialog {
     Password,
     People,
     Storage,
+    Backups,
 }
 
 #[derive(Default)]
@@ -182,6 +193,19 @@ pub struct Account {
     storage_use: bool,
     restarting: Option<f64>,
     polled: f64,
+    /// Backups (owner): what the server said, the backups kept (None = loading, or not set up),
+    /// the form (folder, daily on/off, hour), the recovery key when shown, a key typed to use
+    /// backups made before, and the backup a "Restore" was clicked on once.
+    backup: Option<Json>,
+    backup_list: Option<Vec<Json>>,
+    backup_to: String,
+    backup_on: bool,
+    backup_hour: usize,
+    backup_key: Option<String>,
+    backup_old_key: String,
+    backup_has_old: bool,
+    backup_armed: Option<String>,
+    backup_polled: f64,
 }
 
 fn me_from(v: &Json) -> Option<Me> {
@@ -270,6 +294,37 @@ impl Account {
                     }),
                     None => reload(),
                 },
+                Reply::Backup(v) => {
+                    let was_running = self.backup.as_ref().is_some_and(|b| b["running"].as_bool().unwrap_or(false));
+                    let first = self.backup.is_none();
+                    if first {
+                        self.backup_to = v["to"].as_str().filter(|t| !t.is_empty()).or(v["suggest"].as_str()).unwrap_or("").to_string();
+                        self.backup_on = v["on"].as_bool().unwrap_or(true) || !v["set_up"].as_bool().unwrap_or(false);
+                        self.backup_hour = v["hour"].as_u64().unwrap_or(3).min(23) as usize;
+                    }
+                    let set_up = v["set_up"].as_bool().unwrap_or(false);
+                    let finished = was_running && !v["running"].as_bool().unwrap_or(false);
+                    self.backup = Some(v);
+                    if finished {
+                        // The line at the top now says how it went.
+                        self.done = None;
+                    }
+                    if set_up && (first || finished) {
+                        call(&self.inbox, ctx, Method::Get, "api/backup/list", None, |v| {
+                            Reply::BackupList(v.as_array().cloned().unwrap_or_default())
+                        });
+                    }
+                }
+                Reply::BackupList(l) => self.backup_list = Some(l),
+                Reply::BackupKey(k) => self.backup_key = Some(k),
+                Reply::BackupDone(msg) => {
+                    self.done = Some(msg);
+                    self.error = None;
+                    self.backup_old_key.clear();
+                    self.backup_has_old = false;
+                    call(&self.inbox, ctx, Method::Get, "api/backup", None, Reply::Backup);
+                    call(&self.inbox, ctx, Method::Get, "api/backup/list", None, |v| Reply::BackupList(v.as_array().cloned().unwrap_or_default()));
+                }
                 Reply::Restarting => {
                     self.dialog = Dialog::None;
                     self.restarting = Some(ctx.input(|i| i.time));
@@ -298,6 +353,14 @@ impl Account {
                 "storage" => {
                     self.open(Dialog::Storage);
                     self.load_storage(ctx);
+                }
+                "backups" => {
+                    self.open(Dialog::Backups);
+                    self.backup = None;
+                    self.backup_list = None;
+                    self.backup_key = None;
+                    self.backup_armed = None;
+                    call(&self.inbox, ctx, Method::Get, "api/backup", None, Reply::Backup);
                 }
                 "people" => {
                     self.open(Dialog::People);
@@ -371,6 +434,7 @@ impl Account {
             Dialog::Password => self.change_password(ctx),
             Dialog::People => self.people(ctx),
             Dialog::Storage => self.storage_ui(ctx),
+            Dialog::Backups => self.backups_ui(ctx),
         }
         self.restarting_ui(ctx);
     }
@@ -469,6 +533,195 @@ impl Account {
             call(&self.inbox, ctx, Method::Post, "api/storage", Some(body), |v| {
                 if v["restarting"].as_bool().unwrap_or(false) { Reply::Restarting } else { Reply::Reload }
             });
+        }
+    }
+
+    /// Backups (owner): where they go, once a day at what hour, the recovery key, how the last
+    /// one went, "Back up now", and the backups kept, each with "Restore" (copies your files from
+    /// then into a new folder; nothing is overwritten). See the server's backup.rs.
+    fn backups_ui(&mut self, ctx: &egui::Context) {
+        let mut close = false;
+        let mut cancel = false;
+        let mut save = false;
+        let mut now = false;
+        let mut restore = None;
+        let mut show_key = false;
+        let Some(v) = self.backup.clone() else {
+            house::dialog(ctx, "starsheets_backups", 560.0, "Backups", Some(&mut close), |ui| {
+                ui.label(RichText::new("Loading…").color(theme::TEXT_DIM));
+                self.messages(ui);
+            });
+            if close || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                self.dialog = Dialog::None;
+            }
+            return;
+        };
+        let set_up = v["set_up"].as_bool().unwrap_or(false);
+        let running = v["running"].as_bool().unwrap_or(false);
+        // While one runs, look again every two seconds.
+        let t = ctx.input(|i| i.time);
+        if running {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            if t - self.backup_polled > 2.0 {
+                self.backup_polled = t;
+                call(&self.inbox, ctx, Method::Get, "api/backup", None, Reply::Backup);
+            }
+        }
+        let (list, key) = (self.backup_list.clone(), self.backup_key.clone());
+        let when = |iso: &str| format!("{} UTC", iso.replace('T', " ").chars().take(16).collect::<String>());
+        house::dialog(ctx, "starsheets_backups", 560.0, "Backups", Some(&mut close), |ui| {
+            house::note(
+                ui,
+                "A copy of every file, version, bin and account, made once a day into a folder you choose: best a disk or NAS share that isn't the one your files are on. Backups are locked with a recovery key.",
+            );
+            house::gap(ui);
+            if set_up {
+                let last = &v["last"];
+                if running {
+                    house::text(ui, "Backing up now…");
+                } else if let Some(w) = last["when"].as_str() {
+                    let ok = last["ok"].as_bool().unwrap_or(false);
+                    let msg = last["message"].as_str().unwrap_or("");
+                    let line = if ok { format!("Last backup: {} · {msg}", when(w)) } else { format!("The last backup failed ({}): {msg}", when(w)) };
+                    ui.label(RichText::new(line).size(house::BODY).color(if ok { house::GREEN } else { house::ERROR }));
+                } else {
+                    house::text(ui, "No backup made yet.");
+                }
+                house::gap(ui);
+            }
+            house::label(
+                ui,
+                "Backup folder",
+                "The whole path, as the server sees it (with Docker: a disk or share mounted into the container, such as /backups). Empty the first time.",
+            );
+            Self::field(ui, &mut self.backup_to, "/backups", false);
+            ui.add_space(house::S);
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.backup_on, "Back up every day at");
+                let hours: Vec<String> = (0..24).map(|h| format!("{h:02}:00")).collect();
+                let labels: Vec<&str> = hours.iter().map(String::as_str).collect();
+                house::select(ui, "backup_hour", 96.0, &mut self.backup_hour, &labels, &[]);
+                house::note(ui, &format!("server time ({})", v["timezone"].as_str().unwrap_or("UTC")));
+            });
+            if !set_up || self.backup_has_old {
+                ui.add_space(house::S);
+                ui.checkbox(&mut self.backup_has_old, "That folder has backups from before: use my recovery key");
+                if self.backup_has_old {
+                    ui.add_space(house::S);
+                    Self::field(ui, &mut self.backup_old_key, "Recovery key (xxxx-xxxx-…)", false);
+                }
+            }
+            if set_up {
+                house::gap(ui);
+                house::label(
+                    ui,
+                    "Recovery key",
+                    "Backups can't be opened without it, and it is kept on this server: if the server is lost, so is the key. Keep a copy somewhere else (a password manager, or printed).",
+                );
+                match &key {
+                    Some(k) => {
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new(k).monospace().size(house::BODY).color(theme::TEXT));
+                            if ui.add(house::link("Copy")).clicked() {
+                                ui.ctx().copy_text(k.clone());
+                                self.done = Some("Recovery key copied.".into());
+                            }
+                            if ui.add(house::link("Download")).clicked() {
+                                let text = format!(
+                                    "Starbase backup recovery key\n\n{k}\n\nBackup folder: {}\nThe backups are a restic repository: restic or rustic can open them with this key as the password.\n",
+                                    self.backup_to
+                                );
+                                if let Err(e) = crate::web::download_file("Starbase backup recovery key.txt", text.as_bytes()) {
+                                    self.error = Some(e);
+                                }
+                            }
+                        });
+                    }
+                    None => {
+                        if ui.add(house::link("Show recovery key")).clicked() {
+                            show_key = true;
+                        }
+                    }
+                }
+                house::gap(ui);
+                house::label(
+                    ui,
+                    "Backups kept",
+                    "The last 7 days, 4 weeks and 12 months. Restore copies your files from then into a new folder; nothing is overwritten.",
+                );
+                match &list {
+                    None => house::note(ui, "Loading…"),
+                    Some(l) if l.is_empty() => house::note(ui, "None yet."),
+                    Some(l) => {
+                        egui::ScrollArea::vertical().max_height(200.0).auto_shrink([false, true]).show(ui, |ui| {
+                            for b in l {
+                                let id = b["id"].as_str().unwrap_or("").to_string();
+                                ui.horizontal(|ui| {
+                                    house::text(ui, &format!("{} UTC", b["label"].as_str().unwrap_or("").replace('.', ":")));
+                                    house::note(ui, &format!("{} files · {}", b["files"].as_u64().unwrap_or(0), b["size"].as_str().unwrap_or("")));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        let armed = self.backup_armed.as_deref() == Some(id.as_str());
+                                        if ui.add(house::link(if armed { "Click again to restore" } else { "Restore" })).clicked() {
+                                            if armed {
+                                                restore = Some(id.clone());
+                                            } else {
+                                                self.backup_armed = Some(id.clone());
+                                            }
+                                        }
+                                    });
+                                });
+                            }
+                        });
+                    }
+                }
+            }
+            self.messages(ui);
+            let labels: &[&str] = if set_up { &["Close", "Back up now", "Save"] } else { &["Cancel", "Set up backups"] };
+            match house::actions(ui, labels) {
+                Some(0) => cancel = true,
+                Some(1) if set_up => now = true,
+                Some(_) => save = true,
+                None => {}
+            }
+        });
+        if close || cancel || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.dialog = Dialog::None;
+            self.backup_key = None;
+        } else if self.busy {
+            // One request at a time.
+        } else if save {
+            self.busy = true;
+            self.error = None;
+            let mut body = json!({ "to": self.backup_to.trim(), "on": self.backup_on, "hour": self.backup_hour });
+            if self.backup_has_old && !self.backup_old_key.trim().is_empty() {
+                body["key"] = json!(self.backup_old_key.trim());
+            }
+            call(&self.inbox, ctx, Method::Post, "api/backup", Some(body), |v| {
+                Reply::BackupDone(match v["result"].as_str() {
+                    Some("made") => "Backups are set up. Now keep a copy of the recovery key (below) somewhere else.".into(),
+                    Some("found") => "Found the backups in that folder; they'll carry on there.".into(),
+                    _ => "Saved.".into(),
+                })
+            });
+        } else if now {
+            self.busy = true;
+            self.error = None;
+            self.backup_polled = 0.0;
+            call(&self.inbox, ctx, Method::Post, "api/backup/run", None, |_| Reply::BackupDone("Backup started.".into()));
+        } else if let Some(id) = restore {
+            self.busy = true;
+            self.error = None;
+            self.backup_armed = None;
+            self.done = Some("Restoring…".into());
+            call(&self.inbox, ctx, Method::Post, "api/backup/restore", Some(json!({ "id": id })), |v| {
+                Reply::BackupDone(format!(
+                    "Copied {} files into the folder \"{}\" in your files.",
+                    v["files"].as_u64().unwrap_or(0),
+                    v["folder"].as_str().unwrap_or("")
+                ))
+            });
+        } else if show_key {
+            call(&self.inbox, ctx, Method::Get, "api/backup/key", None, |v| Reply::BackupKey(v["key"].as_str().unwrap_or("").to_string()));
         }
     }
 
