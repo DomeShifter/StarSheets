@@ -14,7 +14,7 @@ use std::io;
 use serde_json::{Map, Value, json};
 
 use crate::auth::User;
-use crate::sharing::{self, Item, Role, Share};
+use crate::sharing::{self, Item, Role};
 use crate::store::{Store, join, now};
 
 fn layout_path(store: &Store) -> std::path::PathBuf {
@@ -285,7 +285,6 @@ mod tests {
         assert_eq!(sharing::file_role(&s, true, Some(&ann), &plan), Role::Edit);
         assert_eq!(sharing::file_role(&s, true, Some(&ann), &anns), Role::Owner);
         assert_eq!(sharing::file_role(&s, true, Some(&ann), &budget), Role::None);
-        let _ = Share::default();
         let _ = fs::remove_dir_all(&s.root);
     }
 

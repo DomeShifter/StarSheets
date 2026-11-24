@@ -41,7 +41,7 @@ impl CalcPreview {
         let Some((_, Some(text))) = self.cache.clone() else { return };
         let Some(cell) = crate::linkcard::cell_rect(app, ed.cell) else { return };
         let mut close = false;
-        egui::Area::new(egui::Id::new("starsheets_calc_preview"))
+        egui::Area::new(egui::Id::unique("starsheets_calc_preview"))
             .fixed_pos(cell.left_top() + vec2(cell.width().min(160.0) * 0.6, -4.0))
             .pivot(Align2::LEFT_BOTTOM)
             .order(egui::Order::Tooltip)

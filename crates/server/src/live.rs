@@ -497,10 +497,10 @@ impl Room {
 
     fn change(&mut self, client: &str, cseq: u64, base: u64, change: Change) {
         let Some(c) = self.clients.get(client) else { return };
-        if let Some(waiting) = c.blocked {
-            if cseq != waiting || !matches!(change, Change::State { .. }) {
-                return;
-            }
+        if let Some(waiting) = c.blocked
+            && (cseq != waiting || !matches!(change, Change::State { .. }))
+        {
+            return;
         }
         if let Change::Cmd { id, .. } = &change
             && !sync::server_allows(id)

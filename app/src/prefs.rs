@@ -38,29 +38,18 @@ pub fn restore(app: &mut SheetApp, ui: Option<&str>, prefs: Option<&str>) {
 pub struct PrefsSync {
     ui: Option<String>,
     prefs: Option<String>,
-    /// The user name to store in place of the session's (see [`Self::keep_user_name`]).
-    user_name: Option<String>,
 }
 
 impl PrefsSync {
     /// Starts from what is already stored, so restoring doesn't write it straight back.
     pub fn new(ui: Option<String>, prefs: Option<String>) -> Self {
-        Self { ui, prefs, user_name: None }
-    }
-
-    /// Stores `name` as the user name whatever the session's becomes: under `?host=parent` the
-    /// framing page names the author for this visit only, and must not replace the user's own.
-    pub fn keep_user_name(&mut self, name: String) {
-        self.user_name = Some(name);
+        Self { ui, prefs }
     }
 
     /// The `(key, JSON)` pairs to store because they differ from what was last written.
     pub fn changed(&mut self, app: &SheetApp) -> Vec<(&'static str, String)> {
         let mut out = Vec::new();
-        let prefs = match &self.user_name {
-            Some(name) => serde_json::to_string(&gridcraft_engine::Prefs { user_name: name.clone(), ..app.session.prefs.clone() }),
-            None => serde_json::to_string(&app.session.prefs),
-        };
+        let prefs = serde_json::to_string(&app.session.prefs);
         for (key, last, json) in [(UI_KEY, &mut self.ui, serde_json::to_string(&app.ui)), (PREFS_KEY, &mut self.prefs, prefs)] {
             match json {
                 Ok(json) if last.as_deref() != Some(json.as_str()) => {
@@ -115,30 +104,6 @@ mod tests {
         assert!(PrefsSync::new(ui, prefs).changed(&reloaded).is_empty(), "restoring doesn't write back");
     }
 
-    /// `?host=parent`: the author the framing page names is not stored over the user's own name.
-    #[test]
-    fn host_author_is_not_stored() {
-        let mut first = app();
-        first.session.prefs.user_name = "Ada".into();
-        let mut sync = PrefsSync::new(None, None);
-        let stored_prefs = stored(&sync.changed(&first), PREFS_KEY);
-
-        let mut hosted = app();
-        restore(&mut hosted, None, stored_prefs.as_deref());
-        let mut sync = PrefsSync::new(None, stored_prefs);
-        sync.keep_user_name(hosted.session.prefs.user_name.clone());
-        hosted.session.prefs.user_name = "Host Author".into();
-        hosted.session.prefs.r1c1 = true;
-        let writes = sync.changed(&hosted);
-        let prefs = stored(&writes, PREFS_KEY).expect("other preferences are still stored");
-
-        let mut reloaded = app();
-        restore(&mut reloaded, None, Some(&prefs));
-        assert_eq!(reloaded.session.prefs.user_name, "Ada");
-        assert!(reloaded.session.prefs.r1c1);
-    }
-
-    /// A stored `ui` without a language keeps the browser's, as the desktop keeps the system's.
     #[test]
     fn missing_language_keeps_the_browsers() {
         let mut a = app();

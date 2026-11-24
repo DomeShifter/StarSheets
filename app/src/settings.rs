@@ -152,7 +152,7 @@ pub struct SettingsWindow {
 
 impl SettingsWindow {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
-        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new(REQUEST))).is_some() {
+        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::unique(REQUEST))).is_some() {
             self.draft = Some(Prefs::load());
             self.tab = 0;
         }
@@ -220,7 +220,7 @@ fn style_tab(ui: &mut egui::Ui, d: &mut Prefs) {
     let swatch = egui::Rect::from_center_size(r.rect.left_center() + egui::vec2(house::M + 9.0, 0.0), egui::vec2(18.0, 18.0));
     ui.painter().rect_filled(swatch, 4, now);
     ui.painter().rect_stroke(swatch, 4, egui::Stroke::new(1.0, crate::theme::DIVIDER), egui::StrokeKind::Inside);
-    egui::Popup::menu(&r).id(egui::Id::new("set_toolbar_colour")).show(|ui| {
+    egui::Popup::menu(&r).id(egui::Id::unique("set_toolbar_colour")).show(|ui| {
         match crate::colourpicker::palette(ui, d.toolbar, false, false) {
             Some(crate::colourpicker::Choice::Colour(c)) => d.toolbar = Some(c),
             Some(crate::colourpicker::Choice::Reset) => d.toolbar = None,

@@ -43,7 +43,7 @@ pub struct CustomNumber {
 
 impl CustomNumber {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
-        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new(REQUEST))).is_some() {
+        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::unique(REQUEST))).is_some() {
             let now = app.session.active().and_then(|d| {
                 let sh = d.wb.active()?;
                 Some(d.wb.styles.get(sh.style_id(d.selection.active)).num_fmt.as_str().to_string())

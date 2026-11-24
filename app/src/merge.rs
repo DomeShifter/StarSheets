@@ -80,7 +80,7 @@ fn merge(app: &mut SheetApp, cmd: &str) {
 
 impl MergeGuard {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
-        if let Some(cmd) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::new(REQUEST))) {
+        if let Some(cmd) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::unique(REQUEST))) {
             let now = ctx.input(|i| i.time);
             if cmd == "home.unmergeCells" {
                 app.run_or_alert(&cmd, json!({}));

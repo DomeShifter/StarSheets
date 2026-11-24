@@ -6,6 +6,10 @@
 //! LOCATION (how people are told where files are kept), STARSHEETS_AUTH (off = no login),
 //! STARSHEETS_PASSWORD, SITE (a built StarSheets site to serve).
 
+// Request handlers return a ready HTTP response as their error (axum's usual way); boxing it to
+// make the error smaller would only add an allocation on the error path.
+#![allow(clippy::result_large_err)]
+
 mod auth;
 mod live;
 mod log;

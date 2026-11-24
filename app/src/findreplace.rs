@@ -95,7 +95,7 @@ impl FindReplace {
             return;
         }
         let (mut go, mut close, mut full) = (None::<i32>, false, false);
-        egui::Area::new(egui::Id::new("starsheets_find_bar")).anchor(egui::Align2::RIGHT_TOP, vec2(-24.0, 136.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+        egui::Area::new(egui::Id::unique("starsheets_find_bar")).anchor(egui::Align2::RIGHT_TOP, vec2(-24.0, 136.0)).order(egui::Order::Foreground).show(ctx, |ui| {
             house::card_frame().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let r = ui.add(egui::TextEdit::singleline(&mut self.bar_text).desired_width(200.0).margin(vec2(house::M, house::S + 1.0)).hint_text("Find in sheet"));

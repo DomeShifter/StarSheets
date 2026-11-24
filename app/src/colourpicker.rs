@@ -139,7 +139,7 @@ pub fn menu_for(app: &mut SheetApp, ui: &mut Ui, cmd: &str, params: serde_json::
         Some(Choice::Colour(rgb)) => app.run_or_alert(cmd, with(format!("#{rgb:06X}"))),
         Some(Choice::Custom) => {
             let start = now.unwrap_or(0x000000);
-            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(PICKER_REQUEST), (cmd.to_string(), start, params.to_string())));
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(PICKER_REQUEST), (cmd.to_string(), start, params.to_string())));
         }
         Some(Choice::Conditional) => app.open_dialog("manageRules", json!({})),
         None => {}
@@ -246,7 +246,7 @@ impl Picking {
 
 impl CustomPicker {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
-        if let Some((cmd, start, params)) = ctx.data_mut(|m| m.remove_temp::<(String, u32, String)>(egui::Id::new(PICKER_REQUEST))) {
+        if let Some((cmd, start, params)) = ctx.data_mut(|m| m.remove_temp::<(String, u32, String)>(egui::Id::unique(PICKER_REQUEST))) {
             let params = serde_json::from_str(&params).unwrap_or_else(|_| json!({}));
             let mut p = Picking { cmd, params, h: 0.0, s: 0.0, v: 0.0, hex: String::new(), rgb_text: Default::default() };
             p.set_rgb(start);

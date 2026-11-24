@@ -12,7 +12,6 @@
 //! reappeared: to-do row 14).
 
 use egui::{Color32, RichText, Sense, Stroke, Ui, vec2};
-use gridcraft_engine::core::RangeRef;
 use gridcraft_engine::model::{CfOperator, CfRule, ErrorStyle, Validation, ValidationKind};
 use gridcraft_ui_egui::SheetApp;
 use serde_json::{Value as Json, json};
@@ -209,7 +208,7 @@ impl DvPanel {
             app.dialog = None;
             self.open(app, false);
         }
-        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new(DROPDOWN_REQUEST))).is_some() {
+        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::unique(DROPDOWN_REQUEST))).is_some() {
             self.preview = None;
             self.open(app, true);
         }
@@ -311,7 +310,7 @@ impl DvPanel {
             p.text(r.left_center() + vec2(12.0, -10.0), egui::Align2::LEFT_CENTER, &d.range, egui::FontId::proportional(13.5), theme::TEXT);
             p.text(r.left_center() + vec2(12.0, 10.0), egui::Align2::LEFT_CENTER, clip(&describe(&d), 44), egui::FontId::proportional(12.0), theme::TEXT_DIM);
             let bin = egui::Rect::from_center_size(egui::pos2(r.right() - 20.0, r.center().y), vec2(28.0, 28.0));
-            let b = ui.interact(bin, ui.id().with(("dv_bin", i)), Sense::click());
+            let b = ui.interact(bin, ui.scope_id().with(("dv_bin", i)), Sense::click());
             if (resp.hovered() || b.hovered())
                 && let Some(img) = crate::icons::icon("delete")
             {
@@ -498,7 +497,7 @@ fn chip_colour(ui: &mut Ui, i: usize, colour: &mut Option<u32>) {
     let a = r.right_center() + vec2(-11.0, 0.0);
     p.add(egui::Shape::convex_polygon(vec![a + vec2(-4.0, -2.0), a + vec2(4.0, -2.0), a + vec2(0.0, 3.0)], theme::TEXT, Stroke::NONE));
     let resp = resp.on_hover_text("Colour");
-    egui::Popup::menu(&resp).id(egui::Id::new(("dv_chip", i))).show(|ui| {
+    egui::Popup::menu(&resp).id(egui::Id::unique(("dv_chip", i))).show(|ui| {
         for row in [&CHIP_LIGHT, &CHIP_DARK] {
             ui.horizontal(|ui| {
                 for c in row.iter() {

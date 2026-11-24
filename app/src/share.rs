@@ -25,7 +25,7 @@ pub fn share_item(ctx: &egui::Context, folder: bool, key: &str, name: &str) {
     } else {
         (format!("api/files/{key}/sharing"), format!("?file={key}"))
     };
-    ctx.data_mut(|m| m.insert_temp(egui::Id::new(ITEM_REQUEST), (url, link, name.to_string())));
+    ctx.data_mut(|m| m.insert_temp(egui::Id::unique(ITEM_REQUEST), (url, link, name.to_string())));
 }
 
 thread_local! {
@@ -115,8 +115,8 @@ impl Share {
     pub fn logic(&mut self, app: &gridcraft_ui_egui::SheetApp, ctx: &egui::Context, files: &crate::files::Files) {
         let file = files.linked().filter(|(doc, _)| app.session.active().is_some_and(|d| d.uid == *doc));
         SHAREABLE.with(|s| s.set(file.is_some() && crate::account::me().is_some()));
-        let item = ctx.data_mut(|m| m.remove_temp::<(String, String, String)>(egui::Id::new(ITEM_REQUEST)));
-        let asked = ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::new(REQUEST))).is_some();
+        let item = ctx.data_mut(|m| m.remove_temp::<(String, String, String)>(egui::Id::unique(ITEM_REQUEST)));
+        let asked = ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::unique(REQUEST))).is_some();
         let target = match (item, file) {
             (Some(t), _) => Some(t),
             (None, Some((_, id))) if asked => Some((format!("api/files/{id}/sharing"), format!("?file={id}"), app.session.active().map(|d| d.title.clone()).unwrap_or_default())),

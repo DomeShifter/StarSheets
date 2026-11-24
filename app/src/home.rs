@@ -718,7 +718,7 @@ impl Home {
             ui.label(RichText::new("StarSheets").size(22.0).color(theme::TEXT));
             ui.add_space(LEFT - 190.0);
             let search = house::field(&mut self.search, house::SEARCH_TEXT)
-                .id(egui::Id::new("home_search"))
+                .id(egui::Id::unique("home_search"))
                 .hint_text(RichText::new("Search in StarSheets").size(house::SEARCH_TEXT))
                 .frame(egui::Frame::NONE)
                 .margin(vec2(0.0, 0.0))
@@ -891,7 +891,7 @@ impl Home {
         }
         if dropping {
             p.rect_stroke(r, 17, Stroke::new(2.0, GREEN), egui::StrokeKind::Inside);
-            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("home_drop"), folder.clone().unwrap_or_default()));
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("home_drop"), folder.clone().unwrap_or_default()));
         }
         let x = r.left() + 4.0 + depth as f32 * 16.0;
         let arrow = Rect::from_center_size(egui::pos2(x + 10.0, r.center().y), vec2(20.0, 20.0));
@@ -918,7 +918,7 @@ impl Home {
             img.paint_at(ui, Rect::from_center_size(egui::pos2(x + 34.0, r.center().y), vec2(20.0, 20.0)));
         }
         let font = FontId::proportional(14.0);
-        let galley = p.layout(label.to_string(), font, if current { theme::TEXT } else { theme::TEXT }, r.right() - x - 56.0);
+        let galley = p.layout(label.to_string(), font, theme::TEXT, r.right() - x - 56.0);
         p.galley(egui::pos2(x + 52.0, r.center().y - galley.size().y / 2.0), galley, theme::TEXT);
         resp.clicked() && !toggled
     }
@@ -926,7 +926,7 @@ impl Home {
     fn main_ui(&mut self, ui: &mut Ui) {
         // Path (each part clickable and a drop target), view switch.
         // Anywhere empty in this area: right-click for New (items drawn later sit on top of it).
-        let bg = ui.interact(ui.max_rect(), egui::Id::new("home_bg"), Sense::click());
+        let bg = ui.interact(ui.max_rect(), egui::Id::unique("home_bg"), Sense::click());
         let crumbs = self.title();
         ui.horizontal(|ui| {
             // Back, forward and up (the mouse's back button goes up too).
@@ -963,7 +963,7 @@ impl Home {
                     && let Some(f) = folder
                 {
                     ui.painter().rect_stroke(r.rect, 6, Stroke::new(2.0, GREEN), egui::StrokeKind::Outside);
-                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("home_drop"), f));
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("home_drop"), f));
                 }
                 if r.clicked()
                     && let Some(v) = view
@@ -1152,7 +1152,7 @@ impl Home {
             && resp.contains_pointer()
         {
             ui.painter().rect_stroke(resp.rect, 8, Stroke::new(2.0, GREEN), egui::StrokeKind::Inside);
-            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("home_drop"), f.clone()));
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("home_drop"), f.clone()));
         }
         resp.context_menu(|ui| {
             *clicked_item = true;
@@ -1275,17 +1275,17 @@ impl Home {
             ui.painter().text(h.left_center() + vec2(x + if x == 0.0 { 44.0 } else { 0.0 }, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(13.0), theme::TEXT_DIM);
         }
         ui.painter().hline(h.x_range(), h.bottom(), Stroke::new(1.0, theme::DIVIDER));
-        let rows: Vec<(Item, String, String, String, i64, Option<u64>, bool, bool)> = order
+        let rows: Vec<ListRow> = order
             .iter()
             .filter_map(|item| match item {
                 Item::Folder(p) => self.folder(p).map(|f| {
                     let (newest, size) = self.folder_stats(&f.path);
-                    (item.clone(), self.folder_label(&f.path), if f.shared { "folder_shared".into() } else { "folder".into() }, f.owner.clone(), newest, Some(size), f.starred, f.shared)
+                    ListRow { item: item.clone(), name: self.folder_label(&f.path), icon: if f.shared { "folder_shared" } else { "folder" }, owner: f.owner.clone(), modified: newest, size: Some(size), starred: f.starred }
                 }),
-                Item::File(id) => self.file(id).map(|f| (item.clone(), f.name.clone(), "starsheets".into(), f.owner.clone(), f.modified, Some(f.size), f.starred, f.shared)),
+                Item::File(id) => self.file(id).map(|f| ListRow { item: item.clone(), name: f.name.clone(), icon: "starsheets", owner: f.owner.clone(), modified: f.modified, size: Some(f.size), starred: f.starred }),
             })
             .collect();
-        for (item, name, icon, owner, modified, size, starred, _) in rows {
+        for ListRow { item, name, icon, owner, modified, size, starred } in rows {
             let (r, resp) = ui.allocate_exact_size(vec2(w, ROW), Sense::click_and_drag());
             let p = ui.painter().clone();
             if self.selected.contains(&item) {
@@ -1297,7 +1297,7 @@ impl Home {
             match &item {
                 Item::Folder(p) if let Some(f) = self.folder(p).cloned() => folder_icon(ui, &f, icon_rect),
                 _ => {
-                    if let Some(img) = crate::icons::icon(&icon) {
+                    if let Some(img) = crate::icons::icon(icon) {
                         img.paint_at(ui, icon_rect);
                     }
                 }
@@ -1622,14 +1622,14 @@ impl Home {
             ui.add_space(house::S);
             egui::Frame::NONE.stroke(Stroke::new(1.0, theme::DIVIDER)).corner_radius(8).inner_margin(egui::Margin::same(4)).show(ui, |ui| {
                 egui::ScrollArea::vertical().max_height(320.0).min_scrolled_height(320.0).auto_shrink([false, false]).show(ui, |ui| {
-                    fn rows(ui: &mut Ui, folders: &[FolderRow], path: &str, label: &str, depth: usize, ok: &dyn Fn(&str, &str) -> bool, target: &mut Option<String>, expanded: &mut HashSet<String>) {
-                        let role = folders.iter().find(|f| f.path == path).map_or("owner", |f| f.role.as_str());
-                        let allowed = ok(path, role);
-                        let mut kids: Vec<&FolderRow> = folders.iter().filter(|f| parent_of(&f.path) == path && f.path != path).collect();
+                    fn rows(ui: &mut Ui, t: &mut PickTree, path: &str, label: &str, depth: usize) {
+                        let role = t.folders.iter().find(|f| f.path == path).map_or("owner", |f| f.role.as_str());
+                        let allowed = (t.ok)(path, role);
+                        let mut kids: Vec<&FolderRow> = t.folders.iter().filter(|f| parent_of(&f.path) == path && f.path != path).collect();
                         kids.sort_by_key(|f| name_of(&f.path).to_lowercase());
                         let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
                         let p = ui.painter().clone();
-                        let picked = target.as_deref() == Some(path);
+                        let picked = t.target.as_deref() == Some(path);
                         if picked {
                             p.rect_filled(r, 6, theme::SHARE);
                         } else if resp.hovered() && allowed {
@@ -1637,7 +1637,7 @@ impl Home {
                         }
                         let x = r.left() + 4.0 + depth as f32 * 18.0;
                         let arrow = Rect::from_center_size(egui::pos2(x + 10.0, r.center().y), vec2(20.0, 20.0));
-                        let open = expanded.contains(path);
+                        let open = t.expanded.contains(path);
                         let mut toggled = false;
                         if !kids.is_empty() {
                             if let Some(img) = crate::icons::icon(if open { "expand_more" } else { "chevron_right" }) {
@@ -1646,29 +1646,29 @@ impl Home {
                             if resp.clicked() && ui.input(|i| i.pointer.interact_pos().is_some_and(|q| arrow.expand(4.0).contains(q))) {
                                 toggled = true;
                                 if open {
-                                    expanded.remove(path);
+                                    t.expanded.remove(path);
                                 } else {
-                                    expanded.insert(path.to_string());
+                                    t.expanded.insert(path.to_string());
                                 }
                             }
                         }
-                        let f = folders.iter().find(|f| f.path == path).cloned().unwrap_or_default();
+                        let f = t.folders.iter().find(|f| f.path == path).cloned().unwrap_or_default();
                         folder_icon(ui, &f, Rect::from_center_size(egui::pos2(x + 34.0, r.center().y), vec2(20.0, 20.0)));
                         p.text(egui::pos2(x + 52.0, r.center().y), Align2::LEFT_CENTER, label, FontId::proportional(14.0), if allowed { theme::TEXT } else { theme::DIVIDER });
                         if resp.clicked() && !toggled && allowed {
-                            *target = Some(path.to_string());
+                            *t.target = Some(path.to_string());
                         }
                         if resp.double_clicked() && !kids.is_empty() {
-                            expanded.insert(path.to_string());
+                            t.expanded.insert(path.to_string());
                         }
-                        if expanded.contains(path) {
+                        if t.expanded.contains(path) {
                             for k in kids {
-                                rows(ui, folders, &k.path, name_of(&k.path), depth + 1, ok, target, expanded);
+                                rows(ui, t, &k.path, name_of(&k.path), depth + 1);
                             }
                         }
                     }
                     for (path, label) in &tops {
-                        rows(ui, &folders, path, label, 0, &ok, &mut target, &mut expanded);
+                        rows(ui, &mut PickTree { folders: &folders, ok: &ok, target: &mut target, expanded: &mut expanded }, path, label, 0);
                     }
                 });
             });
@@ -1852,11 +1852,11 @@ impl Home {
     /// Dragging: a label follows the pointer; letting go over a folder (card, tree row or path)
     /// moves there.
     fn drag_ui(&mut self, ctx: &egui::Context) {
-        let target = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::new("home_drop")));
+        let target = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::unique("home_drop")));
         let Some(items) = self.dragging.clone() else { return };
         if let Some(pos) = ctx.pointer_latest_pos() {
             let label = if items.len() == 1 { self.label_of(&items[0]) } else { format!("{} items", items.len()) };
-            egui::Area::new(egui::Id::new("home_drag")).fixed_pos(pos + vec2(14.0, 10.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
+            egui::Area::new(egui::Id::unique("home_drag")).fixed_pos(pos + vec2(14.0, 10.0)).order(egui::Order::Tooltip).interactable(false).show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.label(label);
                 });
@@ -2036,4 +2036,23 @@ fn size_text(n: u64) -> String {
         1024..=1_048_575 => format!("{:.0} KB", n as f64 / 1024.0),
         _ => format!("{:.1} MB", n as f64 / 1_048_576.0),
     }
+}
+
+/// What the "Move to" folder tree reads and changes as it draws itself, row by row.
+struct PickTree<'a> {
+    folders: &'a [FolderRow],
+    ok: &'a dyn Fn(&str, &str) -> bool,
+    target: &'a mut Option<String>,
+    expanded: &'a mut HashSet<String>,
+}
+
+/// One row of the list view: a folder or a file, as it is shown.
+struct ListRow {
+    item: Item,
+    name: String,
+    icon: &'static str,
+    owner: String,
+    modified: i64,
+    size: Option<u64>,
+    starred: bool,
 }

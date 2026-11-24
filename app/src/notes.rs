@@ -34,7 +34,7 @@ pub struct Notes {
 impl Notes {
     /// Takes over GridCraft's note dialog (right-click › Insert note, Shift+F2) and Insert › Note.
     pub fn intercept(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
-        let asked = ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new(REQUEST))).is_some();
+        let asked = ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::unique(REQUEST))).is_some();
         // GridCraft names its form "note" (a note) or "comment" (a threaded comment).
         let dialog = app.dialog.as_ref().is_some_and(|d| d.name == "note" || d.name == "comment");
         if dialog {
@@ -78,7 +78,7 @@ impl Notes {
         let mut commit = false;
         let mut start_edit = false;
         let mut new_size = None;
-        let area = egui::Area::new(egui::Id::new("starsheets_note_card")).fixed_pos(at).constrain(false).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        let area = egui::Area::new(egui::Id::unique("starsheets_note_card")).fixed_pos(at).constrain(false).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             let writing = self.editing.as_ref().is_some_and(|(doc, c, _)| *doc == uid && *c == cell);
             let frame = crate::house::card_frame().inner_margin(egui::Margin::same(crate::house::M as i8)).show(ui, |ui| {
                 ui.set_min_size(vec2(w - 24.0, h - 24.0));
@@ -97,7 +97,7 @@ impl Notes {
                 }
             });
             // A click anywhere on the card starts writing, as in Sheets.
-            if !writing && ui.interact(frame.response.rect, egui::Id::new("starsheets_note_card_click"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text).clicked() {
+            if !writing && ui.interact(frame.response.rect, egui::Id::unique("starsheets_note_card_click"), Sense::click()).on_hover_cursor(egui::CursorIcon::Text).clicked() {
                 start_edit = true;
             }
             // The resize grip: three short diagonal lines in the bottom-right corner, on the card's
@@ -107,7 +107,7 @@ impl Notes {
             for k in [4.0, 8.0, 12.0] {
                 ui.painter().line_segment([Pos2::new(grip.right() - k, grip.bottom()), Pos2::new(grip.right(), grip.bottom() - k)], Stroke::new(1.0, Color32::from_gray(0x80)));
             }
-            let g = ui.interact(grip, egui::Id::new("starsheets_note_grip_drag"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeNwSe);
+            let g = ui.interact(grip, egui::Id::unique("starsheets_note_grip_drag"), Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeNwSe);
             (g.dragged(), g.drag_stopped(), g.interact_pointer_pos())
         });
         let card = area.response.rect;

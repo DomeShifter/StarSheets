@@ -111,10 +111,6 @@ impl Browser {
         self.renaming.is_some()
     }
 
-    pub fn cwd(&self) -> &str {
-        &self.cwd
-    }
-
     /// The rows shown: folders then files of the current folder, or every match of a search.
     fn rows(&self) -> Vec<(Item, String, String, i64, Option<u64>)> {
         let q = self.search.trim().to_lowercase();
@@ -160,7 +156,7 @@ impl Browser {
         let mut open = true;
         let mut close_now = false;
         let title = if self.in_bin { "Bin" } else { "Open a file" };
-        let shown = egui::Window::new(title).title_bar(false).frame(crate::house::dialog_frame()).id(egui::Id::new("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
+        let shown = egui::Window::new(title).title_bar(false).frame(crate::house::dialog_frame()).id(egui::Id::unique("starsheets_files_window")).open(&mut open).collapsible(false).resizable(false).fixed_size(vec2(W, 520.0)).anchor(Align2::CENTER_TOP, vec2(0.0, 80.0)).show(ctx, |ui| {
             ui.set_width(W);
             if crate::house::title_row(ui, title) {
                 close_now = true;
@@ -237,7 +233,7 @@ impl Browser {
                 }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add(egui::TextEdit::singleline(&mut self.search).id(egui::Id::new("starsheets_files_search")).hint_text("🔍  Search all folders").desired_width(240.0).margin(vec2(8.0, 6.0)));
+                ui.add(egui::TextEdit::singleline(&mut self.search).id(egui::Id::unique("starsheets_files_search")).hint_text("🔍  Search all folders").desired_width(240.0).margin(vec2(8.0, 6.0)));
             });
         });
         ui.add_space(6.0);
@@ -272,7 +268,7 @@ impl Browser {
         let name_col = egui::Rect::from_min_size(h.min, vec2(W - 300.0, 26.0));
         let date_col = egui::Rect::from_min_size(h.min + vec2(W - 300.0, 0.0), vec2(190.0, 26.0));
         for (r, label, date) in [(name_col, "Name", false), (date_col, "Last modified", true)] {
-            let resp = ui.interact(r, ui.id().with(("sort", label)), Sense::click());
+            let resp = ui.interact(r, ui.scope_id().with(("sort", label)), Sense::click());
             let arrow = if self.by_date == date { if self.descending { " ↑" } else { " ↓" } } else { "" };
             ui.painter().text(r.left_center() + vec2(if date { 0.0 } else { 44.0 }, 0.0), Align2::LEFT_CENTER, format!("{label}{arrow}"), FontId::proportional(13.0), theme::TEXT_DIM);
             if resp.clicked() {
@@ -366,7 +362,7 @@ impl Browser {
             // Space under the rows: a right-click there offers folder actions.
             let rest = ui.available_rect_before_wrap();
             if rest.height() > 4.0 {
-                let r = ui.interact(rest, ui.id().with("files_blank"), Sense::click());
+                let r = ui.interact(rest, ui.scope_id().with("files_blank"), Sense::click());
                 if r.clicked() && clicked_empty {
                     self.selected.clear();
                 }
@@ -391,7 +387,7 @@ impl Browser {
         if let Some(items) = self.dragging.clone() {
             if let Some(pos) = ui.ctx().pointer_latest_pos() {
                 let label = if items.len() == 1 { self.label_of(&items[0]) } else { format!("{} items", items.len()) };
-                egui::Area::new(egui::Id::new("starsheets_files_drag")).fixed_pos(pos + vec2(14.0, 10.0)).order(egui::Order::Tooltip).interactable(false).show(ui.ctx(), |ui| {
+                egui::Area::new(egui::Id::unique("starsheets_files_drag")).fixed_pos(pos + vec2(14.0, 10.0)).order(egui::Order::Tooltip).interactable(false).show(ui.ctx(), |ui| {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.label(label);
                     });
@@ -488,7 +484,7 @@ impl Browser {
         crate::house::menu(ui, 260.0);
         let targets = if self.selected.contains(item) { self.selected.clone() } else { vec![item.clone()] };
         let single = targets.len() == 1;
-        let mut row = |ui: &mut Ui, label: &str, keys: &str, enabled: bool| ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked();
+        let row = |ui: &mut Ui, label: &str, keys: &str, enabled: bool| ui.add_enabled(enabled, egui::Button::new(label).shortcut_text(keys)).clicked();
         match item {
             Item::File(id) => {
                 if row(ui, "Open", "Enter", single) {
@@ -550,7 +546,7 @@ impl Browser {
     /// Keys while the window is open (taken from the grid by files.rs): Enter, F2, Delete,
     /// Backspace, Ctrl+A and the clipboard events.
     fn keys(&mut self, ui: &Ui, keys: &[egui::Event], rows: &[(Item, String, String, i64, Option<u64>)], out: &mut Vec<Action>) {
-        if self.renaming.is_some() || ui.ctx().memory(|m| m.focused()) == Some(egui::Id::new("starsheets_files_search")) {
+        if self.renaming.is_some() || ui.ctx().memory(|m| m.focused()) == Some(egui::Id::unique("starsheets_files_search")) {
             return;
         }
         for ev in keys {

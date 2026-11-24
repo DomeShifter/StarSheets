@@ -77,7 +77,7 @@ impl LinkCard {
         if app.grid.cells_rect.is_some_and(|r| !r.contains(pos - vec2(0.0, 6.0))) {
             return;
         }
-        egui::Area::new(egui::Id::new("starsheets_link_card")).fixed_pos(pos).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        egui::Area::new(egui::Id::unique("starsheets_link_card")).fixed_pos(pos).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             crate::house::card_frame().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     let shown: String = if target.chars().count() > 48 { target.chars().take(45).chain("…".chars()).collect() } else { target.clone() };
@@ -85,7 +85,7 @@ impl LinkCard {
                         gridcraft_ui_egui::grid::follow_link(app, &target);
                     }
                     ui.add_space(8.0);
-                    let mut button = |ui: &mut Ui, icon: &str, tip: &str| match icons::icon(icon) {
+                    let button = |ui: &mut Ui, icon: &str, tip: &str| match icons::icon(icon) {
                         Some(img) => ui.add(Button::image(img).frame(false)).on_hover_text(tip),
                         None => ui.add(Button::new(tip).frame(false)),
                     };

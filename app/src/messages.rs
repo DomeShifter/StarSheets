@@ -84,7 +84,7 @@ pub fn plain_error(text: &str) -> String {
     if text.contains("does not parse") {
         // Between "formula " and " — it does not parse", without its quotes (` or ").
         let start = text.find("formula ").map_or(0, |i| i + "formula ".len());
-        let end = text.find("it does not parse").map_or(text.len(), |i| i).max(start);
+        let end = text.find("it does not parse").unwrap_or(text.len()).max(start);
         let formula = text[start..end].trim().trim_end_matches('—').trim().trim_matches(|c| c == '`' || c == '"');
         return format!("StarSheets can't read the formula ={}. {}", formula.trim_start_matches('='), formula_hint(formula));
     }

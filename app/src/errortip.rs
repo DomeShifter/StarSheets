@@ -27,7 +27,6 @@ pub fn explain(e: &CellError) -> &'static str {
         CellError::Busy => "This cell's code is waiting to run.",
         CellError::Timeout => "This cell's code took too long and was stopped.",
         CellError::Blocked => "This cell's code can't run here.",
-        _ => "This cell's formula couldn't be worked out.",
     }
 }
 
@@ -96,7 +95,7 @@ impl ErrorTip {
             return;
         }
         let (at, pivot) = if has_note { (rect.left_top() - vec2(0.0, 6.0), Align2::LEFT_BOTTOM) } else { (rect.right_top() + vec2(6.0, 0.0), Align2::LEFT_TOP) };
-        egui::Area::new(egui::Id::new("starsheets_error_tip"))
+        egui::Area::new(egui::Id::unique("starsheets_error_tip"))
             .fixed_pos(at)
             .pivot(pivot)
             .order(egui::Order::Tooltip)

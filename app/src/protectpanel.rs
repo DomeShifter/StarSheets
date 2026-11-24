@@ -147,7 +147,7 @@ impl ProtectPanel {
 
     pub fn intercept(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         self.just_opened = false;
-        let mut want = ctx.data_mut(|m| m.remove_temp::<i64>(egui::Id::new(REQUEST)));
+        let mut want = ctx.data_mut(|m| m.remove_temp::<i64>(egui::Id::unique(REQUEST)));
         // GridCraft's own Protect Sheet / Allow Edit Ranges dialogs open the panel instead.
         if app.dialog.as_ref().is_some_and(|d| matches!(d.name.as_str(), "protectSheet" | "allowEditRanges")) {
             app.dialog = None;

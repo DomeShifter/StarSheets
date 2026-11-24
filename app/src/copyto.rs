@@ -102,7 +102,7 @@ impl CopyTo {
                 }
             }
         }
-        let Some((sheet, existing)) = ctx.data_mut(|m| m.remove_temp::<(usize, bool)>(egui::Id::new(REQUEST))) else { return };
+        let Some((sheet, existing)) = ctx.data_mut(|m| m.remove_temp::<(usize, bool)>(egui::Id::unique(REQUEST))) else { return };
         let this = files.linked().map(|(_, id)| id).unwrap_or_default();
         if existing {
             let name = app.session.active().and_then(|d| d.wb.sheets.get(sheet)).map(|s| s.name.clone()).unwrap_or_default();

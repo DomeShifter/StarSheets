@@ -24,12 +24,12 @@ const MODAL_FRAME: &str = "starsheets_input_modal_frame";
 /// Marks that a modal dialog is showing in this frame (called by house::dialog).
 pub fn note_modal(ctx: &Context) {
     let frame = ctx.cumulative_frame_nr();
-    ctx.data_mut(|d| d.insert_temp(Id::new(MODAL_FRAME), frame));
+    ctx.data_mut(|d| d.insert_temp(Id::unique(MODAL_FRAME), frame));
 }
 
 /// The last frame a modal dialog was shown in.
 fn modal_frame(ctx: &Context) -> Option<u64> {
-    ctx.data(|d| d.get_temp::<u64>(Id::new(MODAL_FRAME)))
+    ctx.data(|d| d.get_temp::<u64>(Id::unique(MODAL_FRAME)))
 }
 
 /// Keyboard events: the ones the grid would act on.

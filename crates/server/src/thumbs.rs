@@ -212,7 +212,7 @@ fn text_at(pm: &mut Pixmap, font: &FontRef, size: f32, text: &str, (x0, x1, clip
 /// PNG without the alpha channel (always opaque) and with strong compression: about a third
 /// smaller than tiny-skia's own.
 fn encode(pm: &Pixmap) -> Result<Vec<u8>, String> {
-    let rgb: Vec<u8> = pm.data().chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let rgb: Vec<u8> = pm.data().as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
     let mut out = Vec::new();
     let mut enc = png::Encoder::new(&mut out, pm.width(), pm.height());
     enc.set_color(png::ColorType::Rgb);

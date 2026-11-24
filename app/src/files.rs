@@ -137,7 +137,7 @@ impl Files {
             l.folder = folder;
         }
         // While the file window is open it takes its keys before the grid sees them.
-        if self.browser.open && !self.browser.typing() && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::new("starsheets_files_search")) {
+        if self.browser.open && !self.browser.typing() && !ctx.memory(|m| m.focused()).is_some_and(|f| f == egui::Id::unique("starsheets_files_search")) {
             ctx.input_mut(|i| {
                 let mut keep = Vec::new();
                 for ev in std::mem::take(&mut i.events) {
@@ -148,7 +148,7 @@ impl Files {
                 i.events = keep;
             });
         }
-        if let Some(req) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::new(REQUEST))) {
+        if let Some(req) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::unique(REQUEST))) {
             self.request(app, ctx, &req);
         }
         if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O))) {
@@ -181,9 +181,9 @@ impl Files {
         };
         let tip = self.status_tip(app, unsaved);
         ctx.data_mut(|m| {
-            m.insert_temp(egui::Id::new(STATUS), status);
-            m.insert_temp(egui::Id::new(STATUS_TIP), tip);
-            m.insert_temp(egui::Id::new(LAST_EDIT), last_edit);
+            m.insert_temp(egui::Id::unique(STATUS), status);
+            m.insert_temp(egui::Id::unique(STATUS_TIP), tip);
+            m.insert_temp(egui::Id::unique(LAST_EDIT), last_edit);
         });
     }
 

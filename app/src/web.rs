@@ -84,7 +84,7 @@ pub fn start() {
                     app.ui.menu_look = Some(crate::shell::MENU_LOOK);
                     crate::settings::Prefs::load().apply(&mut app);
                     gridcraft_ui_egui::spelling::set(crate::spelling::known);
-                    let mut prefs = crate::prefs::PrefsSync::new(stored_ui, stored_prefs);
+                    let prefs = crate::prefs::PrefsSync::new(stored_ui, stored_prefs);
                     SheetApp::setup_context_for_language(&cc.egui_ctx, false, app.ui.language);
                     crate::theme::install(&cc.egui_ctx);
                     egui_extras::install_image_loaders(&cc.egui_ctx);
@@ -373,7 +373,7 @@ fn copy_without_https(ctx: &egui::Context) {
 /// Calls the page's copy bridge; true when the text reached the clipboard.
 fn page_copy(text: &str, html: Option<&str>) -> bool {
     let Some(w) = web_sys::window() else { return false };
-    let Ok(f) = js_sys::Reflect::get(&w, &"__ssCopy".into()).and_then(|f| f.dyn_into::<js_sys::Function>().map_err(JsValue::from)) else {
+    let Ok(f) = js_sys::Reflect::get(&w, &"__ssCopy".into()).and_then(|f| f.dyn_into::<js_sys::Function>()) else {
         return false;
     };
     let html = html.map_or(JsValue::UNDEFINED, JsValue::from_str);

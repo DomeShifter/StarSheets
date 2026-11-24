@@ -117,7 +117,7 @@ pub fn menu_sep(ui: &mut Ui) {
 /// high), BODY size (SEARCH_TEXT for search bars), with room at the sides. Use it for every
 /// single-line field: search bars, rename boxes, name fields.
 pub fn field<'t>(text: &'t mut dyn egui::TextBuffer, size: f32) -> egui::TextEdit<'t> {
-    egui::TextEdit::singleline(text).font(egui::FontId::proportional(size)).vertical_align(Align::Center).margin(vec2(S, XS))
+    egui::TextEdit::singleline(text).font(egui::FontId::proportional(size)).align(egui::Align2::LEFT_CENTER).margin(vec2(S, XS))
 }
 
 /// Text size in search bars.
@@ -299,7 +299,7 @@ pub fn form_style(ui: &mut Ui) {
 pub fn dialog<R>(ctx: &egui::Context, id: &str, width: f32, title: &str, close: Option<&mut bool>, body: impl FnOnce(&mut Ui) -> R) -> R {
     // While it shows, keys are the dialog's, not the grid's (input.rs).
     crate::input::note_modal(ctx);
-    egui::Modal::new(egui::Id::new(id))
+    egui::Modal::new(egui::Id::unique(id))
         .frame(dialog_frame())
         .show(ctx, |ui| {
             form_style(ui);
@@ -438,7 +438,7 @@ pub fn select(ui: &mut Ui, id: &str, width: f32, current: &mut usize, labels: &[
         .min_size(vec2(width, FIELD_HEIGHT));
     let r = ui.add(field);
     let mut changed = false;
-    egui::Popup::menu(&r).id(egui::Id::new(id)).show(|ui| {
+    egui::Popup::menu(&r).id(egui::Id::unique(id)).show(|ui| {
         crate::shell::menu_style_width(ui, width.max(200.0));
         ui.spacing_mut().button_padding.x = 40.0;
         // As tall as the screen allows; a scroll bar when it still doesn't fit.

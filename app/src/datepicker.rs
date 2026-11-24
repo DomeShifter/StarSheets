@@ -41,7 +41,7 @@ impl DatePicker {
         }
         let Some((_, mut year, mut month)) = self.shown else { return };
         let mut picked = None;
-        egui::Area::new(egui::Id::new("starsheets_date_picker")).fixed_pos(pos + vec2(0.0, 4.0)).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
+        egui::Area::new(egui::Id::unique("starsheets_date_picker")).fixed_pos(pos + vec2(0.0, 4.0)).pivot(Align2::LEFT_TOP).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
             crate::house::card_frame().show(ui, |ui| {
                 ui.set_width(CELL * 7.0);
                 ui.horizontal(|ui| {
@@ -69,7 +69,7 @@ impl DatePicker {
                     let (_, m, d) = ymd(day);
                     let c = r.min + vec2(CELL * ((k % 7) as f32 + 0.5), CELL * ((k / 7) as f32 + 1.5));
                     let hit = egui::Rect::from_center_size(c, vec2(CELL, CELL));
-                    let resp = ui.interact(hit, ui.id().with(("day", k)), Sense::click());
+                    let resp = ui.interact(hit, ui.scope_id().with(("day", k)), Sense::click());
                     let chosen = current == Some(day);
                     if chosen {
                         p.circle_filled(c, 15.0, BLUE);

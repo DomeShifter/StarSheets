@@ -66,7 +66,7 @@ const REQUEST: &str = "starsheets_account_request";
 pub fn me_ui(ui: &mut Ui) {
     let Some(me) = me() else { return };
     let r = avatar(ui, &me.name, &me.colour, 32.0).on_hover_text(format!("{} ({})", me.name, me.username));
-    let ask = |ui: &Ui, what: &str| ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(REQUEST), what.to_string()));
+    let ask = |ui: &Ui, what: &str| ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(REQUEST), what.to_string()));
     egui::Popup::menu(&r).show(|ui| {
         house::menu(ui, 260.0);
         house::menu_inset(ui, |ui| {
@@ -269,7 +269,7 @@ impl Account {
                 }
             }
         }
-        if let Some(req) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::new(REQUEST))) {
+        if let Some(req) = ctx.data_mut(|m| m.remove_temp::<String>(egui::Id::unique(REQUEST))) {
             match req.as_str() {
                 "profile" => self.open(Dialog::Profile),
                 "password" => self.open(Dialog::Password),
@@ -289,11 +289,6 @@ impl Account {
         if SIGN_IN.with(|s| std::mem::take(&mut *s.borrow_mut())) && !matches!(self.dialog, Dialog::Setup | Dialog::SignUp) {
             self.open(Dialog::SignIn);
         }
-    }
-
-    /// Whether a sign-in or setup box is up (the rest of the app waits).
-    pub fn blocking(&self) -> bool {
-        matches!(self.dialog, Dialog::SignIn | Dialog::SignUp | Dialog::Setup)
     }
 
     fn open(&mut self, d: Dialog) {

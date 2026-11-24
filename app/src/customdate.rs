@@ -63,7 +63,7 @@ pub struct CustomDate {
 
 impl CustomDate {
     pub fn ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
-        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new(REQUEST))).is_some() {
+        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::unique(REQUEST))).is_some() {
             let current = app.session.active().and_then(|d| {
                 let sh = d.wb.active()?;
                 let code = d.wb.styles.get(sh.style_id(d.selection.active)).num_fmt.as_str().to_string();
@@ -91,7 +91,7 @@ impl CustomDate {
                                     let (kind, variants) = KINDS[*k];
                                     let label = format!("{kind} ({})", sample(variants[*v].0, *k));
                                     let chip = ui.add(egui::Button::new(RichText::new(label).size(13.0)).fill(house::SELECTED).stroke(Stroke::NONE).corner_radius(f32::from(house::FIELD_RADIUS)));
-                                    egui::Popup::menu(&chip).id(egui::Id::new(("date_part", i))).show(|ui| {
+                                    egui::Popup::menu(&chip).id(egui::Id::unique(("date_part", i))).show(|ui| {
                                         let width = crate::shell::menu_style(ui, false);
                                         for (vi, (_, text)) in variants.iter().enumerate() {
                                             let mark = if *v == vi { "✓  " } else { "     " };
@@ -119,7 +119,7 @@ impl CustomDate {
                     });
                 });
                 let add = ui.add(egui::Button::new("▾").min_size(vec2(36.0, house::FIELD_HEIGHT))).on_hover_text("Add a part");
-                egui::Popup::menu(&add).id(egui::Id::new("date_add")).show(|ui| {
+                egui::Popup::menu(&add).id(egui::Id::unique("date_add")).show(|ui| {
                     crate::shell::menu_style(ui, false);
                     for (k, (kind, _)) in KINDS.iter().enumerate() {
                         if ui.add(crate::shell::menu_row(kind, "", false)).clicked() {

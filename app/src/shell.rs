@@ -567,7 +567,7 @@ impl Shell {
                         Btn(icon, tip, id, p) => {
                             if icon_or_text(ui, icon, tip).clicked() {
                                 if *id == "panel:chart" {
-                                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::chartpanel::REQUEST), true));
+                                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::chartpanel::REQUEST), true));
                                 } else {
                                     app.run_or_alert(id, params(p));
                                 }
@@ -746,7 +746,7 @@ impl Shell {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.x = 0.0;
                 ui.horizontal(|ui| {
-                    let r = ui.add(egui::TextEdit::singleline(&mut text).frame(Frame::NONE).desired_width(26.0).min_size(vec2(26.0, 24.0)).horizontal_align(Align::Center).vertical_align(Align::Center));
+                    let r = ui.add(egui::TextEdit::singleline(&mut text).frame(Frame::NONE).desired_width(26.0).min_size(vec2(26.0, 24.0)).align(egui::Align2::CENTER_CENTER));
                     let mut picked = None;
                     ui.spacing_mut().button_padding.x = 3.0;
                     ui.menu_button(RichText::new("▾").size(11.0).color(theme::TEXT_DIM), |ui| {
@@ -786,11 +786,11 @@ impl Shell {
 /// or a list whose entries may show a grey example on the right ("Currency|£1,000.12").
 fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
     let icon_row = items.iter().all(|(l, _, _)| l.starts_with("icon:"));
-    let mut run = |app: &mut SheetApp, ui: &mut Ui, id: &str, p: &str| {
+    let run = |app: &mut SheetApp, ui: &mut Ui, id: &str, p: &str| {
         if id == "panel:customdate" {
-            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customdate::REQUEST), true));
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::customdate::REQUEST), true));
         } else if id == "panel:customnumber" {
-            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customnumber::REQUEST), true));
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::customnumber::REQUEST), true));
         } else {
             app.run_or_alert(id, params(p));
         }
@@ -800,7 +800,7 @@ fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
         ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
         flat(ui);
         let per_row = if items.len() > 6 { 5 } else { items.len() };
-        egui::Grid::new(ui.id().with("strip")).spacing(vec2(4.0, 4.0)).show(ui, |ui| {
+        egui::Grid::new(ui.scope_id().with("strip")).spacing(vec2(4.0, 4.0)).show(ui, |ui| {
             for (i, (label, id, p)) in items.iter().enumerate() {
                 let (name, tip) = label.trim_start_matches("icon:").split_once('|').unwrap_or((label.trim_start_matches("icon:"), ""));
                 let tip = if tip.is_empty() { name } else { tip };
@@ -826,7 +826,7 @@ fn tool_menu(app: &mut SheetApp, ui: &mut Ui, items: &[(&str, &str, &str)]) {
         if is_merge(id) {
             let on = crate::merge::enabled(app, id);
             if ui.add_enabled_ui(on, |ui| ui.add_sized([width, 32.0], menu_row(name, sample, false))).inner.clicked() {
-                ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::merge::REQUEST), id.to_string()));
+                ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::merge::REQUEST), id.to_string()));
                 ui.close();
             }
         } else if ui.add_sized([width, 32.0], menu_row(name, sample, false)).clicked() {
@@ -851,7 +851,7 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             None => ui.add(egui::Label::new(RichText::new("★").size(26.0).color(theme::BLUE)).sense(egui::Sense::click())),
         };
         if logo.on_hover_text("StarSheets home").clicked() {
-            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "home".to_string()));
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("starsheets_files_request"), "home".to_string()));
         }
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -900,13 +900,13 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
             let can = false;
             if ui.add_enabled(can, share).on_disabled_hover_text("Sharing needs sign-in on the server, and a file that's saved there").clicked() {
                 #[cfg(target_arch = "wasm32")]
-                ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::share::REQUEST), ()));
+                ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::share::REQUEST), ()));
             }
             #[cfg(target_arch = "wasm32")]
             {
                 ui.add_space(8.0);
                 if ui.add(files_button).on_hover_text("Your files and folders, in a new tab").clicked() {
-                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "home_tab".to_string()));
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("starsheets_files_request"), "home_tab".to_string()));
                 }
                 ui.add_space(8.0);
             }
@@ -920,7 +920,7 @@ fn title_and_menus(app: &mut SheetApp, ui: &mut Ui, title_draft: &mut Option<Str
 /// or the connection is down; none when all is saved. Hover: who changed the file last and when,
 /// then where it is saved. A click opens version history, as Sheets' clock does.
 fn save_symbol(ui: &mut Ui, dirty: bool) {
-    let get = |key: &str| ui.ctx().data(|m| m.get_temp::<String>(egui::Id::new(key))).unwrap_or_default();
+    let get = |key: &str| ui.ctx().data(|m| m.get_temp::<String>(egui::Id::unique(key))).unwrap_or_default();
     let status = Some(get("starsheets_save_status")).filter(|s| !s.is_empty()).unwrap_or_else(|| (if dirty { "Not saved" } else { "Saved" }).to_string());
     let (last_edit, tip) = (get("starsheets_last_edit"), get("starsheets_save_status_tip"));
     let dot = match status.as_str() {
@@ -951,7 +951,7 @@ fn save_symbol(ui: &mut Ui, dirty: bool) {
     }
     let r = if lines.is_empty() { r } else { r.on_hover_text(lines.join("\n")) };
     if r.clicked() {
-        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), "versions".to_string()));
+        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("starsheets_files_request"), "versions".to_string()));
     }
 }
 
@@ -1127,7 +1127,7 @@ pub const MENU_LOOK: gridcraft_ui_egui::MenuLook = gridcraft_ui_egui::MenuLook {
     // As wide as the menu itself (320 for cell menus; a drop-down list is only as wide as its
     // choices, and a fixed 320 made it wider than its rows' highlight).
     sep: |ui| menu_sep_width(ui, ui.min_rect().width().max(1.0)),
-    list_style: list_style,
+    list_style,
     // The empty shortcut's stretch keeps the label at the left (as in menu_row).
     list_row: |label| Button::new(RichText::new(label.to_string()).size(14.0).color(theme::TEXT)).shortcut_text(""),
 };
@@ -1201,7 +1201,7 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
             Cmd(label, id, keys) if is_merge(id) => {
                 let on = crate::merge::enabled(app, id);
                 if ui.add_enabled_ui(on, |ui| ui.add_sized([width, 32.0], menu_row(label, keys, with_icons))).inner.clicked() {
-                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::merge::REQUEST), id.to_string()));
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::merge::REQUEST), id.to_string()));
                     ui.close();
                 }
             }
@@ -1211,19 +1211,19 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                     // formatting, are then shown as our own side panel).
                     // "panel:dropdown" opens the data-validation panel on a new drop-down.
                     if *id == "panel:customdate" {
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customdate::REQUEST), true));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::customdate::REQUEST), true));
                     } else if *id == "panel:settings" {
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::settings::REQUEST), true));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::settings::REQUEST), true));
                     } else if *id == "panel:note" {
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::notes::REQUEST), true));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::notes::REQUEST), true));
                     } else if *id == "panel:protect" {
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::protectpanel::REQUEST), -1i64));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::protectpanel::REQUEST), -1i64));
                     } else if *id == "panel:customnumber" {
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::customnumber::REQUEST), true));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::customnumber::REQUEST), true));
                     } else if *id == "panel:chart" {
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::chartpanel::REQUEST), true));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::chartpanel::REQUEST), true));
                     } else if *id == "panel:dropdown" {
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::dvpanel::DROPDOWN_REQUEST), true));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::dvpanel::DROPDOWN_REQUEST), true));
                     } else if *id == "panel:imageInCell" || *id == "panel:imageOverCells" {
                         #[cfg(target_arch = "wasm32")]
                         crate::images::pick(if *id == "panel:imageInCell" { "cell" } else { "overCells" });
@@ -1231,7 +1231,7 @@ fn menu_items(app: &mut SheetApp, ui: &mut Ui, items: &[Item]) {
                         gridcraft_ui_egui::grid::insert_after(app, *id == "panel:insertBelow");
                     } else if let Some(what) = id.strip_prefix("panel:") {
                         // File actions (files.rs reads this from egui memory).
-                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_files_request"), what.to_string()));
+                        ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("starsheets_files_request"), what.to_string()));
                     } else {
                         match id.strip_prefix("ui:") {
                             Some(dialog) => app.open_dialog(dialog, json!({})),

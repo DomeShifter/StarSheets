@@ -497,7 +497,7 @@ impl Bottom {
             let sub = |label: &str| crate::shell::menu_row(label, "", false).min_size(vec2(width, 32.0));
             for (label, existing) in [("New spreadsheet", false), ("Existing spreadsheet…", true)] {
                 if ui.add(sub(label)).clicked() {
-                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new("starsheets_copy_to"), (s, existing)));
+                    ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique("starsheets_copy_to"), (s, existing)));
                     ui.close();
                 }
             }
@@ -512,7 +512,7 @@ impl Bottom {
             crate::colourpicker::menu_for(app, ui, "sheet.tabColor", json!({ "sheet": s }), "none", now, false);
         });
         if ui.add(row("Protect sheet")).clicked() {
-            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::new(crate::protectpanel::REQUEST), s as i64));
+            ui.ctx().data_mut(|m| m.insert_temp(egui::Id::unique(crate::protectpanel::REQUEST), s as i64));
             ui.close();
         }
         if ui.add_enabled(count > 1, row("Hide sheet")).clicked() {

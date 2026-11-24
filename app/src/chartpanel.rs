@@ -214,7 +214,7 @@ impl ChartPanel {
     /// right-click menu) and Insert › Chart; follows the selected chart while open.
     pub fn intercept(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
         self.just_opened = false;
-        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::new(REQUEST))).is_some() {
+        if ctx.data_mut(|m| m.remove_temp::<bool>(egui::Id::unique(REQUEST))).is_some() {
             let before: Vec<u32> = charts(app).iter().map(|c| c.id).collect();
             // GridCraft explains it when the selection can't be charted.
             app.run_or_alert("insert.chart", json!({}));
@@ -538,7 +538,7 @@ fn slice_swatch(ui: &mut Ui, j: usize, now: Option<u32>) -> Option<u32> {
         .min_size(vec2(32.0, 24.0));
     let r = ui.add(swatch).on_hover_text("Slice colour");
     let mut picked = None;
-    egui::Popup::menu(&r).id(egui::Id::new(("chart_slice_colour", j))).show(|ui| {
+    egui::Popup::menu(&r).id(egui::Id::unique(("chart_slice_colour", j))).show(|ui| {
         if let Some(crate::colourpicker::Choice::Colour(rgb)) = crate::colourpicker::palette(ui, now, false, false) {
             picked = Some(rgb);
         }
@@ -555,7 +555,7 @@ fn colour_button(ui: &mut Ui, id: &str, now: Option<u32>) -> Option<u32> {
         .min_size(vec2(64.0, house::FIELD_HEIGHT));
     let r = ui.add(swatch).on_hover_text("Colour");
     let mut picked = None;
-    egui::Popup::menu(&r).id(egui::Id::new(id)).show(|ui| {
+    egui::Popup::menu(&r).id(egui::Id::unique(id)).show(|ui| {
         if let Some(crate::colourpicker::Choice::Colour(rgb)) = crate::colourpicker::palette(ui, now, false, false) {
             picked = Some(rgb);
         }

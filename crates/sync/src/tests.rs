@@ -354,3 +354,26 @@ fn a_sheet_sent_whole_keeps_its_unmodelled_parts_and_spills() {
     assert_eq!(got.sheets[0].file_id, 7);
     assert_eq!(got.sheets[0].spill, after.sheets[0].spill);
 }
+
+/// A formula whose result alone changed (NOW() a moment later) doesn't change an edit's
+/// fingerprint: the tab and the server calculate it at different times.
+#[test]
+fn a_formula_result_moving_on_its_own_is_not_part_of_the_change() {
+    use gridcraft_engine::core::{CellRef, Value};
+    use gridcraft_engine::model::{Cell, Formula};
+    let mut base = (*wb(&session())).clone();
+    let mut now = Cell::formula(Formula::new("=NOW()"));
+    now.value = Value::Number(1.0);
+    base.sheet_mut(0).unwrap().cells.set(CellRef::new(2, 2), now.clone());
+    let base = Arc::new(base);
+    let edited = |later: f64| {
+        let mut w = (*base).clone();
+        let sh = w.sheet_mut(0).unwrap();
+        sh.cells.set(CellRef::new(0, 0), Cell::value(Value::Number(5.0)));
+        let mut n = now.clone();
+        n.value = Value::Number(later);
+        sh.cells.set(CellRef::new(2, 2), n);
+        w
+    };
+    assert_eq!(change_fingerprint(&base, &edited(1.0)), change_fingerprint(&base, &edited(2.0)));
+}

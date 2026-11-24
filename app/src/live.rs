@@ -489,7 +489,7 @@ impl Live {
         // would then throw the typing away as "the sheet was deleted".
         let typing_on = app.editor.as_ref().and_then(|e| app.session.active().filter(|d| d.uid == e.doc).and_then(|d| d.wb.sheet(e.sheet)).map(|sh| sh.name.clone()));
         sync::restore_workbook(&mut app.session, &confirmed);
-        for c in self.acked.drain(..).collect::<Vec<_>>() {
+        for c in std::mem::take(&mut self.acked) {
             let _ = sync::apply(&mut app.session, &c);
         }
         if let Some(r) = remote
@@ -536,7 +536,7 @@ impl Live {
             return;
         }
         let sheet = d.wb.active_sheet();
-        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::new("starsheets_presence"))).with_clip_rect(cells);
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, egui::Id::unique("starsheets_presence"))).with_clip_rect(cells);
         let hover = ctx.pointer_hover_pos();
         let now = now_ms();
         let mut fading = false;

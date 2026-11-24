@@ -246,7 +246,7 @@ impl CfPanel {
             // The bin always exists (so the pointer moving onto it doesn't make it vanish) and
             // shows while the card or the bin is hovered.
             let bin = egui::Rect::from_center_size(egui::pos2(r.right() - 20.0, r.center().y), vec2(28.0, 28.0));
-            let b = ui.interact(bin, ui.id().with(("cf_bin", i)), Sense::click());
+            let b = ui.interact(bin, ui.scope_id().with(("cf_bin", i)), Sense::click());
             if (resp.hovered() || b.hovered())
                 && let Some(img) = crate::icons::icon("delete")
             {
@@ -527,7 +527,7 @@ fn single_editor(ui: &mut Ui, d: &mut Draft) {
         });
     });
     ui.add_space(6.0);
-    let menu_id = ui.id().with("cf_style_presets");
+    let menu_id = ui.scope_id().with("cf_style_presets");
     if preview.on_hover_text("Preset styles").clicked() {
         egui::Popup::toggle_id(ui.ctx(), menu_id);
     }
@@ -574,7 +574,7 @@ fn scale_editor(ui: &mut Ui, d: &mut Draft) {
     let (r, resp) = ui.allocate_exact_size(vec2(PANEL_W, 36.0), Sense::click());
     paint_gradient(ui.painter(), r, &scale_colours(d));
     ui.painter().text(r.left_center() + vec2(8.0, 0.0), egui::Align2::LEFT_CENTER, "Default", egui::FontId::proportional(14.0), theme::TEXT);
-    let presets_id = ui.id().with("cf_presets");
+    let presets_id = ui.scope_id().with("cf_presets");
     if resp.on_hover_text("Choose a preset").clicked() {
         egui::Popup::toggle_id(ui.ctx(), presets_id);
     }

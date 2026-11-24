@@ -24,7 +24,8 @@ use serde_json::Value as Json;
 /// per cell), or every change from an older tab would fall back to the finished state.
 /// 5: Hello says which version of the file the tab already has; Welcome can then leave the
 /// workbook out; spilled array values travel with whole workbooks and sheets.
-pub const PROTOCOL: u32 = 5;
+/// 6: a formula whose result alone moved (NOW()) is left out of an edit's fingerprint.
+pub const PROTOCOL: u32 = 6;
 
 pub const BUILD: &str = match option_env!("STARSHEETS_BUILD") {
     Some(b) => b,
@@ -618,7 +619,18 @@ fn hash_sheet_change(h: &mut Fnv, i: usize, before: &Sheet, after: &Sheet) {
         h.json(&after.rows);
     }
     for at in after.cells.diff(&before.cells) {
-        hash_cell(h, at, after.cells.get(at));
+        let (b, a) = (before.cells.get(at), after.cells.get(at));
+        // A formula whose result alone moved (NOW(), RAND(), or recalculated after the edit)
+        // isn't part of the change: results differ from tab to tab with the clock.
+        if let (Some(b), Some(a)) = (b, a)
+            && b.style == a.style
+            && let (Some(fb), Some(fa)) = (&b.formula, &a.formula)
+            && fb.text == fa.text
+            && fb.array == fa.array
+        {
+            continue;
+        }
+        hash_cell(h, at, a);
     }
 }
 

@@ -71,8 +71,8 @@ fn distance(a: &[char], b: &[char], max: usize) -> usize {
     for (i, row) in d.iter_mut().enumerate() {
         row[0] = i;
     }
-    for j in 0..=m {
-        d[0][j] = j;
+    for (j, cell) in d[0].iter_mut().enumerate().take(m + 1) {
+        *cell = j;
     }
     for i in 1..=n {
         let mut best = usize::MAX;
@@ -109,6 +109,9 @@ fn swapped(typed: &[char], word: &[char]) -> bool {
 /// Up to five known words close to `word`, the likeliest typos first (letters left out, two
 /// letters swapped), then by how many letters differ, same first letter, similar length. In the
 /// word's own case pattern.
+/// A suggestion's sort key, in the order `suggestions` explains, then the word itself.
+type Ranked<'a> = (bool, usize, usize, std::cmp::Reverse<usize>, usize, &'a String);
+
 pub fn suggestions(word: &str) -> Vec<String> {
     let Some(words) = WORDS.get() else { return Vec::new() };
     let w: Vec<char> = word.to_lowercase().chars().collect();
@@ -117,7 +120,7 @@ pub fn suggestions(word: &str) -> Vec<String> {
     // "colder"), then the longest shared start ("choler" last), then nearest length.
     let consonants = |v: &[char]| v.iter().filter(|c| c.is_alphabetic() && !"aeiouy".contains(**c)).count();
     let mine = consonants(&w);
-    let mut found: Vec<(bool, usize, usize, std::cmp::Reverse<usize>, usize, &String)> = words
+    let mut found: Vec<Ranked> = words
         .iter()
         .filter_map(|c| {
             let cc: Vec<char> = c.chars().collect();
@@ -224,7 +227,7 @@ impl Suggest {
         let mut pick: Option<String> = None;
         let mut add = false;
         let mut close = false;
-        let shown = egui::Area::new(egui::Id::new("starsheets_spelling")).fixed_pos(pos + egui::vec2(0.0, 14.0)).order(egui::Order::Foreground).show(ctx, |ui| {
+        let shown = egui::Area::new(egui::Id::unique("starsheets_spelling")).fixed_pos(pos + egui::vec2(0.0, 14.0)).order(egui::Order::Foreground).show(ctx, |ui| {
             egui::Frame::popup(ui.style()).inner_margin(egui::Margin::symmetric(0, crate::house::S as i8)).show(ui, |ui| {
                 crate::house::menu(ui, 220.0);
                 if list.is_empty() {
