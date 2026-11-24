@@ -810,7 +810,7 @@ async fn add_sheets(app: &Shared, me: Option<auth::User>, file: String, q: &Hash
 }
 
 /// GET /api/files/ID/thumb: the file's preview picture (thumbs.rs), drawn if there isn't one for
-/// this version yet. Outside the store lock while drawing. 404: no picture (the app shows an icon).
+/// this version yet (a document's is the one StarDocs sent, if it shows this version). Outside the store lock while drawing. 404: no picture (the app shows an icon).
 async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &HeaderMap) -> Response<Body> {
     enum Got {
         Have(Vec<u8>, String),
@@ -822,13 +822,14 @@ async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &Hea
             return Err(error(403, "You don't have access to that."));
         }
         let path = app.store.path_of(&f2).ok().flatten().ok_or_else(|| error(404, "no such file"))?;
-        if store::is_doc(&path) {
-            return Err(error(404, "documents have no preview picture yet"));
-        }
         let full = app.store.full(&path);
         let version = app.store.version_of(&full).map_err(|_| error(404, "no such file"))?;
         if let Some(png) = thumbs::cached(&app.store, &f2, &version) {
             return Ok(Got::Have(png, version));
+        }
+        // A document's picture comes from StarDocs (put_thumb); none for this version yet.
+        if store::is_doc(&path) {
+            return Err(error(404, "no picture of this version yet"));
         }
         if std::fs::metadata(&full).map(|m| m.len()).unwrap_or(0) > thumbs::MAX_READ {
             return Err(error(404, "too big for a picture"));
@@ -866,6 +867,27 @@ async fn thumb(app: &Shared, me: Option<auth::User>, file: String, headers: &Hea
         .header(header::ETAG, etag)
         .body(Body::from(png))
         .unwrap()
+}
+
+/// PUT /api/files/ID/thumb?version=V: StarDocs' picture of the top of page 1 of document ID,
+/// taken right after saving version V (thumbs::take says what's refused).
+async fn put_thumb(app: &Shared, me: Option<auth::User>, file: String, q: &HashMap<String, String>, body: Bytes) -> Response<Body> {
+    let version = q.get("version").cloned().unwrap_or_default();
+    let r = blocking(app, move |a| {
+        let role = sharing::file_role(&a.store, a.auth, me.as_ref(), &file);
+        let path = a.store.path_of(&file).ok().flatten();
+        match path {
+            None if role == sharing::Role::None => Err(Bad::new(403, "You don't have access to that.")),
+            None => Err(Bad::new(404, "no such file")),
+            Some(path) => thumbs::take(&a.store, role, &file, &path, &version, &body),
+        }
+    })
+    .await;
+    match r {
+        Some(Ok(())) => send_json(&json!({ "ok": true }), 200),
+        Some(Err(b)) => error(b.code, &b.msg),
+        None => error(500, "server error"),
+    }
 }
 
 /// After a files request, with accounts: the file list shows only what the person may see, with
@@ -1042,6 +1064,9 @@ async fn handle(State(app): State<Shared>, method: Method, uri: Uri, headers: He
     if m == "GET" && p.len() == 3 && p[0] == "files" && p[2] == "thumb" {
         return thumb(&app, me, p[1].clone(), &headers).await;
     }
+    if m == "PUT" && p.len() == 3 && p[0] == "files" && p[2] == "thumb" {
+        return put_thumb(&app, me, p[1].clone(), &q, body).await;
+    }
     // StarDocs reads a document with a plain GET (spreadsheets open through their live room,
     // which notes this itself): it counts as opened, for Recent.
     if m == "GET"
@@ -1193,5 +1218,52 @@ async fn main() {
     };
     if let Err(e) = axum::serve(listener, router).with_graceful_shutdown(shutdown()).await {
         eprintln!("server stopped: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn send(app: &Shared, method: Method, uri: &str, headers: HeaderMap, body: Vec<u8>) -> (u16, HeaderMap, Vec<u8>) {
+        let r = handle(State(app.clone()), method, uri.parse().unwrap(), headers, Body::from(body)).await;
+        let (parts, body) = r.into_parts();
+        (parts.status.as_u16(), parts.headers, axum::body::to_bytes(body, usize::MAX).await.unwrap().to_vec())
+    }
+
+    /// StarDocs sends a picture of a document; the home screen gets it back until the file changes.
+    #[tokio::test]
+    async fn documents_picture_round_trip() {
+        let dir = std::env::temp_dir().join(format!("starsheets-main-{}", store::random_hex(6)));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Letter.docx"), b"doc").unwrap();
+        let store = Store { root: dir.clone(), keep: 3, spaces: false };
+        let id = store.synced_index().unwrap().keys().next().unwrap().clone();
+        let app: Shared = Arc::new(App {
+            store,
+            base: dir.clone(),
+            lock: Mutex::new(()),
+            location: String::new(),
+            auth: false,
+            site: None,
+            rooms: live::Rooms::default(),
+        });
+        let full = app.store.full("Letter.docx");
+        let v = app.store.version_of(&full).unwrap();
+        let url = format!("/api/files/{id}/thumb");
+        assert_eq!(send(&app, Method::GET, &url, HeaderMap::new(), vec![]).await.0, 404, "no picture yet");
+        let pic = tiny_skia::Pixmap::new(thumbs::WIDTH, thumbs::HEIGHT).unwrap().encode_png().unwrap();
+        assert_eq!(send(&app, Method::PUT, &format!("{url}?version=0-0"), HeaderMap::new(), pic.clone()).await.0, 409);
+        let (code, _, body) = send(&app, Method::PUT, &format!("{url}?version={v}"), HeaderMap::new(), pic.clone()).await;
+        assert_eq!((code, serde_json::from_slice::<Value>(&body).unwrap()), (200, json!({"ok": true})));
+        let (code, headers, body) = send(&app, Method::GET, &url, HeaderMap::new(), vec![]).await;
+        assert_eq!((code, body), (200, pic));
+        let mut again = HeaderMap::new();
+        again.insert(header::IF_NONE_MATCH, headers[header::ETAG].clone());
+        assert_eq!(send(&app, Method::GET, &url, again, vec![]).await.0, 304);
+        // Saved again (StarDocs hasn't sent the new picture yet): the old one isn't shown.
+        std::fs::write(&full, b"a longer document").unwrap();
+        assert_eq!(send(&app, Method::GET, &url, HeaderMap::new(), vec![]).await.0, 404);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

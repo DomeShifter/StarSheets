@@ -360,9 +360,11 @@ impl Home {
         if let Some(dir) = self.open_dir.take() {
             self.go_folder(&dir);
         }
-        // Forget pictures of files that went away.
+        // Forget pictures of files that went away. A document's picture is sent by StarDocs just
+        // after it saves, so one not there yet is asked for again at the next listing.
         let ids: HashSet<&String> = self.files.iter().map(|f| &f.id).collect();
-        self.thumbs.retain(|k, _| ids.contains(k));
+        let docs: HashSet<&String> = self.files.iter().filter(|f| crate::files::is_doc(&f.name)).map(|f| &f.id).collect();
+        self.thumbs.retain(|k, (_, t)| ids.contains(k) && !(docs.contains(k) && matches!(t, Thumb::None)));
     }
 
     fn person(&self, username: &str) -> String {

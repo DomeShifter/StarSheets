@@ -72,6 +72,7 @@
 - [x] Files changed outside StarSheets (Excel, a file share) are never written over
 - [x] Everyone's own folder; folder sharing; own bin (30 days); stars and recent
 - [x] Preview pictures, drawn on the server
+- [x] Preview pictures of documents: StarDocs sends one of page 1 after each save (server side; StarDocs side in progress)
 - [x] Home screen with a folder tree, cards or list, drag to move, upload
 - [x] A "Move to…" folder picker and a Details panel (owner, who changed it last, who has access)
 - [x] Sort menu; copy a sheet to another spreadsheet; choose where files are kept
