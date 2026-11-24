@@ -103,7 +103,13 @@ pub struct Files {
     /// A big file that arrived and is opened next frame, after "Opening …" has been drawn once:
     /// reading it keeps the page busy for a few seconds (two million cells: about three).
     opening: Option<(Reply, bool)>,
+    /// Save the open workbook now even with nothing in it (Share on a new, empty spreadsheet:
+    /// sharing needs the file on the server, as in Sheets, where it exists from the start).
+    save_now: bool,
 }
+
+/// Asks [`Files`] to save the open workbook at once, empty or not (`ctx.data`, unit value).
+pub const SAVE_NOW: &str = "starsheets_files_save_now";
 
 impl Files {
     /// The open file's folder on the server, if it is on the server.
@@ -187,6 +193,9 @@ impl Files {
         }
         if ctx.input_mut(|i| i.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, egui::Key::O))) {
             self.request(app, ctx, "open");
+        }
+        if ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::unique(SAVE_NOW))).is_some() {
+            self.save_now = true;
         }
         self.autosave(app, ctx);
         self.rename_if_needed(app, ctx);
@@ -469,11 +478,16 @@ impl Files {
             self.seen = Some(key);
             self.changed_at = now;
         }
-        if self.busy || self.renaming || !self.needs_save(d) || app.editor.is_some() {
+        let linked = self.link.as_ref().is_some_and(|l| l.doc == d.uid);
+        let now_wanted = self.save_now && !linked;
+        if linked {
+            self.save_now = false;
+        }
+        if self.busy || self.renaming || !(now_wanted || self.needs_save(d)) || app.editor.is_some() {
             return;
         }
         // The tab is closing or being hidden (index.html sets the flag): save now, don't wait.
-        let flush = take_flush_flag();
+        let flush = take_flush_flag() || now_wanted;
         if now - self.changed_at < SAVE_AFTER && !flush {
             ctx.request_repaint_after(std::time::Duration::from_millis(400));
             return;

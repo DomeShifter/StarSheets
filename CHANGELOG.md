@@ -7,6 +7,13 @@ new features and the last one for fixes.
 ## [Unreleased]
 
 ### Fixed
+- "There's already data here. Do you want to replace it?" (dragging cells onto others) now
+  looks like the other StarSheets dialogs.
+- `DATEVALUE` of a date (not text) gives that date, as in Google Sheets, instead of #VALUE!.
+- Typing in a cell with a coloured font keeps that colour while editing.
+- New folder: the name is selected so you can type straight away, the folder shows first
+  until it is named, it lines up with the other folders, and pressing Enter to name it no
+  longer opens it.
 - No more dark flashes in the grid area while a spreadsheet opens or the page reloads.
 - The formula bar and cells no longer blink off and on a few times while a spreadsheet opens:
   fonts arriving from the server used to blank them for a moment each.
@@ -43,6 +50,9 @@ new features and the last one for fixes.
   tall), and fonts in files without a theme keep their link to the theme when saved.
 
 ### Added
+- Right-click inside a cell (or the formula bar) while typing: Cut, Copy, Paste, Delete and
+  Select all for the text.
+- Share works on a new, empty spreadsheet: it is saved first, then the share box opens.
 - **Settings › Style** tab: choose the toolbar's background colour (shows straight away; Cancel
   puts it back). The first of the look-and-feel settings.
 

@@ -473,20 +473,34 @@ impl Home {
     /// The rename box over `rect` if `item` is being renamed; true when it is.
     pub(super) fn renaming_ui(&mut self, ui: &mut Ui, item: &Item, rect: Rect) -> bool {
         let Some((ritem, text, focus)) = self.renaming.as_mut().filter(|(r, ..)| r == item) else { return false };
-        let te = ui
-            .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                house::form_style(ui);
-                ui.add_sized(rect.size(), house::field(text, house::BODY))
-            })
-            .inner;
+        // A child Ui, not scope_builder: drawn over the card or row at an offset, it must not move
+        // the parent's layout cursor (that lifted a new folder a few pixels above the others on
+        // its row, to-do 3 row 15).
+        let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+        house::form_style(&mut child);
+        let te = child.add_sized(rect.size(), house::field(text, house::BODY));
         if *focus {
             te.request_focus();
+            // The whole name is selected, so typing replaces it (as in Drive).
+            if let Some(mut st) = egui::TextEdit::load_state(ui.ctx(), te.id) {
+                let n = text.chars().count();
+                st.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
+                st.store(ui.ctx(), te.id);
+            } else {
+                // The state exists from the box's first frame on: select on the next one.
+                ui.ctx().request_repaint();
+                return true;
+            }
             *focus = false;
         }
         if te.lost_focus() {
             let (ritem, text) = (ritem.clone(), text.trim().to_string());
             let commit = !ui.input(|i| i.key_pressed(Key::Escape));
+            // The Enter that names it must not also open the folder (the home screen's keys run
+            // after this and would see it with nothing focused).
+            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Enter));
             self.renaming = None;
+            self.just_made = None;
             if commit && !text.is_empty() {
                 let url = match &ritem {
                     Item::File(id) => format!("api/files/{id}/rename?name={}", enc(&text)),

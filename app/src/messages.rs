@@ -1,5 +1,6 @@
 //! GridCraft's alerts ("GridCraft: The cell or chart you're trying to change…") shown as house
-//! dialogs with StarSheets' wording, one at a time.
+//! dialogs with StarSheets' wording, one at a time. GridCraft's questions ("There's already data
+//! here. Do you want to replace it?") too: its own prompt is off (`Chrome::questions`).
 
 use gridcraft_ui_egui::SheetApp;
 
@@ -11,6 +12,8 @@ pub struct Messages {
     /// A formula that can't be entered, while its cell is being edited: Sheets' message with
     /// "Add '" (enter it as text) and "Keep working…".
     formula: Option<String>,
+    /// A GridCraft question was drawn as a house dialog (see `wake`).
+    question_shown: bool,
 }
 
 /// Sheets' message for a formula that can't be entered.
@@ -143,6 +146,9 @@ impl Messages {
             }
             return;
         }
+        if self.showing.is_none() {
+            self.question_ui(app, ctx);
+        }
         let Some((title, text)) = self.showing.clone() else { return };
         let mut closed = false;
         let mut ok = false;
@@ -152,6 +158,48 @@ impl Messages {
         });
         if closed || ok {
             self.showing = None;
+        }
+    }
+}
+
+impl Messages {
+    /// After the grid: a question it asked this frame shows on the next one (this runs before
+    /// GridCraft draws), so ask for that frame.
+    pub fn wake(&mut self, app: &SheetApp, ctx: &egui::Context) {
+        if app.macros.question.is_none() {
+            self.question_shown = false;
+        } else if !self.question_shown {
+            ctx.request_repaint();
+        }
+    }
+
+    /// GridCraft's question (replace data, run a macro…) with its choices and Cancel. Enter picks
+    /// the first choice, Esc cancels.
+    fn question_ui(&mut self, app: &mut SheetApp, ctx: &egui::Context) {
+        let Some(q) = app.macros.question.clone() else {
+            self.question_shown = false;
+            return;
+        };
+        self.question_shown = true;
+        let title = if q.title.is_empty() || q.title == "GridCraft" { "Heads up".to_string() } else { q.title.replace("GridCraft", "StarSheets") };
+        let mut labels = vec!["Cancel"];
+        labels.extend(q.choices.iter().map(|(l, _)| l.as_str()));
+        let mut closed = false;
+        let mut pick = None;
+        house::dialog(ctx, "starsheets_question", 420.0, &title, Some(&mut closed), |ui| {
+            house::text(ui, &plain_error(&q.text));
+            pick = house::actions(ui, &labels);
+            // Consumed, so the grid (drawn after this) doesn't also take the key.
+            if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                pick = Some(0);
+            } else if labels.len() > 1 && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+                pick = Some(1);
+            }
+        });
+        match (closed, pick) {
+            (true, _) | (_, Some(0)) => gridcraft_ui_egui::macro_ui::answer(app, None),
+            (_, Some(k)) => gridcraft_ui_egui::macro_ui::answer(app, Some(k - 1)),
+            _ => {}
         }
     }
 }

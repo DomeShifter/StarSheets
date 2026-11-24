@@ -60,7 +60,8 @@ pub fn start() {
                     // Light theme only for now: the Sheets palette is light (dark mode comes later).
                     app.ui.system_theme = false;
                     // StarSheets draws its own title row, menus and toolbar (crate::shell).
-                    app.chrome = gridcraft_ui_egui::Chrome { title_bar: false, file_tab: false, ribbon: false, sheet_tabs: false };
+                    // Its alerts and questions too (crate::messages, as house dialogs).
+                    app.chrome = gridcraft_ui_egui::Chrome { title_bar: false, file_tab: false, ribbon: false, sheet_tabs: false, questions: false };
                     // Follow the browser's language, except a CJK one. CJK coverage comes from
                     // optional craft-fonts input, not a guaranteed web font set, so a CJK browser
                     // cannot be assumed to render localized labels without tofu. Users can still
@@ -130,6 +131,8 @@ struct WebShell {
     copyto: crate::copyto::CopyTo,
     /// Spelling suggestions for a clicked misspelt word (spelling.rs).
     spell: crate::spelling::Suggest,
+    /// Cut / Copy / Paste on a right-click in the text being edited (editmenu.rs).
+    edit_menu: crate::editmenu::EditMenu,
     /// The home screen, shown instead of a spreadsheet when the page has no file (home.rs).
     home: crate::home::Home,
     live: crate::live::Live,
@@ -169,6 +172,7 @@ impl WebShell {
             files: Default::default(),
             copyto: Default::default(),
             spell: Default::default(),
+            edit_menu: Default::default(),
             live: Default::default(),
             account: Default::default(),
             share: Default::default(),
@@ -304,12 +308,14 @@ impl eframe::App for WebShell {
         // Before GridCraft draws: its alerts are shown as house dialogs instead.
         self.messages.ui(&mut self.app, &ctx);
         self.spell.before(&ctx);
+        self.edit_menu.before(&ctx);
         self.find.keys(&self.app, &ctx);
         crate::dvpanel::delete_key(&mut self.app);
         // Whether the grid gets this frame's keys: not when a box just let go of them, nor while
         // a dialog is showing (input.rs has the rules).
         self.input.before_grid(&ctx, focus_at_start);
         self.app.ui(ui);
+        self.messages.wake(&self.app, &ctx);
         self.input.after_grid(&ctx);
         browser_double_click(&mut self.app, &ctx);
         self.side_panels(&ctx);
@@ -336,6 +342,7 @@ impl eframe::App for WebShell {
         self.copyto.ui(&self.app, &ctx);
         self.panels.protect.warning_ui(&mut self.app, &ctx);
         self.spell.ui(&mut self.app, &ctx);
+        self.edit_menu.ui(&mut self.app, &ctx);
         crate::house::style_tooltips(&ctx);
         copy_without_https(ui.ctx());
         self.input.end_frame(&ctx);

@@ -79,6 +79,9 @@ pub struct Share {
     error: Option<String>,
     copied: bool,
     busy: bool,
+    /// Share was pressed on a spreadsheet not saved yet: it is being saved, and the dialog opens
+    /// once it is on the server.
+    pending: bool,
 }
 
 fn call(
@@ -121,9 +124,22 @@ fn loaded(v: Json) -> Reply {
 impl Share {
     pub fn logic(&mut self, app: &gridcraft_ui_egui::SheetApp, ctx: &egui::Context, files: &crate::files::Files) {
         let file = files.linked().filter(|(doc, _)| app.session.active().is_some_and(|d| d.uid == *doc));
-        SHAREABLE.with(|s| s.set(file.is_some() && crate::account::me().is_some()));
+        // Signed in is enough: a spreadsheet not saved yet (even an empty one) is saved first.
+        let signed_in = crate::account::me().is_some();
+        SHAREABLE.with(|s| s.set(signed_in && app.session.active().is_some()));
         let item = ctx.data_mut(|m| m.remove_temp::<(String, String, String)>(egui::Id::unique(ITEM_REQUEST)));
-        let asked = ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::unique(REQUEST))).is_some();
+        let mut asked = ctx.data_mut(|m| m.remove_temp::<()>(egui::Id::unique(REQUEST))).is_some();
+        if asked && file.is_none() && signed_in {
+            self.pending = true;
+            ctx.data_mut(|m| m.insert_temp(egui::Id::unique(crate::files::SAVE_NOW), ()));
+        }
+        if self.pending && file.is_some() {
+            self.pending = false;
+            asked = true;
+        }
+        if !signed_in {
+            self.pending = false;
+        }
         let target = match (item, file) {
             (Some(t), _) => Some(t),
             (None, Some((_, id))) if asked => {

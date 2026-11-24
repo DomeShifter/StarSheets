@@ -167,6 +167,9 @@ pub struct Home {
     anchor: Option<Item>,
     clipboard: Option<(Vec<Item>, bool)>,
     renaming: Option<(Item, String, bool)>,
+    /// A folder just made with New folder: shown first until it has been named (then the list
+    /// sorts it), as in Drive.
+    just_made: Option<String>,
     dragging: Option<Vec<Item>>,
     confirm_purge: Option<Option<String>>,
     pending_move: Option<PendingMove>,
@@ -390,6 +393,7 @@ impl Home {
         self.selected.clear();
         self.search.clear();
         self.renaming = None;
+        self.just_made = None;
     }
 
     fn go_back(&mut self) {
@@ -517,6 +521,12 @@ impl Home {
         items.sort_by_cached_key(|i| self.sort_key(i));
         if self.descending {
             items.reverse();
+        }
+        // A folder just made stays first until it is named (to-do 3 row 15).
+        if let Some(p) = &self.just_made
+            && let Some(k) = items.iter().position(|i| matches!(i, Item::Folder(f) if f == p))
+        {
+            items[..=k].rotate_right(1);
         }
     }
 
@@ -656,6 +666,7 @@ impl Home {
                     self.refresh(ctx);
                     self.selected = vec![Item::Folder(path.clone())];
                     self.renaming = Some((Item::Folder(path.clone()), name_of(&path).to_string(), true));
+                    self.just_made = Some(path);
                 }
                 Reply::Thumb(id, version, img) => {
                     self.fetching = self.fetching.saturating_sub(1);
